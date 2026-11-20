@@ -205,7 +205,7 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     save("Before the slowness channel", "Everything as it was before I started collecting slowness", day("2026-11-10", "23:00"))
     edit(ids.monday, { ...mondayNow, body: "# Monday, rain\n\nNothing shipped. Read for an hour.", channels: undefined }, "edit", claude, day("2026-11-11", "07:30"), "Added the line you dictated")
     recordSession(claude, "Added the line you dictated to Monday, rain", [
-      { tried: "Turning the entry into a checklist", why: "You said journal entries stay as prose", recheck: "Read the working-style memory" },
+      { tried: "Turning the entry into a checklist", why: "You said journal entries stay as prose", recheck: "Read your profile's preferences" },
     ], day("2026-11-11", "07:32"))
     edit(ids.monday, mondayNow, "edit", YOU, day("2026-11-11", "08:05"))
 
@@ -213,7 +213,7 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     const captions = current.get(ids.captions)!
     edit(ids.captions, { ...captions, body: "# Photo captions are one line\n\nSeen in two sessions, project photos. Three recent photo posts used two lines: one for the place, one for the light." },
       "edit", claude, day("2026-11-18", "18:20"), "Your last three photo captions used two lines")
-    recordSession(claude, "Checked your caption memory against recent photos", [], day("2026-11-18", "18:21"))
+    recordSession(claude, "Checked the caption observation against recent photos", [], day("2026-11-18", "18:21"))
     const reading = current.get(ids.reading)!
     edit(ids.reading, { ...reading, connect: [{ to: "garden-of-notes", why: "A pattern language is where the garden idea started" }] }, "connect", muse, day("2026-11-19", "09:10"), "Your garden essay quotes the first book on this list")
     recordSession(muse, "Looked for blocks that belong together", [
@@ -222,13 +222,9 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
   }
   if (fixtureIds) {
     seed(fixtureIds)
-    // Sample inferences cite the block versions kept when the sample home was seeded.
-    for (const [inference, blocks] of [
-      [fixtureIds.privateFirst, [fixtureIds.monday]],
-      [fixtureIds.slowness, [fixtureIds.slow, fixtureIds.tokyo, fixtureIds.dusk]],
-    ] as const) {
-      const doc = byId(inference)!
-      doc.evidence = blocks.map(id => ({ node: blockKey(id), version: currentVersion(id)! }))
+    // An observation about blocks keeps the versions they had when it was written.
+    for (const doc of all.filter(each => each.kind === "observation" && each.about?.some(item => !item.startsWith("channel:")))) {
+      doc.evidence = doc.about!.filter(item => !item.startsWith("channel:")).map(id => ({ node: blockKey(id), version: currentVersion(id)! }))
     }
   }
   return { historyLines, actor, actingAs, changeById, linesFor, currentVersion, snapshotAt, syncJournal, recordSession, save }

@@ -13,7 +13,7 @@ An agent that clicks through pixels is slow and fragile. It can also do things t
 A light, Obsidian-like workspace, the first flow ([flows/workspace.md](flows/workspace.md)):
 
 - A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), **inbox**, notifications, and you.
-- A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. The graph shows your blocks and how they connect: each block a node, each channel a soft area around its blocks, links in the text grey and whole-block links forest, thicker the more two blocks share. It behaves like Obsidian's: springy, with hover highlighting and drag.
+- A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. The graph puts you in the middle, Obsidian-style, with cortex items (green diamonds) close around you and vault blocks (grey dots) further out, clustered by channel or category, and grey lines for links, connections and what the cortex drew from the vault. It behaves like Obsidian's: springy, with hover highlighting and drag.
 - A **main panel** card where blocks and cortex files open in the editor:
   - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md`, or onto a channel to move it there.
   - **Editing:** a `/` menu, a floating selection toolbar, and block handles with menus.
@@ -40,7 +40,7 @@ npm --prefix app run dev   # http://localhost:5190
 
 Choose **New block** to start a private draft. Type a title in the editor and press Enter to start writing. The title saves as you type, and you can also change it with **Rename** on any of the block's rows. From a channel's menu, **New block here** uses that channel as the block's home. A block can appear in several channels, each with its own order. A post is a published block.
 
-Choose **Home**, then **History**, to see sample changes by date or author. A block's clock opens its own vault versions. Cortex files have their own history. The connections card can show a sample cortex inference whose evidence cites a block version.
+Choose **Home**, then **History**, to see sample changes by date or author. A block's clock opens its own vault versions. Cortex files have their own history. The connections card shows the observations an agent made about a block, and a sample observation keeps the block versions it was written against. The cortex side holds Mira's profile, observations, a skill and a tool, as in [cortex/docs/model.md](../cortex/docs/model.md).
 
 ## Where things are
 

@@ -2,7 +2,8 @@ import { nodeKey } from "../../../vault/vault/node.mjs"
 import { isBlockKind, type BlockKind } from "./block-kind"
 
 export type Visibility = "public" | "friends" | "private"
-export type CortexKind = "identity" | "memory" | "observation" | "skill" | "tool" | "playbook" | "working" | "inference"
+/** The cortex's four parts (cortex/docs/model.md): the profile, observations, skills and tools. */
+export type CortexKind = "profile" | "observation" | "skill" | "tool"
 export type Kind = BlockKind | CortexKind
 export type Platform = "own" | "bluesky" | "instagram" | "x"
 
@@ -27,13 +28,19 @@ export type Doc = {
    * connections live in the body as `[[slug]]` or `[[slug|the words]]`; these are whole-block ones.
    */
   connect?: Connection[]
-  /** Exact versions of the vault nodes an inference came from. */
+  /** What an observation is about: block IDs, or channels written channel:<path>. None is about the person. */
+  about?: string[]
+  /** Who wrote an observation: an agent by name, or "you". */
+  by?: string
+  /** The versions of the blocks an observation is about, as they were when it was written. */
   evidence?: { node: string; version: string }[]
 }
 
 export const isBlock = (doc?: Doc | null): doc is Doc & { kind: BlockKind; homeChannel: string } =>
   doc != null && isBlockKind(doc.kind) && doc.homeChannel !== undefined
-export const locationOf = (doc: Doc) => doc.homeChannel ?? doc.kind
+/** Where the cortex keeps each part, as the tree names its folders. */
+export const CORTEX_FOLDERS: Record<CortexKind, string> = { profile: "profile", observation: "observations", skill: "skills", tool: "tools" }
+export const locationOf = (doc: Doc) => doc.homeChannel ?? CORTEX_FOLDERS[doc.kind as CortexKind] ?? doc.kind
 export const blockKey = (id: string) => nodeKey({ type: "block", id })
 
 export type Connection = { to: string; why?: string }

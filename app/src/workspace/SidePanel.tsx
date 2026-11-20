@@ -249,7 +249,7 @@ function RepoPanel() {
   const { view, rev, repoMode, scope, audience, showVisibility } = useWorkspace()
   const { filters } = useWorkspace()
   const filtering = activeCount(filters) > 0
-  const cortexTree = useMemo(() => toTree("cortex", cortex.filter(kept), ["identity", "memory", "observation", "skill", "tool", "playbook", "working", "inference"]), [rev, filters]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cortexTree = useMemo(() => toTree("cortex", cortex.filter(kept), ["profile", "observations", "skills", "tools"]), [rev, filters]) // eslint-disable-line react-hooks/exhaustive-deps
   const vaultDocs = useMemo(() => blocks.filter(p => sees(audience, p) && !marks.archived.has(p.id) && kept(p)), [rev, audience, filters]) // eslint-disable-line react-hooks/exhaustive-deps
   const pinned = blocks.concat(cortex).filter(d => marks.pinned.has(d.id) && (!isBlock(d) || sees(audience, d)) && kept(d))
   const archived = blocks.filter(d => marks.archived.has(d.id) && kept(d))

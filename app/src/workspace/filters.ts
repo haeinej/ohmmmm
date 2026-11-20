@@ -29,14 +29,10 @@ export const TYPES: { id: PageType; label: string; cortex?: boolean }[] = [
   { id: "file", label: "File" },
   { id: "code", label: "Code" },
   { id: "post", label: "Post" },
-  { id: "identity", label: "Identity", cortex: true },
-  { id: "memory", label: "Memory", cortex: true },
+  { id: "profile", label: "Profile", cortex: true },
   { id: "observation", label: "Observation", cortex: true },
   { id: "skill", label: "Skill", cortex: true },
   { id: "tool", label: "Tool", cortex: true },
-  { id: "playbook", label: "Playbook", cortex: true },
-  { id: "working", label: "Working memory", cortex: true },
-  { id: "inference", label: "Inference", cortex: true },
 ]
 export const EDITED: { id: Edited; label: string; days: number }[] = [
   { id: "any", label: "Any time", days: Infinity },

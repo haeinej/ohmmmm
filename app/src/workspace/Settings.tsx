@@ -123,10 +123,11 @@ function Page({ tab }: { tab: SettingsTab }) {
       </>
     }
     case "cortex":
-      return <Section title="Memory">
-        <Row title="Memories" note={`${cortex.filter(c => c.kind === "memory").length} kept`} />
-        <Row title="Observations waiting" note={`${cortex.filter(c => c.kind === "observation").length} to settle`} action={<Button variant="secondary" disabled>Settle</Button>} />
-        <Row title="Skills" note={`${cortex.filter(c => c.kind === "skill").length} installed`} />
+      return <Section title="Cortex">
+        <Row title="Profile" note="Your preferences, goals and notes. Agents read it every session and only propose changes" />
+        <Row title="Observations" note={`${cortex.filter(c => c.kind === "observation").length} written by your agents as they work. You can edit or remove any`} />
+        <Row title="Skills" note={`${cortex.filter(c => c.kind === "skill").length} approved`} />
+        <Row title="Tools" note={`${cortex.filter(c => c.kind === "tool").length} switched on`} />
       </Section>
     case "appearance":
       return <>
