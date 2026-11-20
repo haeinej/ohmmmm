@@ -1,5 +1,7 @@
 # Cortex and history: one path
 
+> **Superseded in part (2026-11-20).** [model.md](model.md) replaces identity, memory, working memory, settlement and inference with a profile and observations. What this file says about those is history; the rest still holds.
+
 Written 19 November 2026 as a proposal, and changed the same day as the owner decided its details. It joins what were separate: the cortex, version history, and what agents did. It goes with the personal brain plan for ohm-content-layer, which is not published yet. Steps 2 and 3 of the order below are built in ohm-cortex, with evidence from step 4, every change marked with who made it, and sessions with dead ends; see "Built" at the end. [The guide](guide.md) explains the result for people and agents.
 
 For a day this design had every agent edit go through the person: an agent proposed, and nothing changed until the person accepted. The owner reversed that on 19 November 2026, and [plan.md](plan.md) records it: **agents edit directly; every change is marked with who made it; the person reverts.** What needs trust stays the person's: identity facts are proposed with evidence and confirmed, skills are approved, and tools are only asked for.

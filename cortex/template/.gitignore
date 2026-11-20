@@ -13,5 +13,5 @@ Thumbs.db
 .cortex/vault.json
 .cortex/vault-cursor.json
 
-# The hooks' checkpoints for this machine's sessions: when to ask an agent to distill.
+# The hooks' checkpoints for this machine's sessions: when to ask an agent for observations.
 .cortex/hooks.jsonl

@@ -5,35 +5,34 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { memoryFile, readMemoryFile } from '../src/core.mjs';
 import { initCortex, openCortex } from '../src/folder.mjs';
 import { createServer } from '../src/protocol.mjs';
 import { createTools, INSTRUCTIONS, TOOLS } from '../src/tools.mjs';
 
+// Every person here is invented.
 const template = fileURLToPath(new URL('../template', import.meta.url));
+const cli = fileURLToPath(new URL('../bin/cortex.mjs', import.meta.url));
 const fresh = async (options = { actor: 'test-agent' }) => {
   const dir = join(await mkdtemp(join(tmpdir(), 'cortex-')), 'cortex');
   await initCortex(dir, template);
-  return { dir, cortex: openCortex(dir, options) };
+  return { dir, cortex: openCortex(dir, options), person: openCortex(dir, { actor: 'member' }) };
 };
 const refused = code => problem => problem.code === code || JSON.parse(problem.message).error === code;
-const likes = { name: 'prefers-short-titles', description: 'Titles are four words or fewer', kind: 'preference', stated: true, body: 'Keep every title short.' };
 
-test('a memory written as a file reads back the same', () => {
-  const memory = { ...likes, always: true, writtenBy: 'someone', seen: { count: 2, last: '2026-01-01T00:00:00.000Z' } };
-  assert.deepEqual(readMemoryFile(memoryFile(memory)), memory);
-});
-
-test('a new cortex has the rulebook, an identity, one starting memory and an index', async () => {
+test('a new cortex has the playbook, a profile to fill in, no observations, and the filing skill', async () => {
   const { dir, cortex } = await fresh();
   const start = await cortex.start();
   assert.match(start.rules, /How to keep this cortex/);
-  assert.deepEqual(start.identity, { about: '' });
-  assert.deepEqual(start.waiting.identity, []);
-  assert.deepEqual(start.always.map(item => item.memory.name), ['working-style']);
-  assert.deepEqual([start.memories, start.skills.map(skill => skill.name), start.tools, start.observations], [[], ['file-a-source'], [], []]);
-  assert.match(await readFile(join(dir, 'memory', 'MEMORY.md'), 'utf8'), /\[working-style\]\(working-style\.md\)/);
+  assert.deepEqual(start.profile, { account: null, text: '## Preferences\n\n## Goals\n\n## Notes' });
+  assert.deepEqual([start.observations, start.skills.map(skill => skill.name), start.tools], [[], ['file-a-source'], []]);
+  assert.deepEqual(start.waiting, { profile: [], skills: [], tools: [] });
+  assert.deepEqual((await readdir(dir)).filter(name => !name.startsWith('.')).sort(), ['agents', 'observations', 'profile.md', 'skills', 'tools']);
   await assert.rejects(initCortex(dir, template), refused('NameTaken'));
+  // Started for an account, the profile names it.
+  const other = join(await mkdtemp(join(tmpdir(), 'cortex-')), 'cortex');
+  await initCortex(other, template, { account: 'did:plc:example0sam' });
+  assert.equal((await openCortex(other).profile()).account, 'did:plc:example0sam');
+  await assert.rejects(initCortex(join(other, '..', 'bad'), template, { account: 'not an account' }), refused('InvalidRequest'));
 });
 
 test('secrets have one place, and git is told never to take them', async () => {
@@ -47,71 +46,118 @@ test('secrets have one place, and git is told never to take them', async () => {
   git('add', '-A');
   const tracked = git('ls-files').split('\n');
   assert.equal(tracked.some(file => file.startsWith('agents/secrets/')), false);
-  assert.equal(['agents/AGENTS.md', '.gitignore', '.gitattributes', 'memory/working-style.md'].every(file => tracked.includes(file)), true);
-  assert.match(git('check-attr', 'merge', '--', '.cortex/notes.jsonl'), /merge: union/);
+  assert.equal(['agents/AGENTS.md', '.gitignore', '.gitattributes', 'profile.md'].every(file => tracked.includes(file)), true);
+  assert.match(git('check-attr', 'merge', '--', '.cortex/profile.jsonl'), /merge: union/);
 });
 
-test('a memory is one file, indexed, and a save names the version it replaces', async () => {
+test('an observation is one file, a retry is not a second one, and a rewrite names the version it replaces', async () => {
   const { dir, cortex } = await fresh();
-  const saved = await cortex.write(likes);
-  // An agent's memory is written at once, as a change marked with the agent.
-  assert.deepEqual([saved.node, saved.op, typeof saved.change], ['memory/prefers-short-titles', 'create', 'string']);
-  assert.equal(readMemoryFile(await readFile(join(dir, 'memory', 'prefers-short-titles.md'), 'utf8')).writtenBy, 'test-agent');
-  assert.match(await readFile(join(dir, 'memory', 'MEMORY.md'), 'utf8'), /prefers-short-titles.*four words/);
-  assert.equal((await cortex.write(likes)).unchanged, true);
-  const longer = { ...likes, body: 'Keep every title short. Never use a colon.' };
-  await assert.rejects(cortex.write(longer), refused('NameTaken'));
-  await assert.rejects(cortex.write(longer, { replaces: 'cstale' }), refused('Changed'));
-  const next = await cortex.write(longer, { replaces: saved.version });
-  assert.notEqual(next.version, saved.version);
-  // What was replaced is kept, and can be read back to restore.
-  const read = await cortex.read(likes.name, { history: true });
-  assert.deepEqual(read.earlier.map(item => item.version), [saved.version]);
-  assert.equal((await cortex.read(likes.name, { version: saved.version })).memory.body, likes.body);
-  assert.deepEqual((await cortex.search({ q: 'colon' })).memories.map(item => item.name), [likes.name]);
+  const saved = await cortex.observe({ id: 'short-titles', text: 'Shortens titles to three words.', session: 's1' });
+  assert.deepEqual([saved.node, saved.op, typeof saved.change], ['observation/short-titles', 'create', 'string']);
+  assert.match(await readFile(join(dir, 'observations', 'short-titles.md'), 'utf8'), /^---\nat: "[^"]+"\nby: "test-agent"\nsession: "s1"\n---\nShortens titles to three words\.\n$/);
+  assert.equal((await cortex.observe({ id: 'short-titles', text: 'Shortens titles to three words.', session: 's1' })).unchanged, true);
+  await assert.rejects(cortex.observe({ id: 'short-titles', text: 'Something else.' }), refused('NameTaken'));
+  await assert.rejects(cortex.observe({ id: 'short-titles', text: 'Something else.', replaces: 'cstale' }), refused('Changed'));
+  const rewritten = await cortex.observe({ id: 'short-titles', text: 'Shortens titles to three words, even long ones.', replaces: saved.version, reason: 'Seen again' });
+  assert.equal(rewritten.op, 'update');
+  const { observation } = await cortex.readObservation('short-titles');
+  assert.deepEqual([observation.text, observation.by], ['Shortens titles to three words, even long ones.', 'test-agent']);
+  for (const bad of [{ id: '../x', text: 'x' }, { id: 'x', text: '' }, { id: 'x', text: 'y'.repeat(2001) }, { id: 'x', text: 'y', about: 'p1' }]) {
+    await assert.rejects(cortex.observe(bad), refused('InvalidRequest'), JSON.stringify(bad).slice(0, 60));
+  }
+});
+
+test('an agent changes only its own observations as it left them; the person changes any', async () => {
+  const { dir, cortex, person } = await fresh();
+  const codex = openCortex(dir, { actor: 'codex' });
+  const mine = await cortex.observe({ id: 'tables', text: 'Prefers tables to lists.' });
+  // Another agent cannot rewrite, remove or pin it.
+  await assert.rejects(codex.observe({ id: 'tables', text: 'x', replaces: mine.version }), refused('PersonOnly'));
+  await assert.rejects(codex.removeObservation('tables', { replaces: mine.version }), refused('PersonOnly'));
+  await assert.rejects(cortex.observe({ id: 'pinned', text: 'x', pin: true }), refused('PersonOnly'));
+  // Once the person has changed it, it is theirs.
+  const edited = await person.observe({ id: 'tables', text: 'Prefers tables to lists, for comparisons.', replaces: mine.version, pin: true });
+  await assert.rejects(cortex.observe({ id: 'tables', text: 'x', replaces: edited.version }), refused('PersonOnly'));
+  await assert.rejects(cortex.removeObservation('tables', { replaces: edited.version }), refused('PersonOnly'));
+  // An edit by hand counts the same: the file is no longer as the agent left it.
+  const second = await cortex.observe({ id: 'mornings', text: 'Writes in the morning.' });
+  await writeFile(join(dir, 'observations', 'mornings.md'), (await readFile(join(dir, 'observations', 'mornings.md'), 'utf8')).replace('morning', 'early morning'));
+  const now = (await cortex.readObservation('mornings')).version;
+  assert.notEqual(now, second.version);
+  await assert.rejects(cortex.observe({ id: 'mornings', text: 'x', replaces: now }), refused('PersonOnly'));
+  // The person writes their own, and they are named as theirs.
+  await person.observe({ id: 'own', text: 'I draft on paper first.' });
+  assert.equal((await cortex.readObservation('own')).observation.by, 'you');
+  // An agent's own, untouched, it may remove; it is kept, and can be restored.
+  const third = await cortex.observe({ id: 'wrong', text: 'Dislikes footnotes.' });
+  const removed = await cortex.removeObservation('wrong', { replaces: third.version, reason: 'They use footnotes' });
+  assert.equal(removed.op, 'remove');
+  assert.equal((await cortex.readObservation('wrong', { version: third.version })).observation.text, 'Dislikes footnotes.');
+  await cortex.restore({ node: 'observation/wrong', version: third.version });
+  assert.equal((await cortex.readObservation('wrong')).observation.text, 'Dislikes footnotes.');
 });
 
 test('a file the person edited by hand is what the agent is given', async () => {
   const { dir, cortex } = await fresh();
-  await writeFile(join(dir, 'memory', 'lives-in-seoul.md'), '---\nname: "lives-in-seoul"\ndescription: "Where they are"\nkind: "person"\nstated: true\n---\nSeoul.');
-  await writeFile(join(dir, 'memory', 'broken.md'), 'no properties here');
+  await writeFile(join(dir, 'profile.md'), '---\naccount: "sam.example.com"\n---\n## Preferences\n\n- Never use exclamation marks\n');
+  await writeFile(join(dir, 'observations', 'by-hand.md'), '---\nat: "2026-11-01T00:00:00.000Z"\nby: "you"\npin: true\n---\nI file receipts by month.\n');
   const start = await cortex.start();
-  assert.deepEqual(start.memories.map(item => item.name), ['lives-in-seoul']);
-  assert.equal(start.problems.length, 1);
-  assert.match(await readFile(join(dir, 'memory', 'MEMORY.md'), 'utf8'), /lives-in-seoul/);
+  assert.match(start.profile.text, /Never use exclamation marks/);
+  assert.equal(start.profile.account, 'sam.example.com');
+  assert.deepEqual(start.observations.map(item => [item.id, item.by, item.pin, item.text]), [['by-hand', 'you', true, 'I file receipts by month.']]);
 });
 
-test('a removed memory is kept in history and gone from the index', async () => {
-  const { dir, cortex } = await fresh();
-  const { version } = await cortex.write(likes);
-  await assert.rejects(cortex.remove(likes.name, { replaces: 'cstale' }), refused('Changed'));
-  assert.equal((await cortex.remove(likes.name, { replaces: version })).removed, true);
-  assert.doesNotMatch(await readFile(join(dir, 'memory', 'MEMORY.md'), 'utf8'), /prefers-short-titles/);
-  assert.equal((await cortex.read(likes.name, { version })).memory.body, likes.body);
-  await assert.rejects(cortex.read(likes.name), refused('NotFound'));
+test('pinned observations come first, then the newest thirty; recall finds the rest by words, by what they are about, or by ID', async () => {
+  const { dir, person } = await fresh();
+  for (let n = 0; n < 35; n++) await openCortex(dir, { actor: 'codex', now: () => new Date(Date.UTC(2026, 10, 1, 0, n)) }).observe({ id: `seen-${n}`, text: `Noticed thing number ${n}.` });
+  await person.observe({ id: 'harbour', text: 'Walks to the harbour before writing.', pin: true });
+  const start = await openCortex(dir, { actor: 'claude-code' }).start();
+  assert.equal(start.observations[0].id, 'harbour');
+  assert.deepEqual(start.observations.slice(1, 3).map(item => item.id), ['seen-34', 'seen-33']);
+  assert.equal(start.observations.length, 31);
+  assert.equal(start.moreObservations, 5);
+  const tools = createTools(openCortex(dir, { actor: 'claude-code' }));
+  const found = await tools.call('cortex_recall', { query: 'noticed', limit: 2 });
+  assert.deepEqual([found.observations.length, found.more], [2, 33]);
+  assert.deepEqual((await tools.call('cortex_recall', { query: 'harbour writing' })).observations.map(item => item.id), ['harbour']);
+  const one = await tools.call('cortex_recall', { id: 'seen-0', history: true });
+  assert.deepEqual([one.observation.text, one.earlier], ['Noticed thing number 0.', []]);
+  await assert.rejects(tools.call('cortex_recall', { id: 'seen-0', query: 'x' }), refused('InvalidRequest'));
+  await assert.rejects(tools.call('cortex_recall', { query: 'x', history: true }), refused('InvalidRequest'));
 });
 
-test('an observation changes no memory, is kept once, and is settled one way or another', async () => {
-  const { cortex } = await fresh();
-  const note = { id: 'n1', text: 'Asked for the reasoning behind a rejection', session: 's1' };
-  assert.deepEqual(await cortex.observe(note), { id: 'n1' });
-  assert.equal((await cortex.observe(note)).unchanged, true);
-  await assert.rejects(cortex.observe({ ...note, text: 'Something else' }), refused('Changed'));
-  await cortex.observe({ id: 'n2', text: 'Asked why again', session: 's2' });
-  await cortex.observe({ id: 'n3', text: 'Was in a hurry today', session: 's2' });
-  assert.equal((await cortex.start()).observations.length, 3);
-
-  await assert.rejects(cortex.settle({ observations: [{ id: 'n1', outcome: 'no-such-memory' }] }), refused('NotFound'));
-  assert.equal((await cortex.listObservations()).observations.length, 3);
-
-  // Seen once: kept, and still there for a later session to count.
-  await cortex.settle({ observations: [{ id: 'n1', outcome: 'kept' }] });
-  const wants = { name: 'wants-the-reasoning', description: 'Show why, not only the answer', kind: 'preference', stated: false, body: 'Asked why in two sessions.', observations: ['n1', 'n2'] };
-  const done = await cortex.settle({ changes: [{ memory: wants }], observations: [{ id: 'n1', outcome: wants.name }, { id: 'n2', outcome: wants.name }, { id: 'n3', outcome: 'dropped' }] });
-  assert.equal(done.complete, true);
-  assert.deepEqual([done.memories[0].seen.count, typeof done.memories[0].change], [2, 'string']);
-  await assert.rejects(cortex.settle({ observations: [{ id: 'n3', outcome: 'kept' }] }), refused('Changed'));
-  await assert.rejects(cortex.write({ ...likes, observations: ['never-recorded'] }), refused('InvalidMemory'));
+test('the profile is the person\'s: an agent proposes a line, and only the person accepts it', async () => {
+  const { dir, cortex, person } = await fresh();
+  assert.equal(TOOLS.some(tool => /profile/.test(tool.name) && tool.name !== 'cortex_propose_profile'), false);
+  await assert.rejects(cortex.writeProfile('## Preferences\n- Anything\n'), refused('PersonOnly'));
+  await assert.rejects(cortex.setAccount('did:plc:example0x'), refused('PersonOnly'));
+  const proposed = await createTools(cortex).call('cortex_propose_profile', { heading: 'Goals', line: 'Finish the tides essay by spring', quote: 'I want the tides essay done by spring' });
+  assert.equal(proposed.waiting, true);
+  assert.equal((await cortex.proposeProfile({ heading: 'goals', line: 'Finish the tides essay  by spring' })).unchanged, true, 'the same line, asked twice, waits once');
+  assert.deepEqual((await cortex.start()).waiting.profile.map(item => [item.heading, item.line, item.by]), [['Goals', 'Finish the tides essay by spring', 'test-agent']]);
+  await assert.rejects(cortex.acceptProfile(proposed.id), refused('PersonOnly'));
+  const accepted = await person.acceptProfile(proposed.id);
+  assert.equal(accepted.node, 'profile');
+  assert.match(await readFile(join(dir, 'profile.md'), 'utf8'), /## Goals\n\n- Finish the tides essay by spring\n\n## Notes/);
+  assert.equal((await cortex.proposeProfile({ heading: 'Goals', line: 'Finish the tides essay by spring' })).unchanged, true, 'a line already there is not proposed');
+  // A heading the profile does not have yet is added at the end.
+  const garden = await cortex.proposeProfile({ heading: 'Projects', line: 'The garden plan' });
+  await person.acceptProfile(garden.id);
+  assert.match(await readFile(join(dir, 'profile.md'), 'utf8'), /## Notes\n\n## Projects\n\n- The garden plan\n$/);
+  // An agent never restores the profile, and the change names who proposed the line.
+  const change = (await person.history({ node: 'profile' })).changes.at(-1);
+  assert.deepEqual([change.actor.name, change.proposedBy], ['member', 'test-agent']);
+  await assert.rejects(cortex.restore({ node: 'profile', version: change.before }), refused('PersonOnly'));
+  // The person rewrites their part whole; the account stays.
+  await person.setAccount('sam.example.com');
+  const { version } = await person.profile();
+  await person.writeProfile('## Preferences\n\n- Short paragraphs\n', { replaces: version });
+  assert.deepEqual(await person.profile().then(({ account, sections }) => ({ account, sections })), { account: 'sam.example.com', sections: [{ heading: 'Preferences', lines: ['Short paragraphs'] }] });
+  await assert.rejects(person.writeProfile('x', { replaces: version }), refused('Changed'));
+  // From the command line.
+  const asked = await cortex.proposeProfile({ heading: 'Preferences', line: 'British spelling' });
+  assert.match(execFileSync('node', [cli, 'accept', asked.id, dir], { encoding: 'utf8' }), /Added under Preferences: British spelling/);
+  assert.match(execFileSync('node', [cli, 'profile', dir], { encoding: 'utf8' }), /British spelling/);
 });
 
 test('a skill an agent wrote is not used until the person approves it', async () => {
@@ -124,16 +170,12 @@ test('a skill an agent wrote is not used until the person approves it', async ()
   const start = await cortex.start();
   assert.deepEqual([start.skills.map(skill => skill.name), start.waiting.skills], [['file-a-source'], ['publish-an-essay']]);
   await assert.rejects(cortex.proposeSkill({ text, files: [{ path: '../outside.md', text: 'x' }] }), refused('InvalidSkill'));
-
-  // Only the person approves.
   await assert.rejects(cortex.approveSkill('publish-an-essay'), refused('PersonOnly'));
   await openCortex(dir, { actor: 'member' }).approveSkill('publish-an-essay');
   const read = await cortex.getSkill('publish-an-essay');
   assert.equal(read.skill.text, text);
   assert.deepEqual(read.skill.files, [{ path: 'checklist.md', text: 'Title, date.' }]);
-  const { skills } = await cortex.start();
-  assert.deepEqual(skills.map(skill => skill.name), ['file-a-source', 'publish-an-essay']);
-  assert.deepEqual(skills[1], { name: 'publish-an-essay', description: 'The steps for publishing an essay' });
+  assert.deepEqual((await cortex.start()).skills.map(skill => skill.name), ['file-a-source', 'publish-an-essay']);
 });
 
 test('an agent can ask for a tool, and cannot add one or switch one on', async () => {
@@ -143,7 +185,6 @@ test('an agent can ask for a tool, and cannot add one or switch one on', async (
   assert.deepEqual(await readdir(join(dir, 'tools')), []);
   assert.deepEqual((await cortex.start()).waiting.tools, ['calendar']);
   assert.equal(TOOLS.some(tool => /approve|enable|put_tool/.test(tool.name)), false);
-  // The person adds one by putting a file in tools/.
   await writeFile(join(dir, 'tools', 'calendar.md'), '---\nname: calendar\ndescription: Read the calendar\non: true\n---\n');
   await writeFile(join(dir, 'tools', 'mail.md'), '---\nname: mail\ndescription: Send mail\non: false\n---\n');
   assert.deepEqual((await cortex.start()).tools, [{ name: 'calendar', description: 'Read the calendar' }]);
@@ -161,37 +202,17 @@ test('an agent keeps a cortex through the tools alone', async () => {
   const hello = await handle({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', clientInfo: { name: 'claude-code' } } });
   assert.match(hello.result.instructions, /cortex_start before anything else/);
   assert.equal(seen, 'claude-code');
-  // Other tools are added over time; these are the ones this test relies on.
   const offered = (await handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' })).result.tools.map(tool => tool.name);
-  for (const name of ['cortex_start', 'cortex_remember', 'cortex_recall', 'cortex_observe', 'cortex_settle', 'cortex_forget']) assert.ok(offered.includes(name), name);
+  assert.deepEqual(offered, ['cortex_start', 'cortex_observe', 'cortex_recall', 'cortex_propose_profile', 'cortex_skill', 'cortex_propose_skill', 'cortex_propose_tool', 'cortex_file_advice', 'cortex_history', 'cortex_as_of', 'cortex_save', 'cortex_restore', 'cortex_revert', 'cortex_session']);
 
   assert.match((await ask('cortex_start')).value.rules, /What you may not do/);
-  const saved = (await ask('cortex_remember', { memory: likes })).value;
-  assert.equal(saved.done, true);
-  assert.equal((await ask('cortex_history', { node: `memory/${likes.name}` })).value.changes[0].id, saved.change);
-  assert.equal((await ask('cortex_recall', { name: likes.name })).value.memory.writtenBy, 'claude-code');
-  const clash = await ask('cortex_remember', { memory: { ...likes, body: 'Different.' } });
+  const saved = (await ask('cortex_observe', { id: 'titles', text: 'Rewrote my title to be shorter.', session: 's1' })).value;
+  assert.equal((await ask('cortex_history', { node: 'observation/titles' })).value.changes[0].id, saved.change);
+  assert.equal((await ask('cortex_recall', { id: 'titles' })).value.observation.by, 'claude-code');
+  const clash = await ask('cortex_observe', { id: 'titles', text: 'Different.' });
   assert.equal(clash.isError, true);
   assert.equal(JSON.parse(clash.value).current, saved.version);
-
-  await ask('cortex_observe', { id: 'a', text: 'Rewrote my title to be shorter', session: 's1' });
-  assert.equal((await ask('cortex_settle')).value.observations.length, 1);
-  assert.equal((await ask('cortex_settle', { observations: [{ id: 'a', outcome: likes.name }] })).value.complete, true);
-
-  const first = (await ask('cortex_forget', { name: likes.name })).value;
-  assert.equal(first.done, false);
-  assert.equal((await ask('cortex_forget', { name: likes.name, confirm: 'made-up' })).isError, true);
-  // A confirmation is used once, and removes the version that was shown.
-  assert.equal((await ask('cortex_forget', { name: likes.name, confirm: first.confirm })).value.done, true);
-  assert.equal((await ask('cortex_forget', { name: likes.name, confirm: first.confirm })).isError, true);
-  assert.equal((await ask('cortex_recall', { name: likes.name })).isError, true);
-});
-
-test('a memory written with notes, before observations were named, is read with observations', () => {
-  const text = memoryFile({ name: 'short-titles', description: 'Wants short titles', kind: 'preference', stated: false, body: 'Short.', observations: ['n-1'] })
-    .replace('observations:', 'notes:');
-  assert.match(text, /^notes:/m);
-  const memory = readMemoryFile(text);
-  assert.deepEqual(memory.observations, ['n-1']);
-  assert.equal(memory.notes, undefined);
+  assert.equal((await ask('cortex_observe', { id: 'titles', remove: true })).isError, true, 'a removal names the version');
+  assert.equal((await ask('cortex_observe', { id: 'titles', remove: true, version: saved.version })).value.removed, true);
+  assert.equal((await ask('cortex_recall', { id: 'titles' })).isError, true);
 });

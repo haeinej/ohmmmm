@@ -13,6 +13,8 @@ import { checkVault, folderVault } from '../src/vault.mjs';
 // Every person and block here is invented.
 const template = fileURLToPath(new URL('../template', import.meta.url));
 const refused = code => problem => problem.code === code;
+// What a channel is for is an observation about it.
+const describe = (cortex, channel, said) => cortex.observe({ id: `channel-${channel.replace(/\//g, '-')}`, text: said, about: [`channel:${channel}`] });
 const writeBlock = async (root, path, { id, title, body = '' }) => {
   await mkdir(dirname(join(root, path)), { recursive: true });
   await writeFile(join(root, path), `---\nid: ${id}\ntitle: ${title}\n---\n${body}`);
@@ -32,9 +34,9 @@ async function setup() {
   await person.connectVault({ kind: 'folder', path: vault });
   const agent = openCortex(dir, { actor: 'claude-code' });
   await agent.start();
-  await person.describeChannel({ channel: 'meetings', meaning: 'Transcripts of meetings I was in, one per meeting', conventions: 'Titled by the group and the month, such as "Harbour board, March"' });
-  await person.describeChannel({ channel: 'essays', meaning: 'Finished long-form writing, one idea each', conventions: 'Titles start with "On"' });
-  await person.describeChannel({ channel: 'notes/reading', meaning: 'Notes on books and articles I read', conventions: 'Titles start with "Reading:"' });
+  await describe(person, 'meetings', 'Transcripts of meetings I was in, one per meeting. Titled by the group and the month, such as "Harbour board, March"');
+  await describe(person, 'essays', 'Finished long-form writing, one idea each. Titles start with "On"');
+  await describe(person, 'notes/reading', 'Notes on books and articles I read. Titles start with "Reading:"');
   return { base, vault, dir, person, agent, tools: createTools(agent) };
 }
 
@@ -55,26 +57,25 @@ async function listing(root) {
 
 const transcript = { kind: 'meeting transcript', title: 'Harbour board, May', text: 'Chair: the harbour wall is repaired. The ferry timetable changes in June. Harbour fees stay the same.' };
 
-test('the advice names a channel from vault.md with its conventions, and up to five related blocks', async () => {
+test('the advice names a channel with what was observed about it, and up to five related blocks', async () => {
   const { tools } = await setup();
   const advice = await tools.call('cortex_file_advice', transcript);
   assert.deepEqual(advice.vault, { connected: true });
   assert.equal(advice.channels[0].channel, 'meetings');
-  assert.equal(advice.channels[0].meaning, 'Transcripts of meetings I was in, one per meeting');
-  assert.equal(advice.channels[0].conventions, 'Titled by the group and the month, such as "Harbour board, March"');
+  assert.equal(advice.channels[0].observed, 'Transcripts of meetings I was in, one per meeting. Titled by the group and the month, such as "Harbour board, March"');
   assert.equal(advice.channels[0].blocks, 2);
   assert.match(advice.channels[0].why, /meeting/);
   assert.ok(advice.channels.length <= 3);
   assert.equal(advice.related.length, 5);
   assert.deepEqual(advice.related[0], { id: 'm1', title: 'Harbour board, March', channel: 'meetings' });
   assert.ok(advice.related.every(block => block.id && block.title && block.channel));
-  assert.match(advice.ask, /^Shall I file this in meetings, titled the way blocks there are \(Titled by the group and the month/);
+  assert.match(advice.ask, /^Shall I file this in meetings, titled the way blocks there are \(Transcripts of meetings/);
   assert.match(advice.ask, /"Harbour board, March"/);
 
-  // A reading note goes elsewhere, matched by the words of its kind against the channel's meaning.
+  // A reading note goes elsewhere, matched by the words of its kind against what was observed about the channel.
   const reading = await tools.call('cortex_file_advice', { kind: 'reading note', title: 'A book about islands' });
   assert.equal(reading.channels[0].channel, 'notes/reading');
-  assert.equal(reading.channels[0].conventions, 'Titles start with "Reading:"');
+  assert.match(reading.channels[0].observed, /Titles start with "Reading:"/);
   assert.deepEqual(reading.related.map(block => block.id), ['r1']);
 });
 
@@ -220,8 +221,8 @@ test('a channel and its own sub-channel are not both offered', async () => {
   const { vault, dir, tools } = await setup();
   await writeBlock(vault, 'notes/daily/monday.md', { id: 'd1', title: 'Monday', body: '' });
   await openCortex(dir, { actor: 'member' }).syncVault();
-  await openCortex(dir, { actor: 'member' }).describeChannel({ channel: 'notes', meaning: 'Short notes of every kind' });
-  await openCortex(dir, { actor: 'member' }).describeChannel({ channel: 'notes/daily', meaning: 'A note for each day' });
+  await describe(openCortex(dir, { actor: 'member' }), 'notes', 'Short notes of every kind');
+  await describe(openCortex(dir, { actor: 'member' }), 'notes/daily', 'A note for each day');
   const advice = await tools.call('cortex_file_advice', { kind: 'reading note' });
   const channels = advice.channels.map(channel => channel.channel);
   assert.equal(channels[0], 'notes/reading');

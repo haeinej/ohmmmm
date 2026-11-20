@@ -3,7 +3,7 @@
 //
 //   ohmmmm.alice.example.com/
 //   ├── vault/     blocks and channels, .vault/ (journal, index, config): ../vault/README.md
-//   └── cortex/    identity, memory, skills, tools, .cortex/: ../cortex/README.md
+//   └── cortex/    profile, observations, skills, tools, .cortex/: ../cortex/README.md
 //
 // The vault is canonical; the cortex reads it only through the vault reader contract
 // (../contract/vault-reader.mjs). Inside a home the cortex finds its vault by itself: the sibling
@@ -29,7 +29,7 @@ export class HomeProblem extends Error {
 
 // An AT Protocol handle, as a folder name allows it: lower case letters, digits and hyphens in
 // dot-separated parts. A DID is not a handle; a home is named for the person, and the DID is in the
-// cortex's identity.
+// cortex's profile.
 const HANDLE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 export function homeName(handle) {
   const value = String(handle ?? '').trim().replace(/^@/, '').toLowerCase();

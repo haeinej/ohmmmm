@@ -1,5 +1,7 @@
 # Rebuilding cortex
 
+> **Superseded in part (2026-11-20).** [model.md](model.md) replaces identity, memory, working memory, settlement and inference with a profile and observations. What this file says about those is history; the rest still holds.
+
 A plan for the cortex as separate software, decided in conversation on 14 November 2026. It replaces the cortex design in `plans/build-plan.md` of ohm-content-layer (now ohm-vault) where the two disagree.
 
 ## What cortex is

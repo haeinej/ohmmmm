@@ -1,5 +1,7 @@
 # The cortex, its words, and its history: a guide
 
+> **Superseded in part (2026-11-20).** [model.md](model.md) replaces identity, memory, working memory, settlement and inference with a profile and observations. What this file says about those is history; the rest still holds.
+
 For the person whose cortex it is, and for any agent that keeps one. It explains the words ohm and cortex now share, what is evidence and what is inference, how each part of a cortex joins the graph of a vault, and how every change is recorded with who made it, and undone. [plan.md](plan.md) is the specification; [journal-and-history.md](journal-and-history.md) is the design this came from.
 
 Every person, block and file below is invented. The examples follow one person, Mira Okafor, who writes essays and takes photographs on walks.

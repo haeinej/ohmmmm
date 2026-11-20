@@ -1,12 +1,11 @@
 // Filing advice: one answer to "how should I file this?", built from what cortex already knows.
-// The likely channels come from vault.md, the skill from the approved skills, and related blocks
-// from the vault's own search. Matching is by words; nothing here calls a model.
+// The likely channels come from the vault's channels and what has been observed about each, the
+// skill from the approved skills, and related blocks from the vault's own search. Matching is by words; nothing here calls a model.
 //
 // It reads and never writes: not the cortex, not the vault. Saving is the vault's job, done by
 // the agent through the vault's own tools once the person says yes.
 import { Refused } from './core.mjs';
 import { matcherOf, wordsOf } from './vault.mjs';
-import { parseMap } from './vaultmap.mjs';
 
 const CHANNELS = 3;
 const RELATED = 5;
@@ -29,15 +28,15 @@ function mostUsed(text, count) {
 }
 
 // A channel scores for each of its words the source has: most for the kind, then the title, then
-// the text. A word in the channel's name counts once more than one only in its meaning.
-function channelsFor(source, shape, map) {
+// the text. A word in the channel's name counts once more than one only in what was observed about it.
+function channelsFor(source, shape, notes) {
   const weights = [[matcherOf(source.kind), 3], [matcherOf(source.title), 2], [matcherOf(source.text), 1]];
   const weight = word => Math.max(0, ...weights.filter(([holds]) => holds(word)).map(([, value]) => value));
   const scored = [];
   for (const { channel, blocks } of shape.channels) {
-    const words = map.get(channel) ?? { meaning: '', conventions: '' };
+    const said = notes.get(channel) ?? '';
     const inName = wordsOf(channel.replace(/[/-]/g, ' '));
-    const inMeaning = wordsOf(words.meaning);
+    const inMeaning = wordsOf(said);
     let score = 0;
     const shared = [];
     for (const word of new Set([...inName, ...inMeaning])) {
@@ -49,8 +48,8 @@ function channelsFor(source, shape, map) {
     if (!score) continue;
     const named = shared.filter(word => inName.has(word));
     const meant = shared.filter(word => !inName.has(word));
-    const why = [named.length ? `its name shares ${named.join(', ')} with the source` : '', meant.length ? `its meaning shares ${meant.join(', ')}` : ''].filter(Boolean).join(', and ');
-    scored.push({ score, item: { channel, blocks, ...(words.meaning ? { meaning: words.meaning } : {}), ...(words.conventions ? { conventions: words.conventions } : {}), why: `${why[0].toUpperCase()}${why.slice(1)}` } });
+    const why = [named.length ? `its name shares ${named.join(', ')} with the source` : '', meant.length ? `what was observed about it shares ${meant.join(', ')}` : ''].filter(Boolean).join(', and ');
+    scored.push({ score, item: { channel, blocks, ...(said ? { observed: said } : {}), why: `${why[0].toUpperCase()}${why.slice(1)}` } });
   }
   scored.sort((a, b) => b.score - a.score || a.item.channel.localeCompare(b.item.channel));
   // A channel and its own sub-channel are not both offered: the sub-channel is the more exact place.
@@ -90,7 +89,7 @@ function askFor(channels, related, shape) {
       : 'The vault has no channels yet: where would you like this to go?';
   }
   const [first] = channels;
-  const titled = first.conventions ? `titled the way blocks there are (${first.conventions})` : 'with a title in your words, since no convention is written for that channel yet';
+  const titled = first.observed ? `titled the way blocks there are (${first.observed})` : 'with a title in your words';
   const linked = related.length ? `, linked to ${related.map(block => `"${block.title}"`).join(', ')}` : '';
   return `Shall I file this in ${first.channel}, ${titled}${linked}?`;
 }
@@ -112,8 +111,7 @@ export async function adviseFiling(cortex, given) {
     if (!(problem instanceof Refused)) throw problem;
     return answer({ connected: true, reachable: false, problem: problem.message }, { ask: `The vault cannot be read (${problem.message}), so I cannot say where this goes yet. Shall I wait until it can?` });
   }
-  const map = parseMap(await cortex.vaultMap(), new Set(shape.channels.map(item => item.channel)));
-  const channels = channelsFor(source, shape, map);
+  const channels = channelsFor(source, shape, await cortex.channelNotes());
 
   // A vault that cannot search gives no related blocks, and the rest of the answer stands.
   let related = [];

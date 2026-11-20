@@ -36,7 +36,7 @@ test('a home is named for a handle, and found from anywhere inside it', async t 
   const config = await readFile(join(layout.vault, '.vault', 'config.json'), 'utf8');
   await initHome(parent, 'alice.example.com');
   assert.equal(await readFile(join(layout.vault, '.vault', 'config.json'), 'utf8'), config);
-  assert.match(await readFile(join(layout.cortex, 'identity.md'), 'utf8'), /alice\.example\.com/);
+  assert.match(await readFile(join(layout.cortex, 'profile.md'), 'utf8'), /account: "alice\.example\.com"/);
 });
 
 test('one contract: what cortex asks is what the vault reader answers', () => {

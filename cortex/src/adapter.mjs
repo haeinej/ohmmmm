@@ -2,11 +2,9 @@
 // moment of a session. It reads the cortex folder directly and never waits on the network, so it
 // answers fast whatever the model does. A hook must never break the session it runs in: whatever
 // goes wrong, the command writes nothing and exits 0.
-import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { readMemoryFile } from './core.mjs';
-import { agentName, hooksLog, openCortex } from './folder.mjs';
-import { forAgent } from './identity.mjs';
+import { agentName, hooksLog, openCortex, RECENT } from './folder.mjs';
 import { INSTRUCTIONS } from './tools.mjs';
 
 export const MOMENTS = ['session-start', 'prompt', 'stop', 'session-end'];
@@ -19,10 +17,12 @@ export const MOMENTS = ['session-start', 'prompt', 'stop', 'session-end'];
 // Any other agent gets the smaller budget, since we do not know its limit.
 export const BUDGETS = { 'claude-code': 9999, codex: 6000 };
 export const budgetFor = agent => BUDGETS[same(agent)] ?? BUDGETS.codex;
-export const ASK = 'Before you finish, call cortex_distill with what you noticed this session.';
+export const ASK = 'Before you finish: if you learned something about the person or their vault this session that the next session should know, write it down with cortex_observe. If not, just finish.';
+// The stop hook asks once a session, from this many turns on, so a one-question session is never asked.
+export const ASK_AFTER = 2;
 const POINTER = 'The playbook (agents/AGENTS.md) is too long to include here. Call cortex_start now: it returns the playbook in full. Follow it.';
 
-// Agents are matched the way their working memory files are named, so `Codex` and `codex` agree.
+// Agents are matched by a plain form of their name, so `Codex` and `codex` agree.
 const same = name => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'agent';
 const sessionOf = input => typeof input?.session_id === 'string' && input.session_id ? input.session_id.slice(0, 200) : null;
 // Lengths and cuts count whole characters, so an emoji is never split in two.
@@ -34,14 +34,15 @@ async function cortexAt(dir) {
   if (!found.isFile()) throw new Error(`${dir} is not a cortex`);
 }
 
-// The hooks' checkpoints: a session's start, an ask, and a distill, each { agent, session,
-// started | asked | distilled, version }. They are this machine's bookkeeping for when to ask, not
+// The hooks' checkpoints: a session's start, each turn's end, and an ask, each { agent, session,
+// started | stopped | asked }. They are this machine's bookkeeping for when to ask, not
 // history, so they are kept in .cortex/hooks.jsonl, not the journal. A cortex made before kept them
 // in .cortex/sessions.jsonl, which is still read, first.
 async function sessions(dir) {
   const lines = [];
   for (const path of [join(dir, '.cortex', 'sessions.jsonl'), hooksLog(dir)]) {
-    const content = await readFile(path, 'utf8').catch(problem => { if (problem.code === 'ENOENT') return ''; throw problem; });
+    // A log that cannot be read, say one made a folder, is no checkpoints: the hook still answers.
+    const content = await readFile(path, 'utf8').catch(() => '');
     for (const line of content.split('\n')) {
       if (!line.trim()) continue;
       try { const entry = JSON.parse(line); if (entry && typeof entry === 'object') lines.push(entry); } catch {}
@@ -55,48 +56,6 @@ async function record(dir, entry) {
   await appendFile(hooksLog(dir), `${JSON.stringify(entry)}\n`);
 }
 const tryRecord = (dir, entry) => record(dir, entry).then(() => true, () => false);
-
-async function alwaysMemories(dir) {
-  const found = [];
-  for (const entry of await readdir(join(dir, 'memory'), { withFileTypes: true }).catch(() => [])) {
-    if (!entry.isFile() || !entry.name.endsWith('.md') || entry.name === 'MEMORY.md') continue;
-    try {
-      const memory = readMemoryFile(await readFile(join(dir, 'memory', entry.name), 'utf8'));
-      if (memory.always) found.push(memory);
-    } catch {}
-  }
-  return found.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-// Fits text into max characters by dropping whole lines from its middle: the end, the newest part,
-// is kept first, then as much of the start as fits.
-export function squeeze(text, max) {
-  if (chars(text) <= max) return text;
-  const marker = '(… cut to fit; cortex_start has it in full …)';
-  const room = max - chars(marker) - 2;
-  if (room <= 0) return '';
-  const lines = text.split('\n');
-  const tail = [];
-  let used = 0;
-  for (let at = lines.length - 1; at >= 0; at--) {
-    const size = chars(lines[at]) + 1;
-    if (used + size > Math.floor(room * 0.75)) {
-      // A last line too long to keep whole keeps its end, cut on a character.
-      if (!tail.length) { tail.unshift(Array.from(lines[at]).slice(-Math.floor(room * 0.75)).join('')); used = chars(tail[0]) + 1; }
-      break;
-    }
-    tail.unshift(lines[at]);
-    used += size;
-  }
-  const head = [];
-  for (const line of lines.slice(0, lines.length - tail.length)) {
-    const size = chars(line) + 1;
-    if (used + size > room) break;
-    head.push(line);
-    used += size;
-  }
-  return [...head, marker, ...tail].join('\n');
-}
 
 // Cuts at the last line that fits, never inside a character.
 function headCut(text, max) {
@@ -114,127 +73,88 @@ function headCut(text, max) {
   return [...kept, marker].join('\n');
 }
 
-// The context put in front of the model at session start, cut to fit the agent's budget, in this
-// order: the memory index, then other agents' working memory (oldest first), then the playbook
-// becomes a pointer to cortex_start (and whatever was cut and now fits comes back), then the middle
-// of this agent's own working memory, then of the memories marked always. Open dead ends near the
-// project, at most ten short lines, are never cut before the playbook is.
-// Identity is shown as an agent sees it: confirmed fields only, birthdate hidden, and never a
-// proposal or its evidence.
+// How one observation is shown to the model: one line to start, what it is about, who saw it, when.
+const shown = item => `- ${item.text.replace(/\s+/g, ' ')}${item.about?.length ? ` (about ${item.about.join(', ')})` : ''} [${item.id}, ${item.by}${item.at ? `, ${item.at.slice(0, 10)}` : ''}]`;
+
+// The context put in front of the model at session start, cut to fit the agent's budget: the
+// playbook, the profile, the observations (pinned first, then the newest), and open dead ends near
+// the project. To fit, the oldest observations go first, then the playbook becomes a pointer to
+// cortex_start (and observations come back as they fit), then the end is cut.
 export async function sessionContext(dir, agent, budget = budgetFor(agent), { project } = {}) {
   const cortex = openCortex(dir, { actor: agent });
   // Dead ends recorded near the folder this session works in, so the agent does not try them again.
   const ends = project ? await cortex.deadEnds({ project, limit: 10 }).catch(() => []) : [];
   const endsText = ends.map(item => `- ${item.tried}: ${item.why}${item.check ? ` (check: ${item.check})` : ''} [${item.id}, ${item.agent}, ${item.at.slice(0, 10)}]`).join('\n');
-  const identity = forAgent(await cortex.identity());
-  const always = await alwaysMemories(dir);
-  const index = ((await readFile(join(dir, 'memory', 'MEMORY.md'), 'utf8').catch(() => '')) ?? '').split('\n').filter(line => line.startsWith('- ')).join('\n');
-  const { mine, others } = await cortex.working();
+  const profile = await cortex.profile();
+  const { observations } = await cortex.observations({ limit: 500 });
+  const pinned = observations.filter(item => item.pin);
+  const recent = observations.filter(item => !item.pin).slice(0, RECENT);
   const playbook = (await cortex.rules()).trim();
-  const alwaysText = always.length ? always.map(memory => `### ${memory.name}: ${memory.description}\n${memory.body.trim()}`).join('\n\n') : '(none)';
 
-  const build = ({ full = true, withIndex = true, shown = others, own = mine.text.trim(), kept = alwaysText }) => [
+  const build = ({ full = true, count = recent.length }) => [
     '# Your cortex',
     INSTRUCTIONS,
-    'This was read from the cortex folder as the session started: the playbook, the identity, the memories marked always, the memory index and working memory. cortex_start gives the rest, such as the vault, skills and tools, and the versions you need to write.',
+    'This was read from the cortex folder as the session started. cortex_start gives the rest, such as the vault, skills and tools; cortex_recall finds older observations.',
     '## The playbook (agents/AGENTS.md)',
     full ? playbook : POINTER,
-    '## Identity',
-    JSON.stringify(identity, null, 2),
-    '## Memories marked always',
-    kept,
-    ...(withIndex ? ['## Memory index', index || '(no other memories)'] : []),
-    // Kept like this agent's own working memory: the playbook gives way to a pointer before they do.
+    '## Their profile',
+    `Account: ${profile.account ?? '(not set)'}`,
+    profile.text || '(nothing written yet)',
+    '## Observations',
+    [...pinned, ...recent.slice(0, count)].map(shown).join('\n') || '(none yet)',
     ...(endsText ? ['## Dead ends near this project', endsText] : []),
-    `## Your working memory from last time (${mine.agent})`,
-    own || '(empty)',
-    ...(shown.length ? ["## Other agents' working memory", shown.map(other => `### ${other.agent}, updated ${other.updated}\n${other.text.trim()}`).join('\n\n')] : []),
   ].join('\n\n');
   const fits = text => chars(text) <= budget;
-
   for (const full of [true, false]) {
-    for (const withIndex of [true, false]) {
-      // others are newest first, so the oldest is dropped first.
-      for (let count = others.length; count >= 0; count--) {
-        const text = build({ full, withIndex, shown: others.slice(0, count) });
-        if (fits(text)) return text;
-        if (withIndex) break;
-      }
+    for (let count = recent.length; count >= 0; count--) {
+      const text = build({ full, count });
+      if (fits(text)) return text;
     }
   }
-  const bare = { full: false, withIndex: false, shown: [] };
-  // The room left for one part, with everything else as it is.
-  const spare = (part, parts) => budget - (chars(build({ ...bare, ...parts })) - chars(parts[part]));
-  // Own working memory keeps its end, and drops from the middle of its older part.
-  // It is squeezed first, down to a floor of 1,500 characters; past that the memories marked always
-  // give way.
-  const ownText = mine.text.trim();
-  const floor = Math.min(chars(ownText), 1500);
-  const own = squeeze(ownText, Math.max(spare('own', { own: ownText, kept: alwaysText }), floor)) || '(cut to fit; cortex_start has it)';
-  let text = build({ ...bare, own });
-  if (fits(text)) return text;
-  const kept = squeeze(alwaysText, Math.max(spare('kept', { own, kept: alwaysText }), 0)) || '(cut to fit; cortex_start has them)';
-  text = build({ ...bare, own, kept });
-  return fits(text) ? text : headCut(text, budget);
-}
-
-// Whether this agent's working memory holds state the session has not saved: its version differs
-// from the one at the session's last checkpoint (its start, or its last ask), and it is not the
-// version a distill by this agent left since the session started. A session that never touches
-// working memory has nothing unsaved. Versions, not file times, decide, so clocks never matter.
-function unsaved(lines, who, session, mine) {
-  const ours = lines.filter(entry => same(entry.agent) === who && (entry.session ?? null) === session);
-  const start = ours.find(entry => typeof entry.started === 'string');
-  const last = ours.filter(entry => typeof entry.started === 'string' || typeof entry.asked === 'string').at(-1);
-  const current = mine.version ?? null;
-  const distilled = Boolean(start) && lines.some(entry => same(entry.agent) === who && typeof entry.distilled === 'string' && Object.hasOwn(entry, 'version')
-    && entry.distilled >= start.started && (entry.version ?? null) === current);
-  return { start, changed: Boolean(last) && (last.version ?? null) !== current && !distilled, distilled };
+  return headCut(build({ full: false, count: 0 }), budget);
 }
 
 // Answers one moment. Returns what to write to standard output, which may be nothing, and what to
 // record once it has been written. A record that fails never takes the answer with it.
 export async function hook(moment, { dir, agent: given, input = {}, now = () => new Date() }) {
   if (!MOMENTS.includes(moment)) throw new Error(`No moment ${moment}`);
-  // Fitting memories to the prompt is later work; an empty answer must not slow a prompt.
+  // Fitting observations to the prompt is later work; an empty answer must not slow a prompt.
   if (moment === 'prompt') return { output: '' };
   await cortexAt(dir);
   const agent = agentName(given);
   const who = same(agent);
   const session = sessionOf(input);
-  const { mine } = await openCortex(dir, { actor: agent }).working();
+  const ours = (await sessions(dir)).filter(entry => same(entry.agent) === who && (entry.session ?? null) === session);
 
   if (moment === 'session-start') {
     const context = await sessionContext(dir, agent, budgetFor(agent), { project: typeof input.cwd === 'string' ? input.cwd : undefined });
     const output = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } });
     // A resume or a compaction fires again for the same session; its start is the first one.
     const after = async () => {
-      const lines = await sessions(dir).catch(() => []);
-      if (session && lines.some(entry => same(entry.agent) === who && entry.session === session && typeof entry.started === 'string')) return;
-      await tryRecord(dir, { agent, session, started: now().toISOString(), version: mine.version ?? null });
+      if (session && ours.some(entry => typeof entry.started === 'string')) return;
+      await tryRecord(dir, { agent, session, started: now().toISOString() });
     };
     return { output, after };
   }
 
-  const lines = await sessions(dir);
-  const state = unsaved(lines, who, session, mine);
-
   if (moment === 'stop') {
     // stop_hook_active: the client is already continuing because a stop hook asked.
     if (input.stop_hook_active === true) return { output: '' };
-    // A session with no start line, say one begun before the hooks were installed, starts now.
-    if (!state.start) {
-      await tryRecord(dir, { agent, session, started: now().toISOString(), version: mine.version ?? null });
-      return { output: '' };
+    if (!(await tryRecord(dir, { agent, session, stopped: now().toISOString() }))) return { output: '' };
+    const turns = ours.filter(entry => typeof entry.stopped === 'string').length + 1;
+    // Asked once a session, and only once it has had a few turns.
+    if (turns < ASK_AFTER || ours.some(entry => typeof entry.asked === 'string')) return { output: '' };
+    // An agent that already wrote an observation in this session has done what the ask is for.
+    const start = ours.find(entry => typeof entry.started === 'string')?.started;
+    if (start) {
+      const { observations } = await openCortex(dir, { actor: agent }).observations({ by: agent, limit: 1 });
+      if (observations.some(item => item.at && item.at >= start)) return { output: '' };
     }
-    if (!state.changed) return { output: '' };
-    // The same state is never asked about twice: the ask is a checkpoint with this version.
-    if (!(await tryRecord(dir, { agent, session, asked: now().toISOString(), version: mine.version ?? null }))) return { output: '' };
+    if (!(await tryRecord(dir, { agent, session, asked: now().toISOString() }))) return { output: '' };
     return { output: JSON.stringify({ decision: 'block', reason: ASK }) };
   }
 
-  // session-end records nothing. A session is what the agent writes with cortex_session when it
-  // finishes a task; nothing is captured on its behalf.
+  // session-end records nothing: the agent's turn is over, so it cannot be asked.
   return { output: '' };
 }
 

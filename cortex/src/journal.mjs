@@ -6,24 +6,22 @@
 // ({ kind: human or agent, name }), `session` when there is one, and `type`:
 //
 //   change    a node was created, updated, removed or restored, with its versions before and after,
-//             why, and the evidence it was drawn from. Whoever made it, the person or an agent, is
-//             its actor: an agent edits directly, and the person reverts what they do not want
-//   observation  something an agent saw, waiting to be settled. It changes no file. Lines written
-//             as `note` before the name changed are read as observations (and .cortex/notes.jsonl)
-//   settled   what became of an observation: kept, dropped, or the memory it went into
+//             and why. Whoever made it, the person or an agent, is its actor. Writing an observation
+//             is a change to observation/<id>
 //   session   an agent's record of a task it finished or gave up: what was done, the changes it
 //             made, and the dead ends
 //   save      a name and a note for this point in history, to read the cortex as it was here.
 //             It changes nothing. Lines written as `stamp` before the name changed are read as saves.
 //
-// A journal written while agents' edits waited for the person may also hold `proposal` and
-// `decision` lines. They are still read, and kept as history, but nothing writes them now, and they
-// change nothing: a `decision` about an observation is read as a `settled` line.
+// A journal from before docs/model.md may also hold `observation` and `settled` lines, from when
+// observations waited in the journal to be settled into memories, and `proposal` and `decision`
+// lines from when agents' edits waited for the person. They are still read and kept as history, and
+// `cortex migrate` turns the observations no one settled into observation files. Nothing writes them now.
 import { randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-export const TYPES = ['change', 'observation', 'settled', 'session', 'save'];
+export const TYPES = ['change', 'session', 'save'];
 export const OPS = ['create', 'update', 'remove', 'restore'];
 // Names that mean the person, or the signed-in account. Everyone else is an agent.
 export const PEOPLE = ['member', 'account'];

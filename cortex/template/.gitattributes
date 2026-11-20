@@ -3,9 +3,6 @@
 # A version is worked out from a file's exact text, so line endings are the same on every machine.
 * text=auto eol=lf
 
-# The index is generated, and is rebuilt at the start of every session.
-memory/MEMORY.md linguist-generated merge=union
-
 # The journal is only ever added to, one line each, and every line has its own ID, so two
 # machines' lines are both kept.
 .cortex/journal.jsonl merge=union
@@ -16,8 +13,11 @@ memory/MEMORY.md linguist-generated merge=union
 # Nothing in secrets is shown in a diff, should a file there ever be added by force.
 agents/secrets/** -diff
 
-# Identity changes are only ever added to, one line each, so two machines' lines are both kept.
+# Profile proposals and answers are only ever added to, one line each, so two machines' lines are both kept.
+.cortex/profile.jsonl merge=union
+
+# Identity changes from before docs/model.md. Read, never written again.
 .cortex/identity.jsonl merge=union
 
-# Session starts, asks and distills from before the journal. Read, never written again.
+# Session starts and asks from before the journal. Read, never written again.
 .cortex/sessions.jsonl merge=union
