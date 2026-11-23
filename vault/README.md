@@ -21,6 +21,7 @@ This repository is a Claude Code plugin. Its bundled skills are:
 | --- | --- |
 | [start](skills/start/SKILL.md) | The project's purpose and rules |
 | [vault](skills/vault/SKILL.md) | Working in your notes with the vault's tools |
+| [host-pds](skills/host-pds/SKILL.md) | Hosting your own PDS on Cloudflare with Cirrus and connecting it to ohm |
 | [suggest-labels](skills/suggest-labels/SKILL.md) | Deciding your site's sections with you |
 | [migrate-site](skills/migrate-site/SKILL.md) | Moving a website and social posts in without loss |
 | [build-renderer](skills/build-renderer/SKILL.md) | Making your site's pages build from records |
@@ -309,7 +310,7 @@ pnpm --dir cirrus install --frozen-lockfile
 pnpm --dir cirrus exec wrangler login
 ```
 
-**1. The PDS.** If you already have one, use it. To start one, run `pnpm --dir cirrus pds init`, set up a hostname such as `pds.example.com`, and follow the Cirrus instructions to back up your signing key, verify your handle, and deploy. [Cirrus quick start](https://cirrus.earth/start/quick-start/)
+**1. The PDS.** If you already have one, use it. To start one, run `pnpm --dir cirrus pds init`, set up a hostname such as `pds.example.com`, back up your signing key, verify your handle, and deploy. [Host your own PDS](docs/host-your-pds.md) walks through every step and connecting it to ohm; the Cirrus source it runs is pinned, unchanged, in [vendor/cirrus/](vendor/cirrus/) ([vendor/IMPORTS.json](vendor/IMPORTS.json)).
 
 **2. The site configuration.**
 
@@ -390,6 +391,7 @@ Use the [human repository guide](docs/repository-map.md) to understand where a c
 | Path | What it is |
 | --- | --- |
 | [cirrus/](cirrus/) | The PDS: a Cloudflare Worker with a Durable Object for the repository and R2 for its media |
+| [vendor/](vendor/) | Upstream source kept unchanged at a pinned commit: Cirrus, which [cirrus/](cirrus/) deploys. [vendor/IMPORTS.json](vendor/IMPORTS.json) records where each file came from |
 | [feed/](feed/) | The site Worker: identity, forms, the feeds, post pages, and private posts |
 | [vault/](vault/) | The rules every post follows at any visibility; a post as a file; bringing published posts in; syncing a folder; and the stores a site of your own keeps posts in |
 | [service/](service/) | The vault service: ohm's working copy of a vault, one capability to a file, the editor's page, and [the reference](service/CAPABILITIES.md) for every request |
