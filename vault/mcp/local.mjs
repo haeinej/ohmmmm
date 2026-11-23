@@ -4,11 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { addToVault } from '../vault/add.mjs';
-import { VaultProblem } from '../vault/core.mjs';
+import { blobCid, VaultProblem } from '../vault/core.mjs';
+import { allowed, GRANTS, readGrants } from '../vault/grants.mjs';
+import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
-import { appendEvents, JOURNAL } from '../vault/journal.mjs';
+import { appendEvents, JOURNAL, readEvents } from '../vault/journal.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
+
+// Every version an agent replaced or wrote, by content address, so any agent change can be undone.
+export const HISTORY = '.vault/history';
+const CID = /^b[a-z2-7]{20,}$/;
 import { CANONICAL, CONFIG, readConfig } from '../vault/roots.mjs';
 import { createServer, serve } from './protocol.mjs';
 
@@ -32,7 +38,25 @@ export const LOCAL_TOOLS = [
     block: text, channel: text, position: { type: 'integer', minimum: 0 },
   }, ['block', 'channel']),
   tool('vault_index', 'Scan the local vault and its configured roots. Returns what changed and any problems.', {}),
+  tool('vault_where', 'Where the person\'s knowledge and data live: the vault\'s channels, each configured root (its folder, channel, what it keeps, how many files, and the person\'s note on how to use it), and what you may change. Read it before looking for data or changing anything.', {}, [], true),
+  tool('vault_lint', 'Candidates for a semantic check of the vault: reported problems, links to nothing, orphan blocks, related blocks with no link between them, blocks with the same title, and proposals waiting. You judge them: read, then record conclusions with cortex_observe and fix only within your grant.', {
+    limit: integer(1, 100),
+  }, [], true),
+  tool('vault_history', 'What happened to one vault file, newest first, with the content address of each version kept in history. Use it to find a version to restore.', { path: text, limit: integer(1, 100) }, ['path'], true),
+  tool('vault_write', 'Make or replace a block, channel or entity file, if the person granted you write on its folder. To replace a file, pass its current content address (file.hash from vault_local_read) as replaces. The old version is kept and can be restored. A new block is marked as yours.', {
+    path: text, text, replaces: text,
+  }, ['path', 'text']),
+  tool('vault_remove', 'Remove a block, channel or entity file, if the person granted you write on its folder. Pass its current content address as replaces. The removed version is kept and can be restored.', {
+    path: text, replaces: text,
+  }, ['path', 'replaces']),
+  tool('vault_link', 'Link a block to another block or entity, by adding [[its slug]] to the end of the block, if the person granted you link or write on the block\'s folder. A note says why. Nothing is added if the link is already there.', {
+    from: text, to: text, note: text,
+  }, ['from', 'to']),
+  tool('vault_restore', 'Put a vault file back to a version kept in history (an address from vault_history), if the person granted you write on its folder. Pass the file\'s current content address as replaces when it exists.', {
+    path: text, to: text, replaces: text,
+  }, ['path', 'to']),
 ];
+const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore'];
 
 const refuse = message => { throw new VaultProblem(message); };
 const present = value => typeof value === 'string' && value.trim() && !value.includes('\0');
@@ -115,6 +139,11 @@ function neighbors(db, { ref, direction = 'both', kind, depth = 1 }) {
 }
 
 async function replaceFile(path, before, after) {
+  if (after === undefined) {
+    if (await readFile(path, 'utf8') !== before) refuse('The file changed while removing it. Try again.');
+    await unlink(path);
+    return;
+  }
   const temp = join(dirname(path), `.collect-${randomUUID()}`);
   if (before === undefined) {
     await writeFile(path, after, { flag: 'wx' });
@@ -146,12 +175,68 @@ async function withCollectLock(vault, DatabaseSync, collect) {
   }
 }
 
+const addressOf = text => blobCid(Buffer.from(text, 'utf8'));
+const READABLE = /^[^/]+(?:\/[^/]+)*\.md$/;
+
 export function createLocalTools({ vault, by, DatabaseSync }) {
+  const agent = by.startsWith('agent:') ? by.slice('agent:'.length) : by;
   const rescan = db => scan({ vault, db });
-  const recordChange = async (path, before, after) => {
+  // A version kept once, by its address. Two writes of the same text keep one file.
+  const keep = async text => {
+    const address = await addressOf(text);
+    await mkdir(join(vault, HISTORY), { recursive: true });
+    await writeFile(await ordinaryFile(vault, [...HISTORY.split('/'), address]), text, { flag: 'wx' })
+      .catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
+    return address;
+  };
+  const recordChange = async (path, before, after, via = 'collect') => {
     if (before === after) return;
+    const kept = via === 'collect' ? {} : {
+      ...(before === undefined ? {} : { before: await keep(before) }),
+      ...(after === undefined ? {} : { hash: await keep(after) }),
+    };
     await replaceFile(join(vault, path), before, after);
-    await appendEvents(vault, [{ at: new Date().toISOString(), op: before === undefined ? 'added' : 'changed', root: CANONICAL, path, by, via: 'collect' }]);
+    const op = before === undefined ? 'added' : after === undefined ? 'removed' : 'changed';
+    await appendEvents(vault, [{ at: new Date().toISOString(), op, root: CANONICAL, path, by, via, ...kept }]);
+  };
+  const grants = async () => {
+    const held = await readFile(await ordinaryFile(vault, GRANTS.split('/')), 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+    let value;
+    try { value = held === undefined ? undefined : JSON.parse(held); } catch { refuse(`${GRANTS} is not JSON. The person fixes it.`); }
+    return readGrants(value);
+  };
+  const mayChange = async (right, path) => {
+    const scope = allowed(await grants(), agent, right, path);
+    if (!scope) {
+      const folder = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '*';
+      refuse(`You have no ${right} grant on ${path}. Ask the person; they can run: ohm vault grant ${agent} ${right} ${folder}`);
+    }
+    return scope;
+  };
+  // A file an agent may write: Markdown, inside the vault, not machinery and not a captured source.
+  const writable = path => {
+    if (typeof path !== 'string' || path.length > 1000 || !READABLE.test(path)) refuse('Give the path of a Markdown file inside the vault, such as notes/idea.md.');
+    const parts = path.split('/');
+    if (parts.some(part => part.startsWith('.') || part === '..') || parts[0] === SOURCES) refuse('Agents write blocks, channels and entities; not hidden files, .vault/ or captured sources.');
+    return parts;
+  };
+  const current = async parts => {
+    const file = await ordinaryFile(vault, parts);
+    return readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  };
+  const checkReplaces = async (before, replaces) => {
+    if (before === undefined) {
+      if (replaces !== undefined) refuse('There is no file there to replace. Leave replaces out to make it.');
+      return;
+    }
+    if (typeof replaces !== 'string') refuse('This file exists. Pass its current content address (file.hash from vault_local_read) as replaces.');
+    if (replaces !== await addressOf(before)) refuse('The file has changed since you read it. Read it again with vault_local_read and retry.');
+  };
+  const readable = (path, text) => {
+    const read = readNode(path, text);
+    if (!read) refuse('That path is not a block, channel or entity.');
+    if (read.problems.length) refuse(`Fix the file first: ${read.problems.join(' ')}`);
+    return read.node;
   };
   const calls = {
     vault_local_search: (db, { query, limit = 20 }) => {
@@ -161,6 +246,108 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
     vault_local_read: (db, { ref }) => lookedUp(db, ref),
     vault_neighbors: neighbors,
     vault_index: rescan,
+    vault_lint: (db, { limit = 30 }) => {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) refuse('Give a limit from 1 to 100.');
+      return lint(db, { limit });
+    },
+
+    async vault_where(db) {
+      const configPath = await ordinaryFile(vault, CONFIG.split('/'));
+      const config = await readFile(configPath, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+      const { roots, problems } = readConfig(config && JSON.parse(config), { vault, home: homedir() });
+      const counts = Object.fromEntries(summary(db).byRoot.map(row => [row.root, row]));
+      const kinds = root => Object.fromEntries(db.prepare("SELECT COALESCE(kind, type) AS kind, COUNT(*) AS n FROM nodes WHERE root = ? GROUP BY 1 ORDER BY 2 DESC").all(root).map(row => [row.kind, Number(row.n)]));
+      const channels = db.prepare("SELECT home AS channel, COUNT(*) AS n FROM nodes WHERE type = 'block' AND root = ? GROUP BY home ORDER BY n DESC LIMIT 50").all(CANONICAL)
+        .map(row => ({ channel: row.channel || '(top)', blocks: Number(row.n) }));
+      const { agents, problems: grantProblems } = await grants();
+      return {
+        vault: { root: CANONICAL, files: counts[CANONICAL]?.files ?? 0, kinds: kinds(CANONICAL), channels, writable: true },
+        roots: roots.map(root => ({
+          name: root.name, channel: root.channel, where: root.drive ? 'drive' : 'local', path: root.path, retain: root.retain,
+          include: root.include, exclude: root.exclude, files: counts[root.name]?.files ?? 0, kinds: kinds(root.name),
+          note: root.note ?? null, writable: false,
+        })),
+        you: { agent, grant: agents[agent] ?? {}, always: ['vault_capture into the Inbox, as a proposal', 'vault_collect'] },
+        problems: [...problems, ...grantProblems],
+        read: 'Roots are read where they live and never written: search and read them, and capture a copy to change one. A root without a note is one to ask the person about, then record what they say with cortex_observe about its channel.',
+      };
+    },
+
+    async vault_history(db, { path, limit = 30 }) {
+      writable(path);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) refuse('Give a limit from 1 to 100.');
+      const { events } = await readEvents(vault);
+      const mine = events.filter(event => event.root === CANONICAL && (event.path === path || event.from === path)).reverse().slice(0, limit);
+      const kept = async address => Boolean(address && (await info(join(vault, HISTORY, address)))?.isFile());
+      return {
+        path,
+        events: await Promise.all(mine.map(async event => ({ ...event, ...(event.before ? { beforeKept: await kept(event.before) } : {}), ...(event.hash ? { hashKept: await kept(event.hash) } : {}) }))),
+      };
+    },
+
+    async vault_write(db, { path, text: content, replaces }) {
+      const parts = writable(path);
+      if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content) > 600_000) refuse('Give the file\'s text, at most 600 KB.');
+      await mayChange('write', path);
+      const before = await current(parts);
+      await checkReplaces(before, replaces);
+      let after = content;
+      const node = readable(path, after);
+      if (before === undefined && node.type === 'block' && !node.post && !node.by) after = setProperty(after, 'by', by);
+      readable(path, after);
+      await mkdir(dirname(join(vault, path)), { recursive: true });
+      await recordChange(path, before, after, 'write');
+      await rescan(db);
+      return { path, made: before === undefined, unchanged: before === after, hash: await addressOf(after), ...(before === undefined ? {} : { before: await addressOf(before) }) };
+    },
+
+    async vault_remove(db, { path, replaces }) {
+      const parts = writable(path);
+      await mayChange('write', path);
+      const before = await current(parts);
+      if (before === undefined) refuse('There is no file there.');
+      await checkReplaces(before, replaces);
+      await recordChange(path, before, undefined, 'write');
+      await rescan(db);
+      return { path, removed: true, before: await addressOf(before), restore: 'vault_restore with this path and before as to' };
+    },
+
+    async vault_link(db, { from, to, note }) {
+      if (note !== undefined && (!present(note) || note.length > 500 || note.includes('\n'))) refuse('A note is one line of at most 500 characters.');
+      const source = lookedUp(db, from);
+      if (source.root !== CANONICAL || source.node.type !== 'block') refuse('Link from a block in the vault. Capture a copy first if it is in a read-only root.');
+      const target = lookedUp(db, to);
+      if (!['block', 'entity'].includes(target.node.type) || !target.node.slug) refuse('Link to a block or an entity with a slug.');
+      if (target.key === source.key) refuse('A block does not link to itself.');
+      const path = source.node.path;
+      await mayChange('link', path);
+      const before = await current(path.split('/'));
+      if (before === undefined || readNode(path, before)?.node?.id !== source.node.id) refuse('The block changed. Run vault_index and try again.');
+      const link = `[[${target.node.slug}]]`;
+      if (before.includes(link)) return { from: source.key, to: target.key, unchanged: true };
+      const line = `- ${link}${note ? ` ${note.trim()}` : ''}`;
+      const trimmed = before.replace(/\s+$/, '');
+      const after = `${trimmed}${/\n- \[\[[^\n]*$/.test(trimmed) ? '\n' : '\n\n'}${line}\n`;
+      readable(path, after);
+      await recordChange(path, before, after, 'link');
+      await rescan(db);
+      return { from: source.key, to: target.key, path, line, hash: await addressOf(after) };
+    },
+
+    async vault_restore(db, { path, to, replaces }) {
+      const parts = writable(path);
+      if (typeof to !== 'string' || !CID.test(to)) refuse('Give a content address from vault_history as to.');
+      await mayChange('write', path);
+      const kept = await readFile(await ordinaryFile(vault, [...HISTORY.split('/'), to]), 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+      if (kept === undefined) refuse('That version is not kept in history.');
+      readable(path, kept);
+      const before = await current(parts);
+      await checkReplaces(before, replaces);
+      await mkdir(dirname(join(vault, path)), { recursive: true });
+      await recordChange(path, before, kept, 'restore');
+      await rescan(db);
+      return { path, restored: to, unchanged: before === kept };
+    },
 
     async vault_capture(db, { source, channel = 'inbox', title }) {
       if (!isChannelPath(channel)) refuse('Give the channel’s path.');
@@ -207,17 +394,17 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   return {
     async call(name, args = {}) {
       if (!Object.hasOwn(calls, name)) refuse(`There is no tool named ${name}`);
-      for (const path of [CONFIG, JOURNAL, INDEX, `${INDEX}-wal`, `${INDEX}-shm`]) {
+      for (const path of [CONFIG, GRANTS, JOURNAL, INDEX, `${INDEX}-wal`, `${INDEX}-shm`]) {
         await ordinaryFile(vault, path.split('/'));
       }
       await beneath(vault, CACHE.split('/'));
       const db = await openIndex(vault, { DatabaseSync });
       try {
-        if (['vault_local_search', 'vault_local_read', 'vault_neighbors', 'vault_collect'].includes(name) && !summary(db).scanned) {
+        if (!['vault_index', 'vault_capture', 'vault_history'].includes(name) && !summary(db).scanned) {
           refuse('Run vault_index to scan this vault first.');
         }
         const invoke = () => calls[name](db, args);
-        return await (name === 'vault_collect' ? withCollectLock(vault, DatabaseSync, invoke) : invoke());
+        return await (WRITING.includes(name) ? withCollectLock(vault, DatabaseSync, invoke) : invoke());
       } finally {
         db.close();
       }
@@ -230,7 +417,7 @@ export async function serveLocalVault({ vault, agent, DatabaseSync, input, outpu
   if (!/^[A-Za-z0-9._-]+$/.test(agent)) refuse('Name the agent with letters, digits, dots, underscores or hyphens.');
   if (!(await info(vault))?.isDirectory()) refuse('Select an existing vault folder.');
   const tools = createLocalTools({ vault: await realpath(vault), by: `agent:${agent}`, DatabaseSync });
-  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index to refresh the index. Captures are proposed and collecting files them in channels. Both changes are journaled. Use with a client you trust to read the local vault.';
+  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals and restores need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
   input.setEncoding('utf8');
   await serve(createServer({ tools, list: LOCAL_TOOLS, instructions }), input, output);
 }

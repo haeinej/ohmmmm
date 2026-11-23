@@ -120,29 +120,17 @@ test('two sessions keep separate agent names', async t => {
   const first = await initialize('ada-desk');
   const second = await initialize('ben-laptop');
   assert.notEqual(first.session, second.session);
-  const wrote = await call(first.session, 'cortex_working', { text: 'Drafting the essay on tides.' });
-  assert.equal(wrote.value.agent, 'ada-desk');
-  const other = await call(second.session, 'cortex_working', { text: 'Sorting the reading list.' });
-  assert.equal(other.value.agent, 'ben-laptop');
-  const seen = (await call(second.session, 'cortex_start')).value.working;
-  assert.match(seen.mine.text, /reading list/);
-  assert.deepEqual(seen.others.map(item => item.agent), ['ada-desk']);
+  assert.equal((await call(first.session, 'cortex_observe', { id: 'tides', text: 'Drafting the essay on tides.' })).result.isError, undefined);
+  assert.equal((await call(second.session, 'cortex_observe', { id: 'reading', text: 'Sorts the reading list by month.' })).result.isError, undefined);
+  const seen = (await call(second.session, 'cortex_start')).value.observations;
+  assert.deepEqual(Object.fromEntries(seen.map(item => [item.id, item.by])), { tides: 'ada-desk', reading: 'ben-laptop' });
+  // One session cannot rewrite what another agent wrote.
+  const theirs = seen.find(item => item.id === 'tides');
+  assert.equal((await call(second.session, 'cortex_observe', { id: 'tides', text: 'x', version: theirs.version })).result.isError, true);
   // A client cannot take the person's name.
   const posing = await initialize('member');
-  assert.equal((await call(posing.session, 'cortex_working', { text: 'x' })).value.agent, 'agent-member');
-});
-
-test('a cortex_forget confirmation stays in the session it was issued in', async t => {
-  const { initialize, call } = await served(t);
-  const one = await initialize('ada-desk');
-  const two = await initialize('ada-desk');
-  await call(one.session, 'cortex_remember', { memory: { name: 'likes-tea', description: 'Drinks green tea', kind: 'preference', body: 'Green tea, no sugar.', stated: true } });
-  const asked = await call(one.session, 'cortex_forget', { name: 'likes-tea' });
-  assert.ok(asked.value.confirm);
-  const elsewhere = await call(two.session, 'cortex_forget', { name: 'likes-tea', confirm: asked.value.confirm });
-  assert.equal(elsewhere.result.isError, true);
-  const here = await call(one.session, 'cortex_forget', { name: 'likes-tea', confirm: asked.value.confirm });
-  assert.equal(here.result.isError, undefined);
+  await call(posing.session, 'cortex_observe', { id: 'posing', text: 'Posing as the person.' });
+  assert.equal((await call(posing.session, 'cortex_recall', { id: 'posing' })).value.observation.by, 'agent:member');
 });
 
 test('notifications are accepted with 202, GET offers no stream, and bad messages are refused', async t => {

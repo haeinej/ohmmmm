@@ -66,7 +66,7 @@ test("draft kinds, history and channel moves use the same TID across placements"
   }
 })
 
-test("vault evidence and cortex inference refer to the same block keys and keep separate histories", async () => {
+test("vault evidence and cortex observations refer to the same block keys and keep separate histories", async () => {
   const sampleSource = createSampleSource()
   await setSource(sampleSource)
   try {
@@ -76,16 +76,21 @@ test("vault evidence and cortex inference refer to the same block keys and keep 
     assert.ok(evidence.some(edge => edge.from === garden && edge.kind === "mentions" && edge.to.startsWith("entity:")))
     const graph = buildGraph()
     assert.ok(graph.nodes.some(node => node.id === garden))
-    const inference = byId(fixtureIds.slowness)!
-    assert.equal(inference.kind, "inference")
-    assert.ok(inference.evidence?.length)
-    for (const pointer of inference.evidence) {
+    const observation = byId(fixtureIds.slowness)!
+    assert.equal(observation.kind, "observation")
+    assert.deepEqual(observation.about, [fixtureIds.slow, fixtureIds.tokyo, fixtureIds.dusk])
+    assert.ok(observation.evidence?.length)
+    // An observation about blocks is drawn as their connection, not as a node of its own.
+    const edge = graph.edges.find(each => [each.source, each.target].sort().join() === [blockKey(fixtureIds.slow), blockKey(fixtureIds.dusk)].sort().join())
+    assert.deepEqual(edge?.observed, [observation.title])
+    assert.equal(graph.nodes.some(node => node.doc.id === observation.id), false)
+    for (const pointer of observation.evidence) {
       assert.ok(pointer.node.startsWith("block:"))
       assert.ok(demoJournal().snapshotAt(pointer.version))
     }
-    assert.ok(demoJournal().historyLines("cortex").some(line => line.type === "change" && line.node === inference.id))
+    assert.ok(demoJournal().historyLines("cortex").some(line => line.type === "change" && line.node === observation.id))
     assert.ok(demoJournal().historyLines("vault").some(line => line.type === "change" && line.node === fixtureIds.garden))
-    assert.ok(demoJournal().historyLines("vault").every(line => line.type !== "change" || line.node !== inference.id))
+    assert.ok(demoJournal().historyLines("vault").every(line => line.type !== "change" || line.node !== observation.id))
     assert.equal((await search({ query: "June", scope: "entities" }))[0]?.kind, "entity")
   } finally {
     await setSource()

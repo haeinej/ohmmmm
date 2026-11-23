@@ -60,13 +60,13 @@ test('a module that cannot be loaded, opened or checked is refused with a reason
   await assert.rejects(moduleVault({ module: partial, path: vault }).read('x'), problem => problem.code === 'InvalidVault' && /missing read/.test(problem.message));
 });
 
-test('the person connects a vault with its reader, and cortex keeps vault.md from it', async () => {
+test('the person connects a vault with its reader, and cortex reads its channels', async () => {
   const { base, vault, reader } = await setup();
   const dir = join(base, 'cortex');
   await initCortex(dir, template);
-  await openCortex(dir, { actor: 'member' }).connectVault({ kind: 'module', module: reader, path: vault });
+  const connected = await openCortex(dir, { actor: 'member' }).connectVault({ kind: 'module', module: reader, path: vault });
   assert.deepEqual(JSON.parse(await readFile(join(dir, '.cortex', 'vault.json'), 'utf8')), { kind: 'module', module: reader, path: vault });
-  assert.match(await readFile(join(dir, 'vault.md'), 'utf8'), /## essays\n1 block\./);
+  assert.deepEqual(connected.channels.find(item => item.channel === 'essays'), { channel: 'essays', blocks: 1 });
   // From the command line, with --module before or after the folder.
   const other = join(base, 'cortex-cli');
   execFileSync('node', [cli, 'init', other]);

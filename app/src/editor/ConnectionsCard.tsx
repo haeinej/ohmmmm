@@ -18,7 +18,7 @@ import { connectionCount, ConnectionList } from "./Connected"
 type MiniNode = { id: string; name: string; kind: "self" | "channel" | "block" | "cortex"; go?: () => void }
 type MiniEdge = { to: string; inferred: boolean }
 
-/** Everything one step from the block: its channels, the blocks it connects with, and the cortex items drawn from it. */
+/** Everything one step from the block: its channels, the blocks it connects with, and the observations about it. */
 function neighbourhood(doc: Doc, go: (id: string) => void, reveal: (path: string) => void) {
   const self = evidenceKey(doc.id) ?? blockKey(doc.id)
   const nodes: MiniNode[] = [{ id: self, name: titleOf(doc), kind: "self" }]
@@ -36,8 +36,8 @@ function neighbourhood(doc: Doc, go: (id: string) => void, reveal: (path: string
     if (neighbour) add({ id: other, name: titleOf(neighbour), kind: "block", go: () => go(neighbour.id) })
   }
   for (const c of cortex) {
-    if (c.kind === "inference" && c.evidence?.some(item => item.node === self)) {
-      add({ id: `inference:${c.id}`, name: c.title, kind: "cortex", go: () => go(c.id) }, true)
+    if (c.kind === "observation" && c.about?.includes(doc.id)) {
+      add({ id: `observation:${c.id}`, name: c.title, kind: "cortex", go: () => go(c.id) }, true)
     }
   }
   return { nodes, edges }

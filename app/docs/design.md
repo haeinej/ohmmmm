@@ -55,7 +55,7 @@ Each is one closed shape and one inner mark, on Lucide's 24 grid with a stroke o
 
 ## Graph colours
 
-Only blocks are nodes: grey, and forest when open or lit. Channels are not coloured nodes but areas: a faint ink wash around their blocks with a soft outline, dashed for a channel inside another. Edges are grey for a link in the text and forest for a connection between whole blocks, and their thickness, not their colour, says how strongly two blocks are tied. Red is never used here; it means destructive.
+The graph uses white, grey and ohm's green only, as Obsidian's does. You are a forest circle in the middle. Vault blocks are grey dots and cortex items green diamonds. Folders have no areas: their items cluster together and the folder's name sits above in grey. Lines are grey, and green when lit, and their thickness says how strongly two things are tied. The graph has no key and doesn't write "cortex" or "vault". Red is never used here; it means destructive.
 
 ## The side panel and the editor: one active page
 

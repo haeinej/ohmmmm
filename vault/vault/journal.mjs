@@ -10,7 +10,10 @@
 //          downloaded-from (origin: the address macOS recorded when it was downloaded)
 //   by     me, agent:<name>, or unknown: the vault says who only when it was told
 //   via    add (ohm vault add or vault_capture), collect (vault_collect), hook (an agent's hook),
-//          scan (found by indexing), editor, sync
+//          scan (found by indexing), editor, sync, write (vault_write or vault_remove), link
+//          (vault_link), restore (vault_restore or ohm vault restore)
+//   before the content address of the file as it was, kept in .vault/history/ (agent writes only)
+//   hash   the content address of the file as it is now
 import { execFile, spawn } from 'node:child_process';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -18,7 +21,7 @@ import { promisify } from 'node:util';
 
 export const JOURNAL = '.vault/journal.jsonl';
 export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from'];
-export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync'];
+export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;
 
 // Why an event cannot go in the journal. Empty when it can.
@@ -33,6 +36,7 @@ export function eventProblems(event) {
   if (event.op === 'moved' && typeof event.from !== 'string') problems.push('A move says where from');
   if (['copied-from', 'downloaded-from'].includes(event.op) && typeof event.origin !== 'string') problems.push('It says the origin');
   if (!Number.isFinite(Date.parse(event.at))) problems.push('at is a time');
+  for (const key of ['before', 'hash']) if (event[key] !== undefined && event[key] !== null && !/^b[a-z2-7]{20,}$/.test(event[key])) problems.push(`${key} is a content address`);
   return problems;
 }
 

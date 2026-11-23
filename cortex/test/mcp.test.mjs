@@ -21,14 +21,6 @@ const session = (dir, requests, client = 'claude-code') => {
   const output = execFileSync('node', [cli, 'mcp', dir], { input: `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, encoding: 'utf8' });
   return Object.fromEntries(output.trim().split('\n').map(line => JSON.parse(line)).map(message => [message.id, message]));
 };
-const withBirthdate = async dir => {
-  const person = openCortex(dir, { actor: 'member' });
-  await person.proposeIdentity({ field: 'birthdate', value: '1991-07-14', source: { kind: 'person', quote: 'I was born on 14 July 1991' } });
-  await person.confirmIdentity('birthdate');
-  await person.proposeIdentity({ field: 'city', value: 'Lisbon', source: { kind: 'person', quote: 'Lisbon' } });
-  await person.confirmIdentity('city');
-};
-
 test('a client is told to start with cortex_start, in under 512 characters, and gets the playbook from it', async () => {
   const dir = await fresh();
   await appendFile(join(dir, 'agents', 'AGENTS.md'), '\n- Always answer me in Portuguese.\n');
@@ -37,7 +29,7 @@ test('a client is told to start with cortex_start, in under 512 characters, and 
   assert.deepEqual(Object.keys(capabilities).sort(), ['prompts', 'resources', 'tools']);
   assert.ok(instructions.length <= 512, `${instructions.length} characters`);
   assert.match(instructions, /Call cortex_start before anything else/);
-  assert.match(instructions, /Before you finish, call cortex_distill/);
+  assert.match(instructions, /Record what you learn with cortex_observe/);
   const rules = JSON.parse(answers[1].result.content[0].text).rules;
   assert.match(rules, /# How to keep this cortex/);
   assert.match(rules, /Always answer me in Portuguese/);
@@ -60,48 +52,29 @@ test('the person can pick a prompt to start with their cortex', async () => {
 test('a client can read the cortex as resources, and never a secret', async () => {
   const dir = await fresh();
   await writeFile(join(dir, 'agents', 'secrets', 'calendar.key'), 'not-a-real-key');
-  await writeFile(join(dir, 'vault.md'), '# Sections\n\n- essays: finished writing\n');
-  await openCortex(dir).write({ name: 'prefers-short-titles', description: 'Titles are four words or fewer', kind: 'preference', stated: true, body: 'Keep titles short.' });
+  const person = openCortex(dir, { actor: 'member' });
+  await person.setAccount('did:plc:example0alice');
+  await person.writeProfile('## Preferences\n\n- Titles are four words or fewer\n');
+  await openCortex(dir, { actor: 'claude-code' }).observe({ id: 'titles', text: 'Shortens titles to three words.' });
   const answers = session(dir, [
     { method: 'resources/list' },
     { method: 'resources/read', params: { uri: 'cortex://agents/AGENTS.md' } },
-    { method: 'resources/read', params: { uri: 'cortex://vault.md' } },
-    { method: 'resources/read', params: { uri: 'cortex://memory/prefers-short-titles' } },
+    { method: 'resources/read', params: { uri: 'cortex://profile' } },
+    { method: 'resources/read', params: { uri: 'cortex://observations' } },
+    { method: 'resources/read', params: { uri: 'cortex://observations/titles' } },
     { method: 'resources/read', params: { uri: 'cortex://agents/secrets/calendar.key' } },
-    { method: 'resources/read', params: { uri: 'cortex://memory/../agents/secrets/calendar.key' } },
+    { method: 'resources/read', params: { uri: 'cortex://observations/../agents/secrets/calendar.key' } },
   ]);
   const uris = answers[1].result.resources.map(resource => resource.uri);
-  assert.deepEqual(uris.slice(0, 5), ['cortex://agents/AGENTS.md', 'cortex://identity', 'cortex://vault.md', 'cortex://memory/MEMORY.md', 'cortex://tools']);
-  assert.ok(uris.includes('cortex://memory/prefers-short-titles'));
+  assert.deepEqual(uris.slice(0, 4), ['cortex://agents/AGENTS.md', 'cortex://profile', 'cortex://observations', 'cortex://tools']);
   assert.equal(uris.some(uri => /secret/.test(uri)), false);
   assert.match(answers[2].result.contents[0].text, /# How to keep this cortex/);
-  assert.match(answers[3].result.contents[0].text, /essays: finished writing/);
-  assert.match(answers[4].result.contents[0].text, /Keep titles short/);
-  assert.equal(answers[5].error.code, -32002);
+  const profile = JSON.parse(answers[3].result.contents[0].text);
+  assert.equal(profile.account, 'did:plc:example0alice');
+  assert.deepEqual(profile.sections, [{ heading: 'Preferences', lines: ['Titles are four words or fewer'] }]);
+  assert.equal(JSON.parse(answers[4].result.contents[0].text)[0].id, 'titles');
+  assert.match(answers[5].result.contents[0].text, /three words/);
   assert.equal(answers[6].error.code, -32002);
+  assert.equal(answers[7].error.code, -32002);
   assert.doesNotMatch(JSON.stringify(answers), /not-a-real-key/);
-});
-
-test('birthdate is hidden from agents: they are told one is on file, and nothing returns it', async () => {
-  const dir = await fresh();
-  await withBirthdate(dir);
-  const agent = openCortex(dir, { actor: 'claude-code' });
-  const start = await agent.start();
-  assert.equal(start.identity.city, 'Lisbon');
-  assert.equal(start.identity.birthdate, undefined);
-  assert.deepEqual(start.identity.hidden, ['birthdate']);
-
-  const later = await agent.proposeIdentity({ field: 'birthdate', value: '1991-07-15', source: { kind: 'person', quote: 'I was born on 15 July 1991, not the 14th' } });
-  assert.equal(later.current, '(hidden)');
-  const waiting = (await agent.start()).waiting.identity[0];
-  assert.deepEqual(waiting.source, { kind: 'person', hidden: true }, 'the quote states the date, so it is hidden too');
-  assert.equal(waiting.value, '(hidden)');
-  assert.doesNotMatch(JSON.stringify(await agent.start()), /15 July 1991|1991-07-15/);
-
-  const answers = session(dir, [
-    { method: 'tools/call', params: { name: 'cortex_start', arguments: {} } },
-    { method: 'resources/read', params: { uri: 'cortex://identity' } },
-  ]);
-  assert.doesNotMatch(JSON.stringify(answers), /1991-07-1[45]/);
-  assert.deepEqual(JSON.parse(answers[2].result.contents[0].text).hidden, ['birthdate']);
 });

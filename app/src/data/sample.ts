@@ -78,27 +78,28 @@ export const blocks: Doc[] = [
   },
 ]
 
+// The cortex (cortex/docs/model.md): the profile, what agents observed working with Mira, a skill and a tool.
 export const cortex: Doc[] = [
-  { id: fixtureIds.paragraphs, kind: "memory", title: "Writes in short paragraphs", slug: "short-paragraphs", visibility: "private", updated: "2026-11-01",
-    body: "# Writes in short paragraphs\n\nStated. Keep drafts to short paragraphs; no headings inside a post under 300 words." },
-  { id: fixtureIds.privateFirst, kind: "inference", title: "Prefers private first", slug: "private-first", visibility: "private", updated: "2026-10-12",
-    body: "# Prefers private first\n\nInferred from three sessions. New things start private and are shared later." },
-  { id: fixtureIds.captions, kind: "memory", title: "Photo captions are one line", slug: "photo-captions", visibility: "private", updated: "2026-09-20",
-    body: "# Photo captions are one line\n\nSeen in two sessions, project photos." },
-  { id: fixtureIds.renameJournal, kind: "observation", title: "Asked to rename 'journal'", slug: "rename-journal", visibility: "private", updated: "2026-11-13",
-    body: "# Asked to rename 'journal'\n\nOne session. Might want 'diary'. Not settled." },
+  { id: fixtureIds.paragraphs, kind: "profile", title: "Profile", slug: "profile", visibility: "private", updated: "2026-11-01",
+    body: "# Profile\n\n## Preferences\n\n- Keep drafts to short paragraphs; no headings inside a post under 300 words.\n- New things start private.\n\n## Goals\n\n- Ship the ohm workspace this winter.\n\n## Notes\n\n- Writes in the morning, edits at night." },
+  { id: fixtureIds.privateFirst, kind: "observation", by: "claude-code", title: "Starts everything private", slug: "private-first", visibility: "private", updated: "2026-10-12",
+    body: "# Starts everything private\n\nIn three sessions, new blocks started private and were shared days later." },
+  { id: fixtureIds.captions, kind: "observation", by: "claude-code", about: ["channel:photos"], title: "Photo captions are one line", slug: "photo-captions", visibility: "private", updated: "2026-09-20",
+    body: "# Photo captions are one line\n\nSeen in two sessions, on the photos channel." },
+  { id: fixtureIds.renameJournal, kind: "observation", by: "codex", about: ["channel:writing/journal"], title: "Asked to rename 'journal'", slug: "rename-journal", visibility: "private", updated: "2026-11-13",
+    body: "# Asked to rename 'journal'\n\nOne session. Might want 'diary'." },
   { id: fixtureIds.suggestChannels, kind: "skill", title: "Suggest channels", slug: "suggest-channels", visibility: "private", updated: "2026-10-30",
     body: "# Suggest channels\n\nOffer the plain default and ask." },
   { id: fixtureIds.search, kind: "tool", title: "vault_search", slug: "vault-search", visibility: "private", updated: "2026-10-30",
     body: "# vault_search\n\nSearches the vault by text." },
-  { id: fixtureIds.slowness, kind: "inference", title: "Slowness ties the essays to the photos", slug: "slowness-thread", visibility: "private", updated: "2026-11-15",
-    body: "# Slowness ties the essays to the photos\n\nInferred, not stated. [[slow-software]] links to [[tokyo-walks]]; [[yanaka-dusk]] returns to the same street later; all three were collected into the slowness channel. The essays and the walks argue the same thing in two forms." },
+  { id: fixtureIds.slowness, kind: "observation", by: "claude-code", about: [fixtureIds.slow, fixtureIds.tokyo, fixtureIds.dusk], title: "Slowness ties the essays to the photos", slug: "slowness-thread", visibility: "private", updated: "2026-11-15",
+    body: "# Slowness ties the essays to the photos\n\nNoticed, not said. [[slow-software]] links to [[tokyo-walks]]; [[yanaka-dusk]] returns to the same street later; all three were collected into the slowness channel. The essays and the walks argue the same thing in two forms." },
 ]
 
 export const inbox: InboxItem[] = [
   { id: "i1", kind: "reply", from: "june.example", text: "Writing everything twice is the only way I know.", at: "2026-11-14", ref: fixtureIds.garden, unread: true },
   { id: "i2", kind: "mention", from: "theo.example", text: "Mentioned you in “Owning nothing, kindly”.", at: "2026-11-13", unread: true },
   { id: "i3", kind: "friend", from: "sana.example", text: "Wants to be friends. Friends see blocks you mark for friends.", at: "2026-11-12", unread: true },
-  { id: "i4", kind: "observation", from: "cortex", text: "An observation is waiting to settle: asked to rename “journal”.", at: "2026-11-13", ref: fixtureIds.renameJournal, unread: false },
+  { id: "i4", kind: "observation", from: "cortex", text: "An agent observed: you asked to rename “journal”.", at: "2026-11-13", ref: fixtureIds.renameJournal, unread: false },
   { id: "i5", kind: "reply", from: "sana.example", text: "Day two was the better light.", at: "2026-09-16", ref: fixtureIds.tokyoTwo, unread: false },
 ]

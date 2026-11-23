@@ -41,12 +41,12 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | B1 | Show or hide the panel | Rack Home, or ⌘\ (brings back the panel you last had) | The panel shows or hides; the open block never changes | Make room, or come back to your files | *UI only* |
 | B1a | **Reveal the open block** | Automatic: open a block from anywhere | The rows above it open in the tree; it scrolls into view, is selected and flashes once | Always know where you are | Any tool that opens a block |
 | B1b | Reveal a channel or category from the path | Click a channel or category in the path pill | The panel shows the home with that row open, scrolled to, flashing | Jump from where a block lives to its neighbours | *UI only* |
-| B2 | Choose what shows | Your pill (picture and name) → All, or Cortex and/or Vault | The tree and graph show only those | Focus on memory, or on writing | *UI only* |
+| B2 | Choose what shows | Your pill (picture and name) → All, or Cortex and/or Vault | The tree and graph show only those | Focus on what agents know, or on writing | *UI only* |
 | B3 | Open and close rows | Click a channel or category or the cortex/vault row (each side's ⋯ also has Expand all) | Rows open or close (cortex, vault, channel paths) | Walk the hierarchy | *UI only* |
 | B4 | Expand one side | Cortex or vault ⋯ → Expand all / Collapse all (E) | Everything inside that one opens or closes | Survey one side at once | *UI only* |
 | B5 | Show only one side | Cortex or vault ⋯ → Show only… (O) | The scope becomes that one | Same as B2, from the row | *UI only* |
 | B6 | List or graph | Header: one switch, showing the view it goes to (graph icon in the list, list icon in the graph) | The panel shows the list or the graph of the same scope and filters | Switch between where and how things connect | `workspace.graph` opens the graph |
-| B6a | **Filter** | Header funnel → Platform (your site, Bluesky, Instagram, X), Type (text, photo, table, checklist; memory, observation, skill, tool), Who it is for, Edited (any time, past week, month, year), Status (unread, pinned); Clear | The list and the graph show only matching blocks; folders open so matches are in view; a dot on the funnel while any filter is on; "Nothing matches" with Clear when empty | Find a kind of block across folders | *UI only* |
+| B6a | **Filter** | Header funnel → Platform (your site, Bluesky, Instagram, X), Type (text, photo, table, checklist; profile, observation, skill, tool), Who it is for, Edited (any time, past week, month, year), Status (unread, pinned); Clear | The list and the graph show only matching blocks; folders open so matches are in view; a dot on the funnel while any filter is on; "Nothing matches" with Clear when empty | Find a kind of block across folders | *UI only* |
 | B7 | Resize the panel | Drag its right edge (or arrows on the handle; double-click resets) | Width 220–640 px, remembered on this device | More room for names or the graph | *UI only* |
 | B8 | **New block** | Rack New block, ⌘N, vault ⋯ → New block (N), or channel ⋯ → New block here (N) | A new **private** block open in the editor, title focused, in that channel if chosen | Start writing | `workspace.create` |
 | B9 | Pin | Row ⋯ → Pin (P) | The block shows under Pinned at the top; press again to unpin | Keep what you return to close | *UI only* |
@@ -77,13 +77,14 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| D1 | **See your graph** | Home → graph icon, or ⌘G | Your blocks as nodes, each channel a soft area around its blocks, links in the text grey and connections forest, thicker the more two blocks share | See how what you wrote connects | `workspace.graph` |
-| D2 | Explore | Hover a block | It, its edges and its channels' names light up; the rest fades | Read one node's neighbourhood | *UI only* |
+| D1 | **See your graph** | Home → graph icon, or ⌘G | Obsidian-style, in white, grey and green. You (your profile) in the middle; what agents observed about you, skills and tools as green diamonds close around you, each joined to you; vault blocks as grey dots further out, clustered by channel with the channel's name above. Grey lines are your links; dashed green lines are connections an agent observed. No areas, no names for the two parts, no key | See how your home is organised around you and how it connects | `workspace.graph` |
+| D2 | Explore | Hover an item or a collecting channel | It, its lines and its folders' names light up; the rest fades | Read one node's neighbourhood | *UI only* |
+| D2a | Find a folder in the list | Click a cluster's name in the graph | The list opens with that folder revealed | Go from the map to the files | *UI only* |
 | D3 | Rearrange | Drag a node | Its neighbours follow on soft springs and settle back | Untangle a part to look at | *UI only* |
-| D4 | Zoom and pan | Wheel or pinch, drag the background, or + / − / fit | The view moves; names of blocks and of channels inside channels fade in as you zoom; fit returns to all | Read detail or the whole | *UI only* |
+| D4 | Zoom and pan | Wheel or pinch, drag the background, or + / − / fit | The view moves; item names and folders inside folders fade in as you zoom; names that would overlap are left out; fit returns to all | Read detail or the whole | *UI only* |
 | D5 | **Centre on a person** | A person in search results, or an inbox mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
 | D6 | Back to you | Back to me | All your blocks again | Return | `workspace.graph` |
-| D7 | Filter the graph | Graph settings → Links in the text, Connections, Channel areas; Lay out again | Those edges or nodes show or hide; the layout restarts | Simplify or refresh | *UI only* |
+| D7 | Filter the graph | Graph settings → Connections; Lay out again | The lines show or hide; the layout restarts | Simplify or refresh | *UI only* |
 
 ## E. The block editor (main panel)
 
@@ -131,7 +132,7 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | G3 | Identity | Settings → Identity | Your DID (copy), handle, server | Know and share your root identity | *UI only* |
 | G4 | **Agents** | Settings → Agents → Offer tools to browser agents; one switch per tool | Tools are offered to an agent, or withdrawn, at once | Control what an agent can do here | Governs every tool |
 | G5 | Vault | Settings → Vault | New blocks start private (always); your channels | Review how your vault is organised | *UI only* |
-| G6 | Cortex | Settings → Cortex | Memories, observations waiting, skills | Review what your agents remember | *UI only* |
+| G6 | Cortex | Settings → Cortex | Your profile, how many observations, skills and tools | Review what your agents know about you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
 | G8 | Sign out | Settings → Sign out | A notice (not in the wireframe) | Leave | *Not yet* |
 

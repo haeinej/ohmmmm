@@ -10,7 +10,7 @@ The vault keeps versions of blocks and channels. Cortex keeps versions of its ow
 
 ## How history is kept
 
-- **Every block is a block, cortex items too.** Memories, notes, skills and tools have versions and history like any block.
+- **Every block is a block, cortex items too.** The profile, observations, skills and tools have versions and history like any block.
 - **You and agents both edit directly.** Every change is a line that says what was done, to which block, by whom (you, or an agent by name), when, the versions before and after, and any reason the agent gave. An agent's edits are its versions; you revert the ones you don't want. `withAgent` in `src/workspace/tools.ts` runs every agent tool as that agent, so what it changes is marked as its.
 - **Typing makes one change, not one per key.** Edits to the text by the same person or agent within five minutes join one line.
 - **Sessions are for agents, written when a task is done.** In one line, the session says what the agent did. It groups the changes the agent made since its last session, and lists its **dead ends**: what it tried and dropped, why, and how to recheck. A later agent reads them before it starts, so it doesn't retry them.

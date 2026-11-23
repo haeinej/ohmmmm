@@ -36,26 +36,26 @@ The rack sits on the block itself. The side panel and the main panel are separat
 
 ## The graph
 
-The graph lives in the side panel, in the home. It shows your blocks and how they connect, and nothing else: what agents learn about you stays in the cortex, and is not drawn here.
+The graph lives in the side panel, in the home. It looks and behaves like Obsidian's graph view, in white, grey and ohm's green only. It names no parts and needs no key.
 
-- **Nodes are blocks, and only blocks.** A dot's size is how connected the block is.
-- **Channels are a dimension, not nodes.** Each channel is a soft area drawn around its blocks; a channel inside another is a dashed area inside it. Every block is pulled toward the channels it is in, so a block in two channels settles where their areas meet.
-- **Edges are only yours.** A link written in a block's text (`[[slug]]`) is grey. A connection you made between whole blocks is forest, and hovering it shows why you made it. One line per pair of blocks.
-- **Thickness is strength:** one for each way two blocks are joined (a link, a connection) and one for each channel they share.
+- **You are the middle:** a forest circle with your initial. It stands for your profile; clicking it opens it.
+- **Around you, joined to you by faint green lines:** what your agents observed about you, and their skills and tools, as green diamonds. **Vault blocks** are grey dots and gather further out. These are soft pulls, not fixed rings.
+- **Clusters, without areas.** What is filed together (a channel, a cortex category) clusters in one direction, with the folder's name above it in grey. A channel inside a channel clusters beside its siblings. Clicking a name opens the list with that folder revealed. Neither "cortex" nor "vault" is written anywhere.
+- **Collecting channels.** A channel that only collects blocks filed elsewhere (`slowness`) is a small dashed point out among the vault blocks, joined by dashed lines to what it collects.
+- **Lines are connections**, one per pair: a link written in the text or a connection made between whole blocks, grey (hover it for why); or a connection an agent observed, a dashed green line between blocks an observation is about (hover it to read the observation). Thicker is stronger. An observation about one block shows in that block's connections card.
 
-How it looks and behaves, as Obsidian's graph view does:
+How it behaves, as Obsidian's graph view does:
 
-- **Look:** from ohm's palette only. Blocks grey, the open or lit block forest; channel areas a faint ink wash, with a soft outline (dashed for a channel inside another). Red is never used.
-- **Motion:** a force layout (d3-force) with soft springs, moderate friction and very slow cooling, so nodes drift and settle over seconds like soft rubber. Top-level channels each get their own direction; channels inside them sit close by; links still tug across.
-- **Hover** rings the block, lights its edges in forest and its channels' names, and fades everything else over ohm's open duration.
-- **Drag** pins a block under the pointer, and its neighbours follow on soft springs. Release it and they ease back.
-- **Pan and zoom** (d3-zoom). Top-level channel names always show; names of channels inside them and of blocks fade in as you zoom, and for the hovered block. Where areas overlap, a name that would sit on another is left out.
-- **Fit:** the graph stays fitted to the panel as the panel resizes and the layout settles, until you pan or zoom yourself.
-- **Popover:** turns links in the text, connections and channel areas on or off, and lays the graph out again.
-- **Clicking** a block (or focusing it and pressing Enter) opens it in the main panel.
-- **Centred on someone else** (from search or an inbox mention): only your blocks that mention them; "Back to me" returns.
-- **What it draws:** the vault's blocks the current audience can see, through the home’s filters. With only the cortex in scope, it is empty.
-- **Code:** built in `src/graph/model.ts` (blocks, channels, edges and their strength) and `src/workspace/GraphView.tsx` (forces, areas, interaction, drawing).
+- **Motion:** a force layout (d3-force). Each item is pulled softly toward its cluster's direction and its kind's distance from you; lines tug a little. It settles before it is shown, so it opens in place.
+- **Hover** rings the item, lights its lines in green and its folders' names, and fades the rest.
+- **Drag** pins an item under the pointer; its neighbours follow and ease back on release.
+- **Pan and zoom** (d3-zoom). Cluster names always show; names of inner channels and of items fade in as you zoom, and for the hovered item. Names that would overlap are left out.
+- **Fit:** the graph stays fitted to the panel as it resizes and settles, until you pan or zoom yourself.
+- **Popover:** turns connections on or off, and lays the graph out again.
+- **Clicking** an item (or focusing it and pressing Enter) opens it in the main panel.
+- **Centred on someone else** (from search or an inbox mention): they are the middle, with only your blocks that mention them and no cortex; "Back to me" returns.
+- **What it draws:** what the home's scope (All, Cortex, Vault) includes, that the current audience can see, through the home's filters. The cortex shows only to you, looking as yourself.
+- **Code:** built in `src/graph/model.ts` (items, folders, lines and their strength) and `src/workspace/GraphView.tsx` (clusters, forces, interaction, drawing).
 - **Private blocks** (see ohmmmm's [`vault/plans/encryption.md`](https://github.com/haeinej/ohmmmm/blob/main/vault/plans/encryption.md)): their channels and connections are inside the encrypted files, so this graph is built on the device from decrypted blocks, never by the server.
 
 ## The block editor
