@@ -13,15 +13,16 @@ async function fixture(run) {
   await writeFile(config, JSON.stringify({ vars: { ATPROTO_DID: 'did:web:pds.example.test', ATPROTO_PDS_ORIGIN: 'https://pds.example.test', ATPROTO_SITE_NAMESPACE: 'com.example', SITE_ORIGIN: 'https://example.test' } }));
   await writeFile(preload, `
     import { appendFileSync } from 'node:fs';
+    import { served } from ${JSON.stringify(new URL('./standard.mjs', import.meta.url).href)};
     const did = 'did:web:pds.example.test'; let page = 0;
     const record = { $type: 'com.ohmmmm.post', slug: 'hello', body: 'Words.', label: 'Writing', form: 'note', publishedAt: '2026-01-01T00:00:00.000Z', canonicalUrl: 'https://example.test/posts/writing/hello' };
     globalThis.fetch = async (address, options = {}) => {
       const url = new URL(address), method = url.pathname.split('/').at(-1), mode = process.env.OHM_TEST_MODE;
       const body = options.body && typeof options.body === 'string' ? JSON.parse(options.body) : null;
       appendFileSync(process.env.OHM_TEST_LOG, JSON.stringify({ method, verb: options.method ?? 'GET', body }) + '\\n');
-      if (method.endsWith('listRecords')) return Response.json({ records: [{ uri: 'at://' + did + '/' + url.searchParams.get('collection') + '/3aaaaaaaaaaaa', value: record }], ...(mode === 'cycle' ? { cursor: 'again' } : mode === 'cap' ? { cursor: String(++page) } : {}) });
+      if (method.endsWith('listRecords')) return Response.json({ records: [{ uri: 'at://' + did + '/' + url.searchParams.get('collection') + '/3aaaaaaaaaaaa', value: served(url.searchParams.get('collection'), record, { did, site: 'https://example.test' }) }], ...(mode === 'cycle' ? { cursor: 'again' } : mode === 'cap' ? { cursor: String(++page) } : {}) });
       if (method.endsWith('getRecord')) {
-        if (mode === 'render-key') return Response.json({ uri: 'at://' + did + '/com.ohmmmm.post/' + url.searchParams.get('rkey'), value: record });
+        if (mode === 'render-key') return Response.json({ uri: 'at://' + did + '/' + url.searchParams.get('collection') + '/' + url.searchParams.get('rkey'), value: served(url.searchParams.get('collection'), record, { did, site: 'https://example.test' }) });
         if (mode === 'http') return Response.json({ message: 'down' }, { status: 503 });
         if (mode === 'bad404') return Response.json({ message: 'bad route' }, { status: 404 });
         if (mode === 'missing' || !mode?.startsWith('profile')) return Response.json({ error: 'RecordNotFound' }, { status: 400 });

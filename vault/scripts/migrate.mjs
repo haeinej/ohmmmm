@@ -1,14 +1,17 @@
-// Copy a repository's posts from an older post type, such as com.example.post, to the shared one,
-// com.ohmmmm.post. Each post keeps its key, so its address does not change. The older records are
-// left where they are. Without --publish this reads the repository, prints what would be written,
+// Copy a repository's posts from an older post type, such as com.example.post or com.ohmmmm.post
+// itself, to standard.site documents (site.standard.document) of the member's publication. Each
+// post keeps its key, so its address on the site does not change. The older records are left
+// where they are. Without --publish this reads the repository, prints what would be written,
 // and changes nothing.
 //
 //   migrate [--from com.example.post] [--key KEY] [--config PATH] [--publish]
 //
-// --from defaults to the post type an older site configuration names (ATPROTO_POST_COLLECTION).
+// --from defaults to the post type an older site configuration names (ATPROTO_POST_COLLECTION), and
+// otherwise to com.ohmmmm.post.
 // --key prints one post's new record in full.
 import { parseArgs } from 'node:util';
-import { normalizeArchivePost, pdsConfig, POST } from '../feed/pds.mjs';
+import { normalizeArchivePost, pdsConfig, POST, webUrl } from '../feed/pds.mjs';
+import { DOCUMENT, PUBLICATION, PUBLICATION_KEY, publicationRecord, toDocument } from '../feed/standard.mjs';
 import { upgradePost } from '../feed/upgrade.mjs';
 import { siteVars } from './config.mjs';
 import { rpc, signIn } from './rpc.mjs';
@@ -18,8 +21,8 @@ const graphemes = text => [...new Intl.Segmenter().segment(text)].length;
 const LIMITS = { title: 300, subtitle: 300, label: 100, sublabel: 100 };
 
 // Every record of one type, by key. A PDS may repeat a record across a page boundary.
-async function list(pds, collection) {
-  const { records } = await listRecords({ ...pds, collection, maxPages: 500 });
+async function list(pds, collection, raw = false) {
+  const { records } = await listRecords({ ...pds, collection, maxPages: 500, raw });
   return new Map(records.map(record => [record.uri.split('/').at(-1), record.value]));
 }
 
@@ -48,12 +51,15 @@ try {
   const { values } = parseArgs({
     options: { from: { type: 'string' }, key: { type: 'string' }, config: { type: 'string' }, publish: { type: 'boolean' } },
   });
-  const pds = pdsConfig(await siteVars(values.config));
-  const from = values.from ?? pds.olderCollection;
-  if (!from) throw new Error('Set --from to the post type your posts are under now, such as com.example.post');
-  if (from === POST) throw new Error(`Posts under ${POST} are already where they belong`);
+  const vars = await siteVars(values.config);
+  const pds = pdsConfig(vars);
+  const site = webUrl(vars.SITE_ORIGIN);
+  const from = values.from ?? pds.olderCollection ?? POST;
+  if (from === DOCUMENT) throw new Error(`Posts kept as ${DOCUMENT} are already where they belong`);
+  if (!site) throw new Error('Set SITE_ORIGIN in the feed config: the posts are documents of the website\'s publication');
 
-  const older = await list(pds, from);
+  const older = await list(pds, from, true);
+  // Posts already kept as documents, read back as posts.
   const there = await list(pds, POST);
   const posts = [];
   for (const [key, value] of older) {
@@ -61,7 +67,7 @@ try {
     const { record, left, moved } = upgradePost(value, { did: pds.did, key, namespace: pds.namespace });
     const wrong = problems(record, key, pds);
     posts.push({
-      key, record, left, moved,
+      key, record, document: toDocument(record, { did: pds.did, site }), left, moved,
       state: there.has(key) ? 'already there' : wrong.length ? 'cannot be copied' : 'to copy',
       ...(wrong.length ? { problems: wrong } : {}),
     });
@@ -75,11 +81,21 @@ try {
     let copied = 0;
     if (values.publish) {
       const token = await signIn(pds.origin, pds.did);
+      // The publication comes first: every document names it.
+      if (posts.some(found => found.state === 'to copy')) {
+        const held = await rpc(pds.origin, 'com.atproto.repo.getRecord', { query: { repo: pds.did, collection: PUBLICATION, rkey: PUBLICATION_KEY } });
+        if (!held.response.ok) {
+          const made = await rpc(pds.origin, 'com.atproto.repo.createRecord', {
+            body: { repo: pds.did, collection: PUBLICATION, rkey: PUBLICATION_KEY, record: publicationRecord({ site }) }, token,
+          });
+          if (!made.response.ok) throw new Error(`Making the publication failed (HTTP ${made.response.status}); nothing was copied`);
+        }
+      }
       for (const post of posts.filter(found => found.state === 'to copy')) {
         const created = await rpc(pds.origin, 'com.atproto.repo.createRecord', {
-          body: { repo: pds.did, collection: POST, rkey: post.key, record: post.record }, token,
+          body: { repo: pds.did, collection: DOCUMENT, rkey: post.key, record: post.document }, token,
         });
-        if (!created.response.ok || created.data.uri !== `at://${pds.did}/${POST}/${post.key}`) {
+        if (!created.response.ok || created.data.uri !== `at://${pds.did}/${DOCUMENT}/${post.key}`) {
           throw new Error(`Copying ${post.key} failed (HTTP ${created.response.status}) after ${copied} posts were copied. Run the command again to continue; posts already copied are skipped.`);
         }
         post.state = 'copied';
@@ -87,9 +103,9 @@ try {
       }
     }
     console.log(JSON.stringify({
-      from, to: POST, repository: `at://${pds.did}`,
+      from, to: DOCUMENT, repository: `at://${pds.did}`,
       found: posts.length, toCopy: count('to copy'), copied, alreadyThere: count('already there'), cannotBeCopied: count('cannot be copied'),
-      // Fields the shared schema has no place for, with how many posts hold each. The first set is
+      // Fields the post has no place for, with how many posts hold each. The first set is
       // kept in your own layer, under each post's `site`: declare them in your postSite schema. The
       // second is not kept.
       movedToSite: tally(posts, 'moved'),
