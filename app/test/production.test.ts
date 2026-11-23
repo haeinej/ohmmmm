@@ -185,3 +185,89 @@ test("declining a proposal removes it at the source", async () => {
     await setSource(null)
   }
 })
+
+test("saving keeps every property the workspace doesn't edit, for blocks and cortex files", async () => {
+  const { fileOf } = await import("../src/data/block-document")
+  const { cortexDocOf, cortexFileOf } = await import("../src/data/cortex-document")
+  const { docOf } = await import("../src/data/block-document")
+  const ref: BlockRef = { id: newNodeId(), layer: "friends", store: "block" }
+  const base = { path: "photos/dusk.md", text: "---\nkind: media\ntitle: Dusk\nvisibility: friends\norigin: /photos/dusk.jpg\nhash: sha256-ab\nalt: A street at dusk\ncreated: 2026-09-16\ntags: [street]\n---\n\nThe same street, later.\n" }
+  const doc = { ...docOf(ref, base).doc, icon: "🌆", body: "The same street, much later." }
+  const saved = fileOf(doc, base)
+  for (const kept of ["origin: /photos/dusk.jpg", "hash: sha256-ab", "alt: A street at dusk", "created: 2026-09-16", "tags:"]) assert.ok(saved.text.includes(kept), kept)
+  assert.match(saved.text, /icon: /)
+  assert.match(saved.text, /\n\nThe same street, much later\.\n$/)
+  const observation = { id: "fixture-opaque-observation", version: "o1", path: "observations/dusk.md", text: "---\nby: claude-code\nsession: s-12\nevidence: [block:abc@v1]\n---\n\nShe walks at dusk.\n" }
+  const changed = cortexFileOf({ ...cortexDocOf(observation)!, body: "She walks at dusk, often." }, observation)
+  assert.ok(changed.text.includes("session: s-12") && changed.text.includes("evidence:"))
+  assert.equal(changed.path, "observations/dusk.md")
+})
+
+test("ordering, moving channels and keeping proposals stay inside what the screen and the layers allow", async () => {
+  const fixture = createFixtureSource()
+  await setSource(fixture)
+  try {
+    const { moveBlock, keepProposal: keep } = await import("../src/workspace/store")
+    // Only readable slugs go into a channel's readable order; a private block's place is not written there.
+    const result = await moveBlock(fixtureIds.monday, "writing/journal", "writing/journal", { before: fixtureIds.garden })
+    assert.equal(result.ordered, false)
+    await moveBlock(fixtureIds.tokyoTwo, "photos/tokyo", "photos/tokyo", { before: fixtureIds.tokyo })
+    const order = (await fixture.channels.read("photos/tokyo")).text
+    assert.match(order, /order:/)
+    const privateSlugs = blocks.filter(doc => doc.visibility === "private").map(doc => doc.slug)
+    for (const slug of privateSlugs) assert.ok(!order.includes(slug), slug)
+    // The tool takes only what the screen offers: an existing channel outside the inbox.
+    await assert.rejects(keep(fixtureIds.proposal, "inbox/later"), { name: "DataError" })
+    await assert.rejects(keep(fixtureIds.proposal, "nowhere"), { name: "DataError" })
+  } finally {
+    await setSource(null)
+  }
+})
+
+test("with the private layer locked, channel moves and removals are refused, and a reload keeps this device's history", async () => {
+  const fixture = createFixtureSource()
+  const locked = { ...fixture, listBlocks: (layers?: readonly ("public" | "friends" | "private")[]) => {
+    if (layers?.includes("private")) throw Object.assign(new Error("Unlock this account's private vault on this device."), { code: "PrivateLocked" })
+    return fixture.listBlocks(layers)
+  } }
+  await setSource(locked)
+  try {
+    const { privateLayer } = await import("../src/data/workspace-data")
+    assert.equal(privateLayer, "locked")
+    const { renameChannel, deleteChannel: remove } = await import("../src/workspace/store")
+    await assert.rejects(renameChannel("photos", "pictures"), { name: "InvalidStateError" })
+    await assert.rejects(remove("reading"), { name: "InvalidStateError" })
+  } finally {
+    await setSource(null)
+  }
+  await setSource(fixture)
+  try {
+    const { journalOf } = await import("../src/data/workspace-data")
+    const { collect, reload } = await import("../src/workspace/store")
+    await collect(fixtureIds.garden, "reading")
+    const mine = journalOf().linesFor(fixtureIds.garden).at(-1)!
+    await reload()
+    assert.equal(journalOf().changeById(mine.id)?.after, mine.after)
+    assert.ok(journalOf().snapshotAt(mine.after))
+  } finally {
+    await setSource(null)
+  }
+})
+
+test("one unreadable file is left out; the rest of the home opens", async () => {
+  const fixture = createFixtureSource()
+  const flaky = { ...fixture, readBlock: (ref: BlockRef) => {
+    if (ref.id === fixtureIds.garden) throw new Error("The post changed visibility. Refresh the vault.")
+    return fixture.readBlock(ref)
+  } }
+  await setSource(flaky)
+  try {
+    const { unreadable } = await import("../src/data/workspace-data")
+    assert.equal(homeStatus(), "ready")
+    assert.equal(unreadable, 1)
+    assert.equal(byId(fixtureIds.garden), undefined)
+    assert.ok(byId(fixtureIds.slow))
+  } finally {
+    await setSource(null)
+  }
+})

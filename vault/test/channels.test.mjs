@@ -37,6 +37,26 @@ test('a channel is kept as its file, with compare-and-set and a change list', as
   refused({ path: 'walks', text: CHANNEL, extra: 1 });
 });
 
+test('a channel move takes only what is inside it: no wildcards, no case folding, no overwriting', async () => {
+  const db = await testDatabase();
+  const store = channelStore(db), blocks = blockStore(db);
+  const underscore = await store.write(me, { path: 'to_read', text: CHANNEL });
+  await store.write(me, { path: 'to-read', text: CHANNEL });
+  await store.write(me, { path: 'to-read/novels', text: CHANNEL });
+  await store.write(me, { path: 'Walks/seoul', text: CHANNEL });
+  const walks = await store.write(me, { path: 'walks', text: CHANNEL });
+  // `_` and `%` in a path are characters, and case matters.
+  assert.deepEqual(await store.move(me, 'to_read', 'later', { replaces: underscore.version }), { from: 'to_read', to: 'later', channels: 1, blocks: 0 });
+  await store.move(me, 'walks', 'hikes', { replaces: walks.version });
+  assert.deepEqual((await store.list(me)).channels.map(each => each.path).sort(), ['Walks/seoul', 'hikes', 'later', 'to-read', 'to-read/novels']);
+  await store.remove(me, 'later', { replaces: (await store.read(me, 'later')).version });
+  // A folder with no _channel.md holding a block at the moved block's new path is refused, not a server error.
+  const hikes = await store.read(me, 'hikes');
+  await blocks.write(me, block('hikes/cliff.md'));
+  await blocks.write(me, block('trails/cliff.md'));
+  await assert.rejects(store.move(me, 'hikes', 'trails', { replaces: hikes.version }), refusal('PathTaken'));
+});
+
 test('a channel is removed only when empty, and moves with everything filed in it', async () => {
   const db = await testDatabase();
   const store = channelStore(db), blocks = blockStore(db);

@@ -86,5 +86,12 @@ export function mediaStore(bucket, images) {
   };
 }
 
-const headers = type => ({ 'Content-Type': type, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+// Media is served on the app's own address, so what it holds must never run there: a sandbox with
+// nothing allowed, and anything that is not a plain picture is a download, never a page.
+const SHOWN = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
+const headers = type => ({
+  'Content-Type': type, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+  ...(SHOWN.has(type.split(';')[0].trim().toLowerCase()) ? {} : { 'Content-Disposition': 'attachment' }),
+});
 const file = held => new Response(held.body, { headers: headers(held.httpMetadata?.contentType ?? 'application/octet-stream') });

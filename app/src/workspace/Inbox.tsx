@@ -98,9 +98,17 @@ export function ProposalView({ id }: { id: string }) {
     if (!item) return
     const ac = new AbortController()
     const approve = (action: Asking["action"], into?: string) => (_input: unknown, signal: AbortSignal) => new Promise<boolean>((resolve, reject) => {
-      const done = (ok: boolean) => { setAsking(null); resolve(ok) }
-      signal.addEventListener("abort", () => { setAsking(null); reject(new DOMException("Cancelled", "AbortError")) }, { once: true })
-      setAsking({ action, channel: into, resolve: done })
+      // Each call clears only its own dialog: a later abort of a call already answered does nothing.
+      const mine: Asking = { action, channel: into, resolve: ok => finish(() => resolve(ok)) }
+      const finish = (then: () => void) => {
+        signal.removeEventListener("abort", aborted)
+        setAsking(current => current === mine ? null : current)
+        then()
+      }
+      const aborted = () => finish(() => reject(new DOMException("Cancelled", "AbortError")))
+      if (signal.aborted) return aborted()
+      signal.addEventListener("abort", aborted, { once: true })
+      setAsking(mine)
     })
     registerStepTool({
       name: "inbox.keep",

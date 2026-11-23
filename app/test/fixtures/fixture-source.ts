@@ -60,7 +60,7 @@ export function createFixtureSource() {
   const channelHead = (path: string): ChannelHead => ({ path, version: versionOf({ path, text: channels.get(path) }) })
 
   function vaultOf(layers: readonly Layer[] = allLayers) {
-    const files = blocks.filter(doc => layers.includes(doc.visibility)).map(fileOf)
+    const files = blocks.filter(doc => layers.includes(doc.visibility)).map(doc => fileOf(doc))
     const channelFiles = [...channels].map(([path, text]) => ({ path: `${path}/_channel.md`, text }))
     const entityFiles = entities.map(person => ({
       path: `_entities/person/${person.handle}.md`,
@@ -220,7 +220,7 @@ export function createFixtureSource() {
       rendition: mediaOf,
     },
     async agenda() {
-      const read = blocks.map(fileOf).map(file => readNode(file.path, file.text)?.node)
+      const read = blocks.map(doc => fileOf(doc)).map(file => readNode(file.path, file.text)?.node)
       return {
         unlabelled: blocks.filter(doc => doc.homeChannel === "other").length,
         proposed: read.filter(node => node && "status" in node && node.status === "proposed").length,

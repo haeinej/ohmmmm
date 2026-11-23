@@ -37,6 +37,15 @@ test('readable media is kept under its content address, per member, and sealed m
   const answered = await media.get(me, name);
   assert.equal(answered.headers.get('Content-Type'), 'image/png');
   assert.equal(await answered.text(), 'a small picture');
+  assert.match(answered.headers.get('Content-Security-Policy'), /^sandbox/);
+  assert.equal(answered.headers.get('Content-Disposition'), null);
+  // Anything that could run as a page on the app's address is a sandboxed download.
+  const page = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const svg = await mediaHash(page);
+  await media.put(me, svg, page, { type: 'image/svg+xml' });
+  const served = await media.get(me, svg);
+  assert.equal(served.headers.get('Content-Disposition'), 'attachment');
+  assert.match(served.headers.get('Content-Security-Policy'), /^sandbox/);
 
   const sealed = opaque();
   await media.put(me, sealed, new Uint8Array([1, 2, 3]));

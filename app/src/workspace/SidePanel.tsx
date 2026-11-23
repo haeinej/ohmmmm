@@ -182,7 +182,8 @@ function useTreeDragDrop(ref: React.RefObject<HTMLDivElement | null>, deps: unkn
         const from = was.from ?? locationOf(doc)
         const into = t.channel, copy = e.altKey
         void report(moveBlock(id, from, into, { keep: copy, ...(t.where === "before" ? { before: t.block } : t.where === "after" ? { after: t.block } : {}) })
-          .then(({ published }) => notify({ message: from === into ? `Moved within ${shown(into)}`
+          .then(({ published, ordered }) => notify({ message: from === into && !ordered && t.where !== "into" ? "A private block's place in a channel's order isn't kept yet"
+            : from === into ? `Moved within ${shown(into)}`
             : `${copy ? "Added" : "Moved"} “${titleOf(doc)}” to ${shown(into)}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })))
       } catch (err) { notify({ message: (err as Error).message }) }
     }

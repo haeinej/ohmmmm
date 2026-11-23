@@ -86,6 +86,8 @@ export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly Journ
 
   let seq = 0
   const baseline = new Map<string, string>()
+  /** Every node this device has held while this journal was open. */
+  const held = new Set<string>()
   const lineId = () => `${Date.now().toString(36)}-${(++seq).toString(36)}`
   function push<L extends Line>(line: Omit<L, "seq" | "id">): L {
     const full = { ...line, seq: seq + 1, id: lineId() } as L
@@ -104,7 +106,13 @@ export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly Journ
 
   const changeById = (id: string) => historyLines().find((l): l is ChangeLine => l.type === "change" && l.id === id)
   const linesFor = (node: string) => historyLines().filter((l): l is ChangeLine => l.type === "change" && l.node === node)
-  const currentVersion = (node: string): string | undefined => linesFor(node).at(-1)?.after ?? baseline.get(node)
+  // What a node is now: its last line made on this device, else what it held when this journal
+  // opened. A line the journal brought in is history, not now: the file may have changed since,
+  // on another device, and that is not a change by whoever acts here next.
+  const currentVersion = (node: string): string | undefined => {
+    const last = linesFor(node).at(-1)
+    return last && last.seq > openedAt ? last.after : baseline.get(node) ?? last?.after
+  }
   const snapshotAt = (version: string) => versions.get(version)
 
   const words = (s: string) => s.split(/\s+/).filter(Boolean).length
@@ -166,6 +174,7 @@ export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly Journ
    */
   function syncJournal(next?: { op: ChangeOp; reason?: string }) {
     const all = docs()
+    for (const p of all) held.add(p.id)
     for (const p of all) {
       const s = snap(p)
       const held = currentVersion(p.id)
@@ -175,7 +184,9 @@ export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly Journ
     const here = new Set(all.map(p => p.id))
     for (const node of new Set(historyLines().flatMap(l => (l.type === "change" ? [l.node] : [])))) {
       const last = linesFor(node).at(-1)!
-      if (here.has(node) || last.op === "remove") continue
+      // Only what this device held can be seen to go: a node the journal names that never loaded
+      // here (locked, or unreadable) is not removed by anyone.
+      if (here.has(node) || last.op === "remove" || !held.has(node)) continue
       const { seq: _s, id: _i, reason: _r, ...rest } = last
       push<ChangeLine>({ ...rest, at: new Date().toISOString(), actor: acting, op: "remove", fields: [], before: last.after, summary: "Removed it" })
     }
@@ -198,8 +209,10 @@ export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly Journ
     for (const [version, snapshot] of Object.entries(snapshots ?? {})) versions.set(version, snapshot)
     journals[line.owner].push({ ...line, seq: ++seq } as Line)
   }
+  const openedAt = seq
   // Every node here starts at its current version, so the first change made on this device has a before.
   for (const doc of docs()) {
+    held.add(doc.id)
     baseline.set(doc.id, versionOf(snap(doc)))
     versions.set(versionOf(snap(doc)), snap(doc))
   }

@@ -1,7 +1,8 @@
 // A cortex file (cortex/docs/model.md) as the workspace shows it, and back. The files are opened on
 // this device; the service holds them sealed. `profile.md`, `observations/<slug>.md`,
 // `skills/<slug>.md` and `tools/<slug>.md`, each Markdown with a few properties at the top.
-import { readProperties, splitFile, writeNoteFile } from "../../../vault/vault/file.mjs"
+import { readProperties, setProperty, splitFile, writeNoteFile } from "../../../vault/vault/file.mjs"
+import { withBody } from "./block-document"
 import type { CortexFile, HomeFile } from "./source"
 import { CORTEX_FOLDERS, type CortexKind, type Doc } from "./workspace-model"
 
@@ -29,18 +30,15 @@ export function cortexDocOf(file: CortexFile): Doc | undefined {
   }
 }
 
-export function cortexFileOf(doc: Doc): HomeFile {
+/** A cortex file. Given the file it was read from, it keeps every property the workspace doesn't edit (an observation's evidence, session, a skill's or tool's own fields). */
+export function cortexFileOf(doc: Doc, base?: HomeFile): HomeFile {
   const kind = doc.kind as CortexKind
   if (!(kind in CORTEX_FOLDERS)) throw new DOMException("Give a cortex file.", "DataError")
-  const path = kind === "profile" ? "profile.md" : `${CORTEX_FOLDERS[kind]}/${doc.slug}.md`
-  return {
-    path,
-    text: writeNoteFile({
-      properties: {
-        title: doc.title || undefined, by: doc.by, updated: doc.updated || undefined,
-        about: doc.about?.map(item => item.startsWith("channel:") ? item : `block:${item}`),
-      },
-      body: doc.body,
-    }),
+  const path = base?.path ?? (kind === "profile" ? "profile.md" : `${CORTEX_FOLDERS[kind]}/${doc.slug}.md`)
+  const properties = {
+    title: doc.title || undefined, by: doc.by, updated: doc.updated || undefined,
+    about: doc.about?.map(item => item.startsWith("channel:") ? item : `block:${item}`),
   }
+  if (!base) return { path, text: writeNoteFile({ properties, body: doc.body }) }
+  return { path, text: withBody(Object.entries(properties).reduce((text, [key, value]) => setProperty(text, key, value), base.text), doc.body) }
 }

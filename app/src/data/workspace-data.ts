@@ -30,6 +30,8 @@ export let entities: Entity[] = []
 export let agenda: Agenda | null = null
 export let privateLayer: Sealed = "locked"
 export let cortexState: Sealed = "locked"
+/** Files the last read could not open, left out of the projection. */
+export let unreadable = 0
 let journal = createJournal([])
 let vault: VaultContents = readVault([])
 let edges: VaultEvidence = []
@@ -106,31 +108,48 @@ export async function selectSource(given: HomeSource | HomeSource<"sync"> | null
     project()
     return true
   }
+  const before = { source, status }
+  // Reading the same home again keeps this device's timeline: the block changes made here live
+  // only in it.
+  const carried = next === source ? journal.historyLines().map(line => journal.entryOf(line)) : []
   source = next
   status = "loading"
-  const [account, heads, channels, sealedCortex, entries, waiting] = await Promise.all([
-    next.account(),
-    Promise.resolve().then(() => next.listBlocks(["public", "friends", "private"])).then(
-      list => ({ list, sealed: "open" as Sealed }),
-      async problem => ({ list: await next.listBlocks(["public", "friends"]), sealed: sealedState(problem) })),
-    next.channels.list().then(list => Promise.all(list.map(head => next.channels.read(head.path)))),
-    next.cortex.list().then(list => ({ list, sealed: "open" as Sealed }), problem => ({ list: [] as CortexFile[], sealed: sealedState(problem) })),
-    next.cortex.journal().catch(() => []),
-    next.agenda().catch(() => null),
-  ])
-  const files = await Promise.all(heads.list.map(async ref => [ref, await next.readBlock(ref)] as [BlockHead, BlockFile]))
-  if (attempt !== selection) return false
-  held = new Map(files.map(([ref, { version, ...file }]) => [ref.id, { ref: { id: ref.id, layer: ref.layer, store: ref.store }, file, version }]))
-  channelFiles = new Map(channels.map(channel => [channel.path.replace(/\/_channel\.md$/, ""), { text: channel.text, version: channel.version }]))
-  cortexFiles = new Map(sealedCortex.list.map(file => [file.id, file]))
-  privateLayer = heads.sealed
-  cortexState = sealedCortex.sealed
-  agenda = waiting
-  owner = { did: account.did ?? "", handle: account.did ?? "", name: account.user.name }
-  project()
-  journal = createJournal(() => [...blocks, ...inbox, ...cortex], entries.map(each => each.entry).filter(isJournalEntry) as JournalEntry[])
-  status = "ready"
-  return true
+  try {
+    const [account, heads, channels, sealedCortex, entries, waiting] = await Promise.all([
+      next.account(),
+      Promise.resolve().then(() => next.listBlocks(["public", "friends", "private"])).then(
+        list => ({ list, sealed: "open" as Sealed }),
+        async problem => ({ list: await next.listBlocks(["public", "friends"]), sealed: sealedState(problem) })),
+      next.channels.list().then(list => Promise.allSettled(list.map(head => next.channels.read(head.path)))),
+      next.cortex.list().then(list => ({ list, sealed: "open" as Sealed }), problem => ({ list: [] as CortexFile[], sealed: sealedState(problem) })),
+      next.cortex.journal().catch(() => []),
+      next.agenda().catch(() => null),
+    ])
+    // One file that can't be read (it changed layer since the list, or its key isn't here) is left
+    // out and counted; it doesn't keep the rest of the home from opening.
+    const reads = await Promise.allSettled(heads.list.map(async ref => [ref, await next.readBlock(ref)] as [BlockHead, BlockFile]))
+    if (attempt !== selection) return false
+    const files = reads.flatMap(read => read.status === "fulfilled" ? [read.value] : [])
+    const channelReads = channels.flatMap(read => read.status === "fulfilled" ? [read.value] : [])
+    unreadable = reads.length - files.length + channels.length - channelReads.length
+    held = new Map(files.map(([ref, { version, ...file }]) => [ref.id, { ref: { id: ref.id, layer: ref.layer, store: ref.store }, file, version }]))
+    channelFiles = new Map(channelReads.map(channel => [channel.path.replace(/\/_channel\.md$/, ""), { text: channel.text, version: channel.version }]))
+    cortexFiles = new Map(sealedCortex.list.map(file => [file.id, file]))
+    privateLayer = heads.sealed
+    cortexState = sealedCortex.sealed
+    agenda = waiting
+    owner = { did: account.did ?? "", handle: account.did ?? "", name: account.user.name }
+    project()
+    const kept = entries.map(each => each.entry).filter(isJournalEntry) as JournalEntry[]
+    const seen = new Set(carried.map(entry => entry.line.id))
+    journal = createJournal(() => [...blocks, ...inbox, ...cortex], [...kept.filter(entry => !seen.has(entry.line.id)), ...carried])
+    status = "ready"
+    return true
+  } catch (problem) {
+    // Nothing was replaced: the home stays as it was shown, and the caller hears why.
+    if (attempt === selection) ({ source, status } = before)
+    throw problem
+  }
 }
 
 // ─── What a write changes here, once the source has answered ─────────────────

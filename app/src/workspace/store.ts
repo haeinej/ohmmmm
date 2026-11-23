@@ -2,7 +2,7 @@
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
 import { useSyncExternalStore } from "react"
-import { blockVersion, byId, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel, inbox,
+import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel, inbox,
   inOrder, isBlock, journalOf, landBlock, landChannel, landCortex, heldCortex, owner, blocks, selectSource,
   type Audience, type Doc, type Visibility,
 } from "@/data/workspace-data"
@@ -50,8 +50,8 @@ export function report<T>(work: Promise<T>) {
 async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) {
   const source = live()
   if (!isBlock(doc)) {
-    const file = cortexFileOf(doc)
     const held = heldCortex(doc.id)
+    const file = cortexFileOf(doc, held)
     // The sealed journal entry says who changed it and why, in the shape the journal reads back.
     const journal = journalOf()
     const before = journal.currentVersion(doc.id), after = versionOf(snap(doc))
@@ -65,7 +65,8 @@ async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]
   } else {
     const held = blockVersion(doc.id)
     const ref: BlockRef = held?.ref ?? { id: doc.id, layer: "private", store: "sealed" }
-    const file = fileOf(doc)
+    // From the file as the source gave it, so properties the workspace doesn't edit are kept.
+    const file = fileOf(doc, heldBlock(doc.id)?.file)
     const { version } = await source.saveBlock(ref, file, held?.version ?? null, change)
     landBlock(ref, file, version)
   }
@@ -323,7 +324,9 @@ export function openInbox(id: string) {
 /** Keeps a proposal: files it in a channel and clears its mark. Consequential: the person approves it first. */
 export async function keepProposal(id: string, channel: string) {
   validateChannel(channel)
-  if (channel === INBOX) throw new DOMException("Keep it in a channel other than the inbox", "DataError")
+  // The same choice the screen offers: an existing channel outside the inbox.
+  if (channel === INBOX || channel.startsWith(`${INBOX}/`)) throw new DOMException("Keep it in a channel other than the inbox", "DataError")
+  if (!channelByPath(channel)) throw new DOMException(`There is no channel “${channel.replace("/", " › ")}”`, "DataError")
   return serial(async () => {
     const held = blockVersion(id)
     if (!held || !inbox.some(item => item.id === id)) throw new DOMException("That proposal is no longer in the inbox", "NotFoundError")
@@ -494,17 +497,22 @@ export async function moveBlock(id: string, from: string, to: string, opts: { be
       return true
     })
   }
-  if (opts.before || opts.after) {
+  let ordered = false
+  // A channel's order names its blocks by slug in its own _channel.md, which the service keeps
+  // readable. So it lists only readable blocks: a private block's slug never goes there, and a
+  // private block's place in an order waits for the sealed private overlay.
+  if ((opts.before || opts.after) && byId(id)?.visibility !== "private") {
     await serial(async () => {
-      const list = inOrder(to, blocks.filter(post => channelsOf(post).includes(to))).map(post => post.id).filter(x => x !== id)
-      const index = opts.before ? list.indexOf(opts.before) : list.indexOf(opts.after!) + 1
+      const readable = blocks.filter(post => post.visibility !== "private" && channelsOf(post).includes(to))
+      const list = inOrder(to, readable).map(post => post.id).filter(x => x !== id)
+      const index = opts.before ? list.indexOf(opts.before) : opts.after ? list.indexOf(opts.after) + 1 : -1
       list.splice(index < 0 ? list.length : index, 0, id)
-      // A channel's order names its blocks by slug, in its own _channel.md.
       await saveChannelProperty(to, "order", list.map(each => byId(each)?.slug).filter(Boolean))
+      ordered = true
       set(bump())
     })
   }
-  return { homeChannelChanged, published: homeChannelChanged && visibility !== "private" }
+  return { homeChannelChanged, ordered, published: homeChannelChanged && visibility !== "private" }
 }
 
 /**
@@ -521,13 +529,27 @@ async function refileSealed(from: string, to: string, descendants: boolean) {
   }
 }
 
+/**
+ * Changing a channel's path or removing it reaches sealed blocks only on a device that can open
+ * them; the service moves only what it can read. Locked, it would leave private blocks filed
+ * under a channel that is gone, so it is refused.
+ */
+function needsPrivateLayer(what: string) {
+  if (privateLayer !== "open") throw new DOMException(`${what} needs your private blocks: unlock them on this device first.`, "InvalidStateError")
+}
+
 /** Moves a channel with everything in it, at the service, then the sealed blocks here, then reads the home again. */
 function relocateChannel(from: string, to: string) {
+  needsPrivateLayer("Moving a channel")
   return serial(async () => {
-    const moved = await live().channels.move(from, to, heldChannel(from)?.version ?? null)
-    await refileSealed(from, to, true)
-    await setSource(live(), { keepView: true })
-    return moved
+    try {
+      const moved = await live().channels.move(from, to, heldChannel(from)?.version ?? null)
+      await refileSealed(from, to, true)
+      return moved
+    } finally {
+      // Whatever happened, show the home as the service now holds it.
+      await setSource(live(), { keepView: true })
+    }
   })
 }
 
@@ -569,6 +591,7 @@ export async function createChannel(inside?: string) {
 /** Removes an empty channel. One with blocks or channels in it is refused: move them out first. */
 export async function deleteChannel(path: string) {
   if (path === INBOX) throw new DOMException("The inbox stays", "DataError")
+  needsPrivateLayer("Removing a channel")
   if ([...blocks, ...inbox].some(p => channelsOf(p).some(c => c === path || c.startsWith(`${path}/`))) || channelRecords.some(c => c.path.startsWith(`${path}/`)))
     throw new DOMException(`“${path.replace("/", " › ")}” is not empty: move what is in it out first`, "DataError")
   await serial(async () => {

@@ -133,7 +133,7 @@ export function channelStore(db) {
       if (held.version !== replaces) throw changed(path, held);
       const filed = (await blocksIn(did, path)).filter(row => row.home).length + await postsIn(did, path);
       if (filed) throw new Refused(409, 'NotEmpty', `${filed} block${filed === 1 ? ' is' : 's are'} filed in ${path}. Move ${filed === 1 ? 'it' : 'them'} first`, { path });
-      const inside = await db.prepare(`SELECT 1 AS yes FROM channels WHERE did = ?1 AND path LIKE ?2 || '/%' AND version IS NOT NULL`).bind(did, path).first();
+      const inside = await db.prepare(`SELECT 1 AS yes FROM channels WHERE did = ?1 AND substr(path, 1, length(?2) + 1) = ?2 || '/' AND version IS NOT NULL`).bind(did, path).first();
       if (inside) throw new Refused(409, 'NotEmpty', `${path} has channels inside it. Move or remove them first`, { path });
       const gone = await db.prepare(
         `UPDATE channels SET version = NULL, title = NULL, kind = NULL, text = NULL, seq = ${next}, updated_at = ?3
@@ -155,16 +155,18 @@ export function channelStore(db) {
       if ((held?.version ?? null) !== replaces) throw changed(from, held);
       const posts = await postsIn(did, from);
       if (posts) throw new Refused(409, 'HasPosts', `${posts} published post${posts === 1 ? ' is' : 's are'} filed in ${from}. Their addresses come from it: change their label through Publish`, { path: from });
-      const taken = await db.prepare(`SELECT path FROM channels WHERE did = ?1 AND (path = ?2 OR path LIKE ?2 || '/%') AND version IS NOT NULL`).bind(did, to).first();
+      const taken = await db.prepare(`SELECT path FROM channels WHERE did = ?1 AND (path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/') AND version IS NOT NULL`).bind(did, to).first();
       if (taken) throw new Refused(409, 'PathTaken', `There is already a channel at ${taken.path}`, { path: taken.path });
 
       const at = now.toISOString();
       const statements = [];
-      const { results: channels } = await db.prepare(`SELECT path, version, text FROM channels WHERE did = ?1 AND (path = ?2 OR path LIKE ?2 || '/%') AND version IS NOT NULL`).bind(did, from).all();
+      const { results: channels } = await db.prepare(`SELECT path, version, text FROM channels WHERE did = ?1 AND (path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/') AND version IS NOT NULL`).bind(did, from).all();
       for (const channel of channels) {
         const path = moved(channel.path, from, to);
         const version = await channelVersion({ path, text: channel.text });
         statements.push(guard(`NOT EXISTS (SELECT 1 FROM channels WHERE did = ?1 AND path = ?2 AND version IS ?3)`, did, channel.path, channel.version));
+        // A channel made at the new path since the check above is not overwritten: the move fails instead.
+        statements.push(guard(`EXISTS (SELECT 1 FROM channels WHERE did = ?1 AND path = ?2 AND version IS NOT NULL)`, did, path));
         statements.push(db.prepare(`UPDATE channels SET version = NULL, title = NULL, kind = NULL, text = NULL, seq = ${next}, updated_at = ?3 WHERE did = ?1 AND path = ?2`).bind(did, channel.path, at));
         const node = readNode(`${path}/${CHANNEL_FILE}`, channel.text).node;
         statements.push(db.prepare(
@@ -175,12 +177,19 @@ export function channelStore(db) {
         ).bind(did, path, version, node.title ?? null, node.kind ?? null, channel.text, at));
       }
       const filed = await blocksIn(did, from);
+      // A block already at a moved block's new path (a folder with no _channel.md) is refused plainly.
+      for (const block of filed.filter(each => each.home)) {
+        const path = moved(block.path, from, to);
+        const there = await db.prepare('SELECT id FROM blocks WHERE did = ?1 AND path = ?2 AND version IS NOT NULL AND id <> ?3').bind(did, path, block.id).first();
+        if (there) throw new Refused(409, 'PathTaken', `There is already a block at ${path}`, { path });
+      }
       for (const block of filed) {
         const path = block.home ? moved(block.path, from, to) : block.path;
         const listed = block.channels.map(channel => under(channel, from) ? moved(channel, from, to) : channel);
         const text = block.channels.some(channel => under(channel, from)) ? setProperty(block.text, 'channels', listed) : block.text;
         const version = await recordVersion({ path, text });
         statements.push(guard(`NOT EXISTS (SELECT 1 FROM blocks WHERE did = ?1 AND id = ?2 AND version IS ?3)`, did, block.id, block.version));
+        statements.push(guard(`EXISTS (SELECT 1 FROM blocks WHERE did = ?1 AND path = ?2 AND version IS NOT NULL AND id <> ?3)`, did, path, block.id));
         statements.push(db.prepare(
           `UPDATE blocks SET version = ?3, path = ?4, text = ?5, seq = (SELECT COALESCE(MAX(seq), 0) + 1 FROM blocks WHERE did = ?1), updated_at = ?6
            WHERE did = ?1 AND id = ?2`,
