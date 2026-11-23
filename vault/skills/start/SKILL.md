@@ -27,6 +27,7 @@ Read `AGENTS.md` there before doing anything. It holds the ten rules, which the 
 | A field the schema has no place for | `docs/schema-layers.md` |
 | Reading, saving, or changing the owner's notes, or who can see one | the `vault` skill |
 | Deciding the site's sections with the owner | the `suggest-labels` skill |
+| Designing a home from a site, feeds, a PDS and folders, or settling labels, channels, moves and merges | the `curator` agent and its `design-home` skill. Do not settle structure yourself: flag it with `needs: curator` |
 | Moving a website and social posts in | the `migrate-site` skill |
 | Making the site's own pages build from records | the `build-renderer` skill |
 | Finishing a chunk of work or preparing its handoff | the `document-work` skill; maintain both agent and human documentation |

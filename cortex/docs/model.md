@@ -85,6 +85,8 @@ The slowness essay and the Yanaka photos were written in the same week, about th
 - **About one block or channel:** extra context on it. It shows in that block's connections card, and the agent sees it when it reads the block.
 - **About two or more blocks:** it also **connects them**. In the graph that's an observed connection, drawn green; hover it to read the observation. It never becomes one of your links. If you connect the blocks yourself, that connection is yours.
 
+- **A flag for the curator:** `needs: curator` on an observation about a block or channel asks the curator, the one agent that settles labels, channels, moves and merges with you, to take it up. The curator answers with an observation of its own whose `settles` names the flags and whose text says what you decided; `cortex_recall` with `needs: curator` lists the flags not yet settled.
+
 **Editing:** you can change the text, change what it's about, delete it, or write one yourself (`by: you`). Deleting an observation removes the connections it made. An agent may edit or delete only its own observations, and only while you haven't edited them.
 
 **Reading many:** observations only grow. `cortex_start` gives the most recent ones plus any marked by you as always relevant (`pin: true`). `cortex_recall` searches them by words or by block. Old ones are never thrown away automatically; you delete what you don't want.

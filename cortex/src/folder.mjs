@@ -65,6 +65,10 @@ export const checkAccount = value => {
 
 // An observation's ID is made once where it was seen, and reused on a retry.
 export const OBSERVATION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+// Who an observation is waiting for. A working agent flags what only the curator settles (labels,
+// channels, moves, merges) with needs: curator; the curator answers with an observation of its own
+// that settles it.
+export const NEEDS = ['curator'];
 // How many observations a session is handed, besides the pinned ones.
 export const RECENT = 30;
 const CHANNEL = 'channel:';
@@ -160,16 +164,20 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
   const readObservationFile = (id, content) => {
     const { properties, body } = splitFront(content);
     const about = Array.isArray(properties.about) ? properties.about.filter(item => typeof item === 'string') : [];
+    const settles = Array.isArray(properties.settles) ? properties.settles.filter(item => typeof item === 'string') : [];
     return {
       id, text: body.trim(), by: typeof properties.by === 'string' ? properties.by : 'you',
       at: typeof properties.at === 'string' ? properties.at : null,
       ...(typeof properties.session === 'string' ? { session: properties.session } : {}),
       ...(about.length ? { about } : {}),
       ...(properties.pin === true ? { pin: true } : {}),
+      ...(NEEDS.includes(properties.needs) ? { needs: properties.needs } : {}),
+      ...(settles.length ? { settles } : {}),
     };
   };
-  const observationFile = ({ text: said, by, at: when, session, about, pin }) =>
-    writeFront({ at: when, by, ...(session ? { session } : {}), ...(about?.length ? { about } : {}), ...(pin ? { pin: true } : {}) }, `${said.trim()}\n`);
+  const observationFile = ({ text: said, by, at: when, session, about, pin, needs, settles }) =>
+    writeFront({ at: when, by, ...(session ? { session } : {}), ...(about?.length ? { about } : {}), ...(pin ? { pin: true } : {}),
+      ...(needs ? { needs } : {}), ...(settles?.length ? { settles } : {}) }, `${said.trim()}\n`);
   async function heldObservation(id) {
     const content = await text(observationPath(id));
     if (content === null) return null;
@@ -753,19 +761,28 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
     // Writes one observation: a new one, or a rewrite of one given with the version read. The person
     // writes any; an agent writes new ones, and rewrites only its own as it left them. Only the
     // person pins one, so every session is handed it.
-    async observe({ id, text: said, about, session, pin, replaces, reason } = {}) {
+    async observe({ id, text: said, about, session, pin, needs, settles, replaces, reason } = {}) {
       checkObservationId(id);
       if (typeof said !== 'string' || !said.trim() || [...said].length > 2000) throw new Refused('InvalidRequest', 'An observation is what was seen, at most 2,000 characters');
       if (session !== undefined && !oneLine(session, 200)) throw new Refused('InvalidRequest', 'session is one line, at most 200 characters');
       if (pin !== undefined && typeof pin !== 'boolean') throw new Refused('InvalidRequest', 'pin is true or false');
       if (pin !== undefined && !person) throw new Refused('PersonOnly', 'Only the person pins an observation');
+      if (needs !== undefined && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}`);
+      if (settles !== undefined) {
+        if (!Array.isArray(settles) || settles.length > 20 || new Set(settles).size !== settles.length || settles.includes(id)) throw new Refused('InvalidRequest', 'settles is up to 20 distinct IDs of other observations');
+        for (const flag of settles) {
+          checkObservationId(flag);
+          if (!(await heldObservation(flag))?.observation.needs) throw new Refused('NotFound', `There is no observation ${flag} waiting to be settled`);
+        }
+      }
       const why = checkReason(reason);
       const checked = await checkAbout(about);
       const spec = nodeOf(`observation/${id}`);
       const held = await heldObservation(id);
       if (held) {
         const was = held.observation;
-        const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}) };
+        const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}),
+          ...(needs !== undefined ? { needs } : {}), ...(settles !== undefined ? { settles } : {}) };
         const content = observationFile(next);
         if (replaces === undefined) {
           // A retry of the same observation is not a second one.
@@ -777,7 +794,7 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
         return { id, ...await edit(spec, 'update', content, { before: held.version, reason: why, session }) };
       }
       if (replaces !== undefined && replaces !== null) throw changed(`observation ${id}`, null);
-      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin });
+      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin, needs, settles });
       return { id, ...await edit(spec, 'create', content, { reason: why, session }) };
     },
 
@@ -806,13 +823,17 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
 
     // Observations, newest first: all of them, those about something (a block ID or channel:<path>),
     // or those whose words match. Words in the text count, and so do the IDs and channels it is about.
-    async observations({ q, about, by, limit = 50 } = {}) {
+    // With needs, only the flags waiting for that agent: marked needs and not settled by another.
+    async observations({ q, about, by, needs, limit = 50 } = {}) {
+      if (needs !== undefined && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}`);
       if (q !== undefined && (typeof q !== 'string' || !q.trim() || q.length > 2000)) throw new Refused('InvalidRequest', 'q is one or more words, at most 2,000 characters');
       if (about !== undefined && (typeof about !== 'string' || !about.trim())) throw new Refused('InvalidRequest', 'about is a block ID, or a channel written channel:<path>');
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Refused('InvalidRequest', 'limit is a whole number from 1 to 500');
       let { observations: found } = await all();
+      const settled = new Set(found.flatMap(item => item.settles ?? []));
       if (about !== undefined) found = found.filter(item => item.about?.includes(about));
       if (by !== undefined) found = found.filter(item => item.by === by);
+      if (needs !== undefined) found = found.filter(item => item.needs === needs && !settled.has(item.id));
       if (q !== undefined) {
         const words = [...new Set(q.toLowerCase().split(/\s+/).filter(Boolean))].slice(0, 12);
         const count = (within, word) => within.toLowerCase().split(word).length - 1;

@@ -15,4 +15,14 @@ and agent documentation. Its folder contains:
 [lint](lint/SKILL.md) checks a vault for meaning: candidates from `vault_lint`, judged
 by the agent, recorded as cortex observations and fixed only within the person's grant.
 
+[design-home](design-home/SKILL.md) is the [curator](../agents/curator.md)'s first job:
+screen every source read-only, report with the fixed
+[home report template](../docs/agents/home-report.md), discuss item by item with the
+owner, and apply only what they decided. A dry run on a real site:
+[home-report-haeinjung.md](../examples/home-report-haeinjung.md).
+
+The curator is the plugin's one agent (`agents/curator.md`). It alone settles labels,
+channels, moves and merges; working agents flag those questions as cortex
+observations with `needs: curator`.
+
 The [repository README](../README.md) lists the other bundled skills.

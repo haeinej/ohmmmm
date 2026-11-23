@@ -42,6 +42,7 @@ Keep member content private and use synthetic examples in public documentation.
 - Moving a site in: [skills/migrate-site/SKILL.md](skills/migrate-site/SKILL.md)
 - Reading, saving, or changing the owner's notes, or who can see one: [skills/vault/SKILL.md](skills/vault/SKILL.md)
 - Deciding sections: [skills/suggest-labels/SKILL.md](skills/suggest-labels/SKILL.md)
+- Designing a home from what someone already has (site, feeds, PDS, folders), and settling labels, channels, moves and merges: the [curator](agents/curator.md) agent with [skills/design-home/SKILL.md](skills/design-home/SKILL.md). Other agents only flag structure questions, with `needs: curator` on a cortex observation
 - Making a site's pages build from records: [skills/build-renderer/SKILL.md](skills/build-renderer/SKILL.md)
 - Documenting completed work for people and agents: [skills/document-work/SKILL.md](skills/document-work/SKILL.md)
 - The commands: `npm run identity`, `posts`, `profile`, `publish:post`, `render`, `lexicon`, `configure`, `migrate`, and `ohm vault init|add|index|status|inspect|search|hook` for a vault folder on this machine ([docs/vault-format.md](docs/vault-format.md)). Run `npm test` after changing code.

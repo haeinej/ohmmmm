@@ -67,6 +67,27 @@ test('an observation is one file, a retry is not a second one, and a rewrite nam
   }
 });
 
+test('a working agent flags a question for the curator, and the curator settles it with an observation of its own', async () => {
+  const { dir, cortex } = await fresh();
+  const curator = openCortex(dir, { actor: 'curator' });
+  await cortex.observe({ id: 'label-q', text: 'This essay reads like a photo post; its label may be wrong.', needs: 'curator' });
+  await cortex.observe({ id: 'plain', text: 'Prefers tables to lists.' });
+  assert.match(await readFile(join(dir, 'observations', 'label-q.md'), 'utf8'), /\nneeds: "curator"\n/);
+  assert.deepEqual((await cortex.observations({ needs: 'curator' })).observations.map(item => item.id), ['label-q']);
+  await assert.rejects(cortex.observe({ id: 'x', text: 'y', needs: 'anyone' }), refused('InvalidRequest'));
+  await assert.rejects(curator.observe({ id: 'answer', text: 'Kept as is.', settles: ['plain'] }), refused('NotFound'));
+  await assert.rejects(curator.observe({ id: 'answer', text: 'Kept as is.', settles: ['answer'] }), refused('InvalidRequest'));
+  // Settling writes the curator's own observation and leaves the flag as its author wrote it.
+  await curator.observe({ id: 'answer', text: 'The person kept the label.', settles: ['label-q'] });
+  assert.deepEqual((await cortex.observations({ needs: 'curator' })).observations, []);
+  assert.equal((await cortex.readObservation('label-q')).observation.needs, 'curator');
+  assert.deepEqual((await cortex.readObservation('answer')).observation.settles, ['label-q']);
+  // The same over the tools.
+  const tools = createTools(cortex);
+  await tools.call('cortex_observe', { id: 'channel-q', text: 'Two channels hold the same trip.', needs: 'curator' });
+  assert.deepEqual((await tools.call('cortex_recall', { needs: 'curator' })).observations.map(item => item.id), ['channel-q']);
+});
+
 test('an agent changes only its own observations as it left them; the person changes any', async () => {
   const { dir, cortex, person } = await fresh();
   const codex = openCortex(dir, { actor: 'codex' });

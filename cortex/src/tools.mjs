@@ -24,14 +24,16 @@ const object = (properties, required = []) => ({ type: 'object', properties, req
 export const TOOLS = [
   { name: 'cortex_start', description: 'Call first in every session. Returns the playbook for keeping this cortex (follow it), the person\'s own rules included; their profile (the account, and their preferences, goals and notes in their words); the observations pinned and the newest ones; the vault\'s channels and counts; the skills approved and the tools switched on; what is waiting for the person; and the open dead ends.',
     inputSchema: object({}), annotations: { readOnlyHint: true } },
-  { name: 'cortex_observe', description: 'Write down something you learned working with the person, so the next session knows it: about them ("keeps titles to three words"), or about their vault, with the blocks or channels it is about in about ("these two blocks are about the same walk"). Write what you saw, plainly. An observation about two or more blocks shows the person they are connected. To rewrite or remove one of yours, pass the version you read; once the person has changed one, it is theirs.',
+  { name: 'cortex_observe', description: 'Write down something you learned working with the person, so the next session knows it: about them ("keeps titles to three words"), or about their vault, with the blocks or channels it is about in about ("these two blocks are about the same walk"). Write what you saw, plainly. An observation about two or more blocks shows the person they are connected. A question of labels, channels, moves or merges is not yours to settle: flag it with needs: curator. To rewrite or remove one of yours, pass the version you read; once the person has changed one, it is theirs.',
     inputSchema: object({
       id, text: { type: 'string', maxLength: 2000 },
       about: { type: 'array', maxItems: 20, uniqueItems: true, items: text, description: 'Block IDs from the vault, or channels written channel:<path>' },
       session: text, version, remove: { type: 'boolean', description: 'true, with version, to remove one of yours' }, reason: { type: 'string', maxLength: 500 },
+      needs: { type: 'string', enum: ['curator'], description: 'curator, to flag a label, channel, move or merge question for the curator to settle with the person. Do not settle it yourself' },
+      settles: { type: 'array', maxItems: 20, uniqueItems: true, items: text, description: 'The curator only: IDs of the flags this observation settles, with what the person decided as its text' },
     }, ['id']) },
-  { name: 'cortex_recall', description: 'Find observations: by words, by what they are about (a block ID, or channel:<path>), or one by its ID, with its earlier versions when asked. It writes nothing.',
-    inputSchema: object({ id: text, query: text, about: text, limit: { type: 'integer', minimum: 1, maximum: 100 }, history: { type: 'boolean' }, version }),
+  { name: 'cortex_recall', description: 'Find observations: by words, by what they are about (a block ID, or channel:<path>), the flags still waiting for the curator (needs), or one by its ID, with its earlier versions when asked. It writes nothing.',
+    inputSchema: object({ id: text, query: text, about: text, needs: { type: 'string', enum: ['curator'], description: 'curator: only the flags still waiting for the curator' }, limit: { type: 'integer', minimum: 1, maximum: 100 }, history: { type: 'boolean' }, version }),
     annotations: { readOnlyHint: true } },
   { name: 'cortex_propose_profile', description: 'Propose one line for the person\'s profile, under a heading such as Preferences or Goals, when they told you something that should hold every session ("always keep drafts short"). Quote what they said. It changes nothing until they accept it. A line they turned down is not proposed again.',
     inputSchema: object({ heading: { type: 'string', maxLength: 60 }, line: { type: 'string', maxLength: 300 }, quote: { type: 'string', maxLength: 500 } }, ['line']) },
@@ -71,21 +73,21 @@ const refuse = (message, code = 'InvalidRequest') => { throw new Refused(code, m
 export function createTools(cortex) {
   const calls = {
     cortex_start: () => cortex.start(),
-    async cortex_observe({ id, text: said, about, session, version, remove, reason }) {
+    async cortex_observe({ id, text: said, about, session, version, remove, reason, needs, settles }) {
       if (remove) {
         if (version === undefined) refuse('Pass the version you read to remove an observation');
         return cortex.removeObservation(id, { replaces: version, reason });
       }
       if (said === undefined) refuse('Give text: what you saw');
-      return cortex.observe({ id, text: said, about, session, reason, ...(version === undefined ? {} : { replaces: version }) });
+      return cortex.observe({ id, text: said, about, session, reason, needs, settles, ...(version === undefined ? {} : { replaces: version }) });
     },
-    async cortex_recall({ id, query, about, limit, history, version }) {
+    async cortex_recall({ id, query, about, needs, limit, history, version }) {
       if (id !== undefined) {
-        if (query !== undefined || about !== undefined) refuse('Give an ID, or words and about to search with, not both');
+        if (query !== undefined || about !== undefined || needs !== undefined) refuse('Give an ID, or words and about to search with, not both');
         return cortex.readObservation(id, { version, history });
       }
       if (history !== undefined || version !== undefined) refuse('history and version go with an ID');
-      return cortex.observations({ ...(query === undefined ? {} : { q: query }), ...(about === undefined ? {} : { about }), ...(limit === undefined ? {} : { limit }) });
+      return cortex.observations({ ...(query === undefined ? {} : { q: query }), ...(about === undefined ? {} : { about }), ...(needs === undefined ? {} : { needs }), ...(limit === undefined ? {} : { limit }) });
     },
     cortex_propose_profile: args => cortex.proposeProfile(args),
     cortex_skill: ({ name }) => cortex.getSkill(name),
