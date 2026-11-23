@@ -23,7 +23,7 @@ Running your own PDS changes where your public posts are hosted. It does not mov
 - Node.js 22 or newer, pnpm, and a clone of [haeinej/ohmmmm](https://github.com/haeinej/ohmmmm).
 - A password manager, for the signing key backup and your password.
 
-The PDS code is Cirrus `@getcirrus/pds` 0.18.0. Its source is kept, unchanged, in [vendor/cirrus/](../vendor/cirrus/), pinned to an exact upstream commit in [vendor/IMPORTS.json](../vendor/IMPORTS.json). The Worker you deploy is [cirrus/](../cirrus/), which only re-exports it.
+The PDS code is Cirrus `@getcirrus/pds` 0.18.0. The Worker you deploy is [cirrus/](../cirrus/): it installs the published npm package, locked to one exact tarball in `cirrus/pnpm-lock.yaml`, and only re-exports it. That release's source is kept, unchanged, in [vendor/cirrus/](../vendor/cirrus/) so you can read what you run; [vendor/IMPORTS.json](../vendor/IMPORTS.json) records its upstream commit and the tarball's integrity, and `npm test` checks that the lockfile still names that tarball.
 
 ## 1. Install and sign in to Cloudflare
 
@@ -58,24 +58,29 @@ pnpm --dir cirrus pds init
 
 It asks, in order:
 
-1. **The hostname** (`pds.example.com`) and **the handle**.
-2. **The DID.** Accept the default `did:web:` + your hostname.
-3. **Where your data is stored.** "Auto" is right for most people. This cannot change after the first deploy.
-4. **Your account password.** It signs you in at your own server. Only its hash is stored.
-5. **Back up your signing key.** See step 4. Do not skip it.
-6. **Deploy to Cloudflare?** Answer yes to push the secrets and deploy, or no to do that yourself in step 5.
+1. **The Worker's name** and, if you have more than one, **which Cloudflare account**.
+2. **Are you migrating an existing account?** Answer no for a fresh start. (To move a Bluesky `did:plc`, see step 2.)
+3. **The hostname** (`pds.example.com`), **the handle** and **the DID**. Accept the default `did:web:` + your hostname.
+4. **Where your data is stored.** "Auto" is right for most people. This cannot change after the first deploy.
+5. **How to back up your signing key**, then whether you saved it. See step 4. Do not skip it.
+6. **Your account password.** It signs you in at your own server. Only its hash is stored.
+7. **An email address**, optional. Some apps expect one; press Enter to skip.
+8. **Push secrets to Cloudflare now?** Answer yes. A Worker deployed without its secrets has no signing key or password and cannot work.
+9. **Deploy to Cloudflare now?** Answer yes. It is only asked once the secrets are pushed.
 
-It writes the public settings (`PDS_HOSTNAME`, `DID`, `HANDLE`, `SIGNING_KEY_PUBLIC`) into `cirrus/wrangler.jsonc` and the secrets into `cirrus/.dev.vars` and Cloudflare. `.dev.vars` is git-ignored; never commit it.
+It writes the secrets (`SIGNING_KEY`, `JWT_SECRET`, `PASSWORD_HASH`, `AUTH_TOKEN`) to `cirrus/.dev.vars`, which is git-ignored, and pushes them to Cloudflare when you say yes. (`pds init --production` would push them without keeping the local copy; this guide does not use it, so this machine keeps one.) It writes your settings into `cirrus/wrangler.jsonc`: the Worker's name, `PDS_HOSTNAME`, `DID`, `HANDLE`, `SIGNING_KEY_PUBLIC`, `INITIAL_ACTIVE`, `DATA_LOCATION`, your email if you gave one, and the hostname as a route. That file is tracked by git: keep these changes out of any commit you push to a shared or public copy, since they include your email.
 
 ## 4. Back up the signing key
 
 The signing key proves that what your repository holds was written by you. Once it is pushed to Cloudflare as a secret it cannot be read back out, and the only other copy is `cirrus/.dev.vars` on this machine. If you lose both, a `did:web` identity can only take a new key, and what was signed with the old one can no longer be checked.
 
-When the setup offers to save it, put it in your password manager (or save the file it offers and move that into your password manager, then delete the file). Keep it somewhere that survives losing this computer.
+When the setup asks how to back it up, choose your password manager or copy it to the clipboard and paste it into your password manager. Keep it somewhere that survives losing this computer.
+
+If you choose **Save to file**, it writes `cirrus/signing-key-backup-<handle>.txt` beside the Worker. That name is git-ignored, but the file is still a plain copy of your key: move its contents into your password manager and delete it.
 
 ## 5. Deploy
 
-If the setup did not deploy:
+If the setup did not deploy, first make sure the secrets are in Cloudflare. If you answered no to pushing them, run `pnpm --dir cirrus pds init` again, keep the values it finds in `.dev.vars` (it reuses the signing key on its own), and answer yes to pushing. Check with `pnpm --dir cirrus exec wrangler secret list`, which lists names only: `AUTH_TOKEN`, `SIGNING_KEY`, `JWT_SECRET` and `PASSWORD_HASH` should all be there. Then:
 
 ```sh
 pnpm --dir cirrus run deploy
@@ -110,9 +115,15 @@ curl -s "https://pds.example.com/xrpc/com.atproto.identity.resolveHandle?handle=
 
 - `describeServer` returns JSON naming your server's DID.
 - `did.json` lists your handle under `alsoKnownAs` and `https://pds.example.com` as the service.
-- `resolveHandle` returns `{"did":"did:web:pds.example.com"}`. A handle on a different domain can take a few minutes after the DNS record is added.
+- `resolveHandle` returns `{"did":"did:web:pds.example.com"}`. Your server answers this from its own settings, so it shows the setup worked, not that your DNS is right.
 
-`npm run --silent identity -- example.com` checks the handle both ways, as every tool here does.
+Then check the handle the way the rest of the network does, both ways:
+
+```sh
+npm run --silent identity -- example.com
+```
+
+It resolves the handle through DNS or `https://example.com/.well-known/atproto-did`, reads the DID document, and shows the handle only when the document claims it back. A handle on a different domain can take a few minutes after the DNS record is added.
 
 ## 8. Connect it to ohm
 
@@ -120,7 +131,7 @@ In the account app, choose **Connect my own server**. On **Your server's address
 
 After that:
 
-- The vault service admits your DID as a member (today, by its `MEMBERS` list).
+- The vault service has to admit your DID as a member. Today that is its `MEMBERS` setting, which whoever runs the vault service sets; if your vault says you are not a member yet, send them your DID.
 - It runs `com.ohmmmm.vault.importPublished` once, bringing the posts already on your PDS into your vault. On a new server there are none yet.
 - From then on, Publish in ohm writes the post, and only the post, to your PDS.
 
@@ -131,6 +142,8 @@ Next, your agent can help you decide your sections with the curator skill, [desi
 | What you see | What to try |
 | --- | --- |
 | `describeServer` does not answer | The hostname is not on the Worker yet. Check **Domains & Routes**, and wait a minute for the certificate. |
-| `resolveHandle` fails for a different-domain handle | Check the `_atproto` TXT record with `dig TXT _atproto.example.com`. |
+| `npm run identity` does not verify a different-domain handle | Check the `_atproto` TXT record with `dig TXT _atproto.example.com`, and give DNS a few minutes. |
+| The Worker deploys but signing in fails | The secrets were not pushed. Run `pnpm --dir cirrus pds init` again, keep the values from `.dev.vars`, answer yes to pushing, and deploy. |
 | "Your server supports signing in to apps" is red | Deploy again with the current `cirrus/`; Cirrus 0.18.0 serves OAuth. |
 | The setup says the signing key is in Cloudflare but not in `.dev.vars` | Put the key from your backup into `cirrus/.dev.vars` as `SIGNING_KEY=…`, then run the setup again. |
+| `git status` shows `cirrus/wrangler.jsonc` changed | Those are your settings. Keep them out of commits you push anywhere shared. |

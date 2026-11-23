@@ -1,5 +1,5 @@
 {
-  "about": "Files copied unchanged from pinned upstream commits by scripts/import-vendor.mjs. Never edit them; ohm overrides live in cirrus/src/index.ts.",
+  "about": "Files copied unchanged from pinned upstream commits by scripts/import-vendor.mjs. Never edit them; ohm overrides live in cirrus/src/index.ts. cirrus/ deploys the published npm tarball named under npm, which matches this source.",
   "sources": [
     {
       "repository": "cirrus",
@@ -16,7 +16,13 @@
         "packages/pds/tsconfig.json",
         "packages/pds/tsdown.config.ts"
       ],
-      "destination": "vendor/cirrus/packages/pds"
+      "destination": "vendor/cirrus/packages/pds",
+      "npm": {
+        "name": "@getcirrus/pds",
+        "version": "0.18.0",
+        "integrity": "sha512-JT11jVkRwjzxNKR3LwAytdjFJyIN11+Rv/YooAQK/NxuBOCzDPahFhxWh2lV0JsNFqCBG85fpSi/YXTENWliKw==",
+        "lockfile": "cirrus/pnpm-lock.yaml"
+      }
     }
   ],
   "files": [

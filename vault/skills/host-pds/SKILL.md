@@ -18,7 +18,7 @@ The PDS is the **PDS boundary**. It holds only public `com.ohmmmm.post` records 
 ## What you may not change
 
 - [vendor/cirrus/](../../vendor/cirrus/) is upstream Cirrus, pinned in [vendor/IMPORTS.json](../../vendor/IMPORTS.json). Never edit it. An ohm override goes only in `cirrus/src/index.ts`.
-- `cirrus/package.json` stays on the pinned version. To move to another version, re-import with `node scripts/import-vendor.mjs --from <clone>` after the person agrees.
+- `cirrus/package.json` stays on the pinned version, and `cirrus/pnpm-lock.yaml` on the pinned tarball. The vendored copy is the source of that npm release; `cirrus/` deploys the package itself. Moving to another version is a maintainer change, not part of this skill: the tag, commit and npm integrity in `SOURCES` in `scripts/import-vendor.mjs`, the version in `cirrus/package.json` and the lockfile change together, then `node scripts/import-vendor.mjs --from <clone>` and `--check`.
 - Names that stay `ohm-vault` (the vault service Worker, its D1 database, the MCP server, the crypto context strings) are never renamed.
 
 ## Steps
@@ -59,15 +59,20 @@ The DID is `did:web:<hostname>`. Tell them it cannot change, and that it lasts o
 pnpm --dir cirrus pds init
 ```
 
-Tell them what to answer: the hostname and handle from step 3; the default `did:web`; "Auto" for data location unless they have a reason (it cannot change later); a password of their own; yes to deploying to Cloudflare.
+Do not add `--production`: it pushes the secrets without keeping the local copy in `cirrus/.dev.vars`. Tell them what it asks, in order, and what to answer: the Worker's name and Cloudflare account; no to migrating (unless step 3 chose to migrate); the hostname, handle and default `did:web` from step 3; "Auto" for data location unless they have a reason (it cannot change later); the signing key backup; a password of their own; an email only if they want one; yes to **Push secrets to Cloudflare now?**; yes to **Deploy to Cloudflare now?** (asked only after the push).
 
-**Hand over: the signing key backup.** When the wizard offers backup choices, they save the key to their password manager. Say plainly that without the backup and this machine's `cirrus/.dev.vars`, the key cannot be recovered. Do not continue until they confirm the backup exists.
+**Hand over: the signing key backup.** They choose their password manager, or copy to the clipboard and paste into it. If they choose **Save to file**, it writes `cirrus/signing-key-backup-<handle>.txt` (git-ignored); they move its contents into their password manager and delete the file. Say plainly that without the backup and this machine's `cirrus/.dev.vars`, the key cannot be recovered. Do not continue until they confirm the backup exists.
 
-Afterwards, check without reading secrets: `cirrus/wrangler.jsonc` now has `PDS_HOSTNAME`, `DID`, `HANDLE` and `SIGNING_KEY_PUBLIC`, and `git status` does not show `.dev.vars`.
+Afterwards, check without reading any secret or its value:
+
+- `ls cirrus/signing-key-backup-*.txt` finds nothing. If a file is there, ask them to move it into their password manager and delete it; do not open it.
+- `git status --short` shows neither `.dev.vars` nor a key backup file.
+- `cirrus/wrangler.jsonc` has `PDS_HOSTNAME`, `DID`, `HANDLE` and `SIGNING_KEY_PUBLIC` (it also has their email if they gave one). Tell them this file is now their settings: do not commit it to a shared or public copy, and do not commit it yourself.
+- `pnpm --dir cirrus exec wrangler secret list` lists `AUTH_TOKEN`, `SIGNING_KEY`, `JWT_SECRET` and `PASSWORD_HASH` (names only).
 
 ### 5. Deploy and DNS
 
-If the wizard did not deploy:
+Deploy only once `wrangler secret list` shows all four secrets; a Worker without them cannot sign or sign in. If any is missing, hand over again for `pnpm --dir cirrus pds init`: they keep the values it finds in `.dev.vars` (it reuses the signing key on its own) and answer yes to pushing. If the wizard did not deploy:
 
 ```sh
 pnpm --dir cirrus run deploy
@@ -79,7 +84,7 @@ pnpm --dir cirrus run deploy
 _atproto.<handle>  TXT  "did=did:web:<hostname>"
 ```
 
-Check with `dig TXT _atproto.<handle>`.
+Check with `dig TXT _atproto.<handle>`. Only DNS (or `https://<handle>/.well-known/atproto-did`) proves the handle; the server's own `resolveHandle` answers from its settings either way.
 
 ### 6. A way to sign in
 
@@ -104,13 +109,13 @@ curl -s https://<hostname>/.well-known/oauth-authorization-server
 npm run --silent identity -- <handle>
 ```
 
-Done when: `describeServer` names the DID; `did.json` has the handle in `alsoKnownAs` and `https://<hostname>` as its PDS service; `resolveHandle` returns the DID; the OAuth metadata answers; and `identity` shows the handle verified both ways. If one fails, use the table at the end of the human guide, fix that one thing, and check again.
+Done when: `describeServer` names the DID; `did.json` has the handle in `alsoKnownAs` and `https://<hostname>` as its PDS service; `resolveHandle` returns the DID (this only shows the server's settings); the OAuth metadata answers; and `identity` shows the handle verified both ways, which is the check that covers DNS. If one fails, use the table at the end of the human guide, fix that one thing, and check again.
 
 ### 8. Connect to ohm
 
 **Hand over:** in the account app they choose **Connect my own server**, type the handle, DID or `https://<hostname>`, press **Check my server**, see three green rows, press **Continue to my server**, and say yes at their own server's consent screen.
 
-Then the vault service admits the DID as a member (today its `MEMBERS` list) and runs `com.ohmmmm.vault.importPublished` once. On a new server there is nothing to bring in. Publishing later writes only the post to the PDS.
+The vault service must admit the DID as a member. Today that is its `MEMBERS` setting, which the service's operator sets, not you or the person: if the vault refuses them as not a member, tell them to send their DID to whoever runs the vault service. Once admitted, it runs `com.ohmmmm.vault.importPublished` once. On a new server there is nothing to bring in. Publishing later writes only the post to the PDS.
 
 ### 9. Hand off
 
