@@ -1,10 +1,10 @@
-import { isPostId, postFile } from "../../../vault/vault/file.mjs"
+import { isPostId, postFile, setProperty } from "../../../vault/vault/file.mjs"
 import { readNode, readVault } from "../../../vault/vault/node.mjs"
 import { words } from "../../../vault/vault/words.mjs"
 import {
-  blockOf, loadVault, moveVisibility, readEvidence, searchInput, visibilityMove,
-  type Account, type BlockFile, type BlockHead, type BlockRef, type Friend, type HistoryVersion,
-  type HomeFile, type HomeSource, type Layer, type PublishPlan,
+  blockOf, CORTEX_CONTEXT, mediaName, moveVisibility, readEvidence, searchInput, visibilityMove,
+  type Account, type Agenda, type BlockFile, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove,
+  type CortexEntry, type CortexFile, type Friend, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type PublishPlan,
 } from "./source"
 import { isBlockKind } from "./block-kind"
 import type { SearchHit } from "./search"
@@ -13,14 +13,20 @@ type RemoteBlock = { id: string; path: string; title?: string; version: string; 
 type PostHead = { id: string; slug: string; title?: string; visibility: Layer }
 type Tree = { labels: { label: string; posts: PostHead[]; sublabels: { sublabel: string; posts: PostHead[] }[] }[] }
 type SealedRow<Sealed> = { id: string; sealed: Sealed; version: string }
+type SealOptions = { context?: typeof CORTEX_CONTEXT }
 type Keys<Master, Sealed> = {
+  /**
+   * Present once packages/keys can seal under another context than private blocks'. The cortex
+   * refuses until it is, rather than sealing cortex files as private blocks.
+   */
+  CORTEX_CONTEXT?: string
   vaultPrivateFiles(options: { baseUrl: string; fetch: typeof fetch }): {
     list(): Promise<SealedRow<Sealed>[]>
     get(id: string): Promise<SealedRow<Sealed> | null>
     replace(file: { id: string; sealed: Sealed; replaces: string | null }): Promise<unknown>
   }
-  openFile(master: Master, did: string, id: string, file: Sealed): Promise<Uint8Array>
-  sealFile(master: Master, did: string, id: string, plain: Uint8Array<ArrayBuffer>): Promise<Sealed>
+  openFile(master: Master, did: string, id: string, file: Sealed, options?: SealOptions): Promise<Uint8Array>
+  sealFile(master: Master, did: string, id: string, plain: Uint8Array<ArrayBuffer>, options?: SealOptions): Promise<Sealed>
 }
 
 export type ServiceOptions<Master, Sealed> = {
@@ -36,11 +42,39 @@ export class HomeRefusal extends Error {
   constructor(readonly code: string, message: string) { super(message) }
 }
 
+async function answerOf<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const { error, message } = await response.json().catch(() => ({}))
+    throw new HomeRefusal(error ?? "HttpError", message ?? `Vault request failed (HTTP ${response.status}).`)
+  }
+  return response.json() as Promise<T>
+}
+
+const statusOf = (file: HomeFile) => (blockOf(file) as { status?: string } | undefined)?.status
+
+/** A new opaque ID for a sealed file: a private block or a cortex file. */
+export const newOpaqueId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+
 const friendsHead = (block: RemoteBlock): BlockHead => ({
   id: block.id, path: block.path, title: block.title, version: block.version,
   layer: "friends", store: block.kind === "post" ? "post" : "block",
 })
 const visibleLayers: readonly Layer[] = ["public", "friends"]
+/** packages/keys seals journal entries as a file with this ID. */
+const JOURNAL_FILE_ID = "journal"
+const randomId = () => newOpaqueId()
+const pageAll = async <Row>(read: (since?: string) => Promise<{ cursor?: string; more?: boolean } & Record<string, unknown>>, key: string, what: string) => {
+  const rows: Row[] = []
+  let since: string | undefined
+  for (;;) {
+    const page = await read(since)
+    rows.push(...page[key] as Row[])
+    if (!page.more) return rows
+    if (!page.cursor || page.cursor === since) throw new HomeRefusal("InvalidCursor", `The ${what} list did not advance.`)
+    since = page.cursor
+  }
+}
 
 export function createServiceSource<Master, Sealed>(options: ServiceOptions<Master, Sealed>): HomeSource {
   const { did, origin, privateSession, fetch: send = fetch } = options
@@ -69,14 +103,33 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       }),
     }
     if (input.token) init.headers = { ...init.headers, Authorization: `Bearer ${input.token}` }
-    const response = await (input.account ? send : boundFetch)(url, init)
-    if (!response.ok) {
-      const { error, message } = await response.json().catch(() => ({}))
-      throw new HomeRefusal(error ?? "HttpError", message ?? `Vault request failed (HTTP ${response.status}).`)
-    }
-    return response.json() as Promise<T>
+    return answerOf<T>(await (input.account ? send : boundFetch)(url, init))
   }
   const vaultAsk = <T>(name: string, input?: Parameters<typeof ask>[1]) => ask<T>(`vault.${name}`, input)
+  const cortexAsk = <T>(name: string, input?: Parameters<typeof ask>[1]) => ask<T>(`cortex.${name}`, input)
+  const mediaAsk = <T>(name: string, input?: Parameters<typeof ask>[1]) => ask<T>(`media.${name}`, input)
+  const mediaBytes = async (name: string, query: Record<string, string>) => {
+    const url = new URL(`xrpc/com.ohmmmm.media.${name}`, base)
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+    const response = await boundFetch(url, { credentials: "same-origin", redirect: "error" })
+    if (!response.ok) await answerOf(response)
+    return response.blob()
+  }
+  const cortexSeal: SealOptions = { context: CORTEX_CONTEXT }
+  const checkOpaque = (id: string) => {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(id)) throw new HomeRefusal("InvalidFile", "Name a cortex file by its opaque ID.")
+  }
+  const listChannels = () => pageAll<ChannelHead & { removed?: boolean }>(since =>
+    vaultAsk("listChannels", { query: since === undefined ? {} : { since } }), "channels", "channel")
+    .then(rows => [...new Map(rows.map(row => [row.path, row])).values()].filter(row => !row.removed)
+      .map(({ path, version, title, kind }): ChannelHead => ({ path, version, title, kind })))
+  const channelFiles = async (): Promise<HomeFile[]> => {
+    const heads = await listChannels()
+    return Promise.all(heads.map(async head => {
+      const { channel } = await vaultAsk<{ channel: HomeFile }>("getChannel", { query: { path: head.path } })
+      return { path: channel.path.endsWith("/_channel.md") ? channel.path : `${head.path}/_channel.md`, text: channel.text }
+    }))
+  }
   const sharedToken = (method: "listShared" | "getShared") => {
     if (!options.sharedServiceToken) throw new HomeRefusal("TokenRequired", "Shared reads need a service token for your DID.")
     return options.sharedServiceToken(`com.ohmmmm.vault.${method}`)
@@ -89,11 +142,27 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
     }
     return { ...session, keys: privateSession.keys, files }
   }
-  const decode = async (id: string, sealed: Sealed): Promise<HomeFile> => {
-    const { keys, master } = unlocked()
-    const plain = await keys.openFile(master, did, id, sealed)
+  const cortexKeys = () => {
+    const session = unlocked()
+    if (session.keys.CORTEX_CONTEXT !== CORTEX_CONTEXT) {
+      throw new HomeRefusal("CortexKeysMissing", "This version of the account's keys can't seal the cortex yet.")
+    }
+    return session
+  }
+  const sealJson = async (id: string, value: unknown, options?: SealOptions) => {
+    const { keys, master } = options ? cortexKeys() : unlocked()
+    const sealed = await keys.sealFile(master, did, id, new TextEncoder().encode(JSON.stringify(value)), options)
     unlocked()
-    const file = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plain))
+    return sealed
+  }
+  const openJson = async (id: string, sealed: Sealed, options?: SealOptions) => {
+    const { keys, master } = options ? cortexKeys() : unlocked()
+    const plain = await keys.openFile(master, did, id, sealed, options)
+    unlocked()
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plain))
+  }
+  const decode = async (id: string, sealed: Sealed, options?: SealOptions): Promise<HomeFile> => {
+    const file = await openJson(id, sealed, options)
     if (!file || typeof file.path !== "string" || typeof file.text !== "string") {
       throw new HomeRefusal("InvalidFile", "The private file can't be read as a vault file.")
     }
@@ -196,16 +265,15 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       await vaultAsk(name, { body: { id: ref.id, replaces } })
     },
     async vault(layers = visibleLayers) {
-      if (!layers.includes("private")) return loadVault(source, layers)
       // The keys package already loaded the sealed files. Open them once, on this device.
-      const privateFiles = await unlocked().files.list()
-      const shared = await source.listBlocks(layers.filter(layer => layer !== "private"))
+      const privateFiles = layers.includes("private") ? await unlocked().files.list() : []
+      const [shared, channels] = await Promise.all([source.listBlocks(layers.filter(layer => layer !== "private")), channelFiles()])
       const all = await Promise.all([
         ...shared.map(ref => source.readBlock(ref)),
         ...privateFiles.map(file => decode(file.id, file.sealed)),
       ])
-      unlocked()
-      return readVault(all)
+      if (layers.includes("private")) unlocked()
+      return readVault([...all, ...channels])
     },
     connections: layers => readEvidence(source, layers),
     async search(input, signal) {
@@ -273,6 +341,120 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       return { path: block.path, text: block.text, version }
     },
     publishPlan: prepare => vaultAsk<PublishPlan>("getPublishPlan", { query: prepare ? { prepare: "1" } : {} }),
+    channels: {
+      list: listChannels,
+      async read(path) {
+        const { channel, version } = await vaultAsk<{ channel: HomeFile; version: string }>("getChannel", { query: { path } })
+        return { path: channel.path, text: channel.text, version }
+      },
+      async save(file, replaces) {
+        const path = file.path.replace(/\/_channel\.md$/, "")
+        const { version } = await vaultAsk<{ version: string }>("putChannel", { body: { channel: { path, text: file.text }, replaces } })
+        return { version }
+      },
+      move: (from, to, replaces) => vaultAsk<ChannelMove>("moveChannel", { body: { from, to, replaces } }),
+      async remove(path, replaces) { await vaultAsk("deleteChannel", { body: { path, replaces } }) },
+    },
+    inbox: {
+      async keep(ref, channel, replaces) {
+        checkRef(ref)
+        if (ref.store !== "sealed") {
+          const kept = await vaultAsk<{ id: string; version: string }>("keepProposed", { body: { id: ref.id, channel, replaces } })
+          return { ref, version: kept.version }
+        }
+        // A private capture is kept on this device: the same file, filed in the channel, unmarked.
+        const file = await source.readBlock(ref)
+        if (file.version !== replaces) throw new HomeRefusal("Changed", "The proposal changed. Review it again before keeping it.")
+        if (statusOf(file) !== "proposed") throw new HomeRefusal("NotProposed", "This block is not waiting in the inbox.")
+        const name = file.path.split("/").at(-1)!
+        const kept = { path: `${channel}/${name}`, text: setProperty(file.text, "status", undefined) }
+        return { ref, ...await source.saveBlock(ref, kept, replaces) }
+      },
+      async decline(ref, replaces) {
+        checkRef(ref)
+        if (ref.store !== "sealed") { await vaultAsk("declineProposed", { body: { id: ref.id, replaces } }); return }
+        const file = await source.readBlock(ref)
+        if (statusOf(file) !== "proposed") throw new HomeRefusal("NotProposed", "This block is not waiting in the inbox.")
+        await source.deleteBlock(ref, replaces)
+      },
+    },
+    cortex: {
+      async list() {
+        cortexKeys()
+        const heads = await pageAll<{ id: string; removed?: boolean }>(since =>
+          cortexAsk("listFiles", { query: since === undefined ? {} : { since } }), "blocks", "cortex")
+        const live = [...new Map(heads.map(head => [head.id, head])).values()].filter(head => !head.removed)
+        return Promise.all(live.map(head => source.cortex.read(head.id)))
+      },
+      async read(id) {
+        checkOpaque(id)
+        cortexKeys()
+        const { ciphertext, version } = await cortexAsk<{ ciphertext: Sealed; version: string }>("getFile", { query: { id } })
+        return { id, version, ...await decode(id, ciphertext, cortexSeal) }
+      },
+      async save(id, file, replaces, journal) {
+        checkOpaque(id)
+        const ciphertext = await sealJson(id, { path: file.path, text: file.text }, cortexSeal)
+        const entry = journal && await sealJson(JOURNAL_FILE_ID, journal, cortexSeal)
+        const { version } = await cortexAsk<{ version: string }>("putFile", { body: { file: { id, ciphertext }, replaces, ...(entry ? { journal: entry } : {}) } })
+        return { version }
+      },
+      async saveMany(changes, journal) {
+        const sealed = await Promise.all(changes.map(async change => {
+          checkOpaque(change.id)
+          return "remove" in change
+            ? { id: change.id, remove: true, replaces: change.replaces }
+            : { id: change.id, ciphertext: await sealJson(change.id, { path: change.file.path, text: change.file.text }, cortexSeal), replaces: change.replaces }
+        }))
+        const entry = journal && await sealJson(JOURNAL_FILE_ID, journal, cortexSeal)
+        const { blocks } = await cortexAsk<{ blocks: { id: string; version?: string; removed?: boolean }[] }>("putFiles", {
+          body: { changes: sealed, batchId: randomId(), ...(entry ? { journal: entry } : {}) },
+        })
+        return blocks
+      },
+      async remove(id, replaces, journal) {
+        checkOpaque(id)
+        cortexKeys()
+        const entry = journal && await sealJson(JOURNAL_FILE_ID, journal, cortexSeal)
+        await cortexAsk("deleteFile", { body: { id, replaces, ...(entry ? { journal: entry } : {}) } })
+      },
+      async history(id) {
+        checkOpaque(id)
+        cortexKeys()
+        return (await cortexAsk<{ versions: HistoryVersion[] }>("listVersions", { query: { id } })).versions
+      },
+      async readVersion(id, rev) {
+        checkOpaque(id)
+        cortexKeys()
+        const { ciphertext } = await cortexAsk<{ ciphertext: Sealed }>("getVersion", { query: { id, rev: String(rev) } })
+        return decode(id, ciphertext, cortexSeal)
+      },
+      async journal() {
+        cortexKeys()
+        const rows = await pageAll<{ seq: number; entry: Sealed; created: string }>(since =>
+          cortexAsk("listJournal", { query: since === undefined ? {} : { since } }), "entries", "cortex journal")
+        return Promise.all(rows.map(async (row): Promise<CortexEntry> => ({
+          seq: row.seq, created: row.created, entry: await openJson(JOURNAL_FILE_ID, row.entry, cortexSeal),
+        })))
+      },
+    },
+    media: {
+      async has(names) {
+        if (!names.length) return []
+        return (await mediaAsk<{ present: string[] }>("hasMedia", { query: { names: names.join(",") } })).present
+      },
+      async put(bytes, type) {
+        const name = await mediaName(bytes)
+        const url = new URL("xrpc/com.ohmmmm.media.putMedia", base)
+        url.searchParams.set("name", name)
+        const response = await boundFetch(url, { method: "POST", headers: { "Content-Type": type || "application/octet-stream" }, body: bytes })
+        const answer = await answerOf<{ name: string; size: number }>(response)
+        return { name: answer.name, size: answer.size }
+      },
+      get: name => mediaBytes("getMedia", { name }),
+      rendition: (name, width) => mediaBytes("getRendition", { name, width: String(width) }),
+    },
+    agenda: () => vaultAsk<Agenda>("getAgenda"),
   }
   return source
 }

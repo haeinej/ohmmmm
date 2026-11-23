@@ -1,4 +1,4 @@
-// Version history, for you and for agents (flows/history.md). A timeline over the sample histories (data/journal.ts),
+// Version history, for you and for agents (flows/history.md). A timeline over the home's journal (data/journal.ts: the sealed cortex journal and this device's changes),
 // drawn as a minimal vertical timeline, as VS Code's Timeline is: one line per entry, an icon for who,
 // and what was done as a verb with the block it was done to ("Edited Monday, rain").
 //
@@ -18,7 +18,7 @@ import {
   diffWords,
   type Actor, type ChangeLine, type ChangeOp, type DeadEnd, type Line, type SaveLine, type SessionLine, type Snapshot,
 } from "@/data/journal"
-import { byId, demoJournal, titleOf, type Doc } from "@/data/workspace-data"
+import { byId, journalOf, titleOf, type Doc } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
 import { finishSession, focusHistory, open, restoreVersion, revertChange, saveNow, useWorkspace } from "@/workspace/store"
@@ -33,8 +33,8 @@ const byName = (a: Actor) => (a.kind === "human" ? "You" : a.name)
 const nodeTitle = (node: string) => {
   const d = byId(node)
   if (d) return titleOf(d)
-  const last = demoJournal().linesFor(node).at(-1)
-  return (last && (demoJournal().snapshotAt(last.before ?? last.after)?.title || undefined)) ?? "a removed item"
+  const last = journalOf().linesFor(node).at(-1)
+  return (last && (journalOf().snapshotAt(last.before ?? last.after)?.title || undefined)) ?? "a removed item"
 }
 
 /** What was done, as a verb. */
@@ -138,18 +138,19 @@ function Diff({ before, after }: { before?: Snapshot; after: Snapshot }) {
 const meta = (who: Actor, at: string, reason?: string) => (
   <p className="text-small text-muted-foreground">{byName(who)} · {when(at)}{reason ? <> · <span className="italic">“{reason}”</span></> : null}</p>
 )
-const act = (fn: () => void, message: string, done?: () => void) => {
-  try { fn(); notify({ message, tone: "info" }); done?.() } catch (err) { notify({ message: (err as Error).message }) }
+const act = (fn: () => unknown, message: string, done?: () => void) => {
+  Promise.resolve().then(fn).then(() => { notify({ message, tone: "info" }); done?.() })
+    .catch(err => notify({ message: (err as Error).message }))
 }
 
 /** A change, opened: who and why, what it touched, the words, and Revert, Restore, Open. */
 function ChangeDetail({ line, inPage, onDone }: { line: ChangeLine; inPage?: boolean; onDone?: () => void }) {
   const doc = byId(line.node)
   const [againstNow, setAgainstNow] = useState(false)
-  const before = line.before ? demoJournal().snapshotAt(line.before) : undefined
-  const after = demoJournal().snapshotAt(line.after)!
-  const now = demoJournal().currentVersion(line.node)
-  const current = now ? demoJournal().snapshotAt(now) : undefined
+  const before = line.before ? journalOf().snapshotAt(line.before) : undefined
+  const after = journalOf().snapshotAt(line.after)!
+  const now = journalOf().currentVersion(line.node)
+  const current = now ? journalOf().snapshotAt(now) : undefined
   const editable = doc?.visibility === "private"
   return <>
     {meta(line.actor, line.at, line.reason)}
@@ -179,7 +180,7 @@ function ChangeDetail({ line, inPage, onDone }: { line: ChangeLine; inPage?: boo
 
 /** An agent's session, opened: what it did, the changes it made (each opens and reverts), and its dead ends. */
 function SessionDetail({ line }: { line: SessionLine }) {
-  const changes = line.changes.map(demoJournal().changeById).filter((c): c is ChangeLine => !!c)
+  const changes = line.changes.map(journalOf().changeById).filter((c): c is ChangeLine => !!c)
   const [picked, setPicked] = useState<string | null>(null)
   return <>
     {meta(line.actor, line.at)}
@@ -252,11 +253,11 @@ function Timeline({ lines, inPage, picked, setPicked, onDone }: {
 // ─── The Days layer: one autosave per day ───────────────────────────────────────
 
 /**
- * The sample Dates tab groups changes by day. Opening a day shows its changes, newest first.
+ * The Dates tab groups changes by day. Opening a day shows its changes, newest first.
  */
 function dailyAutosaves() {
   const days = new Map<string, ChangeLine[]>()
-  for (const l of demoJournal().historyLines()) if (l.type === "change") { const k = dayKey(l.at); days.set(k, [...(days.get(k) ?? []), l]) }
+  for (const l of journalOf().historyLines()) if (l.type === "change") { const k = dayKey(l.at); days.set(k, [...(days.get(k) ?? []), l]) }
   return [...days].sort(([a], [b]) => b.localeCompare(a)).map(([day, lines]) => {
     const sorted = [...lines].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
     return { day, at: sorted[0].at, lines: sorted, blocks: new Set(lines.map(l => l.node)).size }
@@ -299,8 +300,8 @@ function registerChangeTools(revert: boolean, restore: boolean) {
     inputSchema: { type: "object", properties: { change: { type: "string", maxLength: 64 } }, required: ["change"], additionalProperties: false },
     outputSchema: { type: "object", properties: { id: { type: "string" }, reverted: { type: "string" }, fields: { type: "array" }, next: { const: "history.list" } } },
     run: withAgent("Reverting a change", async ({ change }) => {
-      if (!demoJournal().changeById(change)) throw new DOMException("There is no such change", "DataError")
-      return { ...revertChange(change), next: "history.list" }
+      if (!journalOf().changeById(change)) throw new DOMException("There is no such change", "DataError")
+      return { ...await revertChange(change), next: "history.list" }
     }),
   }, ac.signal).catch(console.error)
   if (restore) registerStepTool<{ block: string; version: string; reason?: string }, unknown>({
@@ -313,10 +314,10 @@ function registerChangeTools(revert: boolean, restore: boolean) {
     },
     outputSchema: { type: "object", properties: { id: { type: "string" }, version: { type: "string" }, next: { const: "history.versions" } } },
     run: withAgent("Restoring a version", async ({ block: id, version, reason }) => {
-      const mine = demoJournal().linesFor(id)
+      const mine = journalOf().linesFor(id)
       if (!mine.some(c => c.after === version)) throw new DOMException("That version is not one of this block's", "DataError")
-      if (version === demoJournal().currentVersion(id)) throw new DOMException("That is the current version", "DataError")
-      return { ...restoreVersion(id, version, reason), next: "history.versions" }
+      if (version === journalOf().currentVersion(id)) throw new DOMException("That is the current version", "DataError")
+      return { ...await restoreVersion(id, version, reason), next: "history.versions" }
     }),
   }, ac.signal).catch(console.error)
   return ac
@@ -340,9 +341,9 @@ function useChangeTools() {
 
 /** A block's own lines, newest first: its changes, and saves between. */
 function linesForBlock(id: string): Line[] {
-  const changes = demoJournal().linesFor(id)
+  const changes = journalOf().linesFor(id)
   const from = changes[0] ? Date.parse(changes[0].at) : Infinity
-  const saves = demoJournal().historyLines(changes[0]?.owner).filter(l => l.type === "save" && Date.parse(l.at) >= from)
+  const saves = journalOf().historyLines(changes[0]?.owner).filter(l => l.type === "save" && Date.parse(l.at) >= from)
   return [...changes, ...saves].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 }
 
@@ -351,7 +352,7 @@ function PageVersions({ doc, focus, onRestored }: { doc: Doc; focus?: string; on
   const editable = doc.visibility === "private"
   const lines = useMemo(() => linesForBlock(doc.id), [doc.id, rev])
   const changes = lines.filter((l): l is ChangeLine => l.type === "change")
-  const now = demoJournal().currentVersion(doc.id)
+  const now = journalOf().currentVersion(doc.id)
   const [picked, setPicked] = useState<string | null>(focus ?? null)
 
   // This step's tool: read the versions. Revert and restore are shared with the home's history.
@@ -409,8 +410,8 @@ type Tab = "dates" | "you" | "agents"
 
 /** One tab's lines: yours (changes and saves), or agents' (sessions, with the changes they made inside). */
 function topLevel(who: "human" | "agent"): Line[] {
-  const grouped = new Set(demoJournal().historyLines("cortex").flatMap(l => (l.type === "session" ? l.changes : [])))
-  return [...demoJournal().historyLines()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+  const grouped = new Set(journalOf().historyLines("cortex").flatMap(l => (l.type === "session" ? l.changes : [])))
+  return [...journalOf().historyLines()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
     .filter(l => l.actor.kind === who && !(l.type === "change" && grouped.has(l.id)))
 }
 
@@ -455,10 +456,10 @@ export function RepoHistory() {
       },
       outputSchema: { type: "object", properties: { lines: { type: "array" }, deadEnds: { type: "array" }, next: { const: "history.session" } } },
       run: withAgent("Reading history", async ({ who: w = "all", node, since, limit = 30 }) => ({
-        lines: [...demoJournal().historyLines()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+        lines: [...journalOf().historyLines()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
           .filter(l => (w === "all" || l.actor.kind === w) && (!node || ("node" in l && l.node === node)) && (!since || l.at >= since))
           .slice(0, limit).map(asTool),
-        deadEnds: demoJournal().historyLines("cortex").filter((l): l is SessionLine => l.type === "session").flatMap(s => s.deadEnds.map(d => ({ ...d, by: s.actor.name, at: s.at }))),
+        deadEnds: journalOf().historyLines("cortex").filter((l): l is SessionLine => l.type === "session").flatMap(s => s.deadEnds.map(d => ({ ...d, by: s.actor.name, at: s.at }))),
         next: "history.session",
       })),
     }, ac.signal).catch(console.error)
@@ -478,7 +479,7 @@ export function RepoHistory() {
     }, ac.signal).catch(console.error)
     if (offered["history.save"]) registerStepTool<{ name: string; note?: string }, unknown>({
       name: "history.save", title: "Save",
-      description: "Names the sample vault as it is now, so it can be found and compared later. It changes no block. Returns the save's name and its place in the history.",
+      description: "Names the home as it is now, so it can be found and compared later. It changes no block. Returns the save's name and its place in the history.",
       inputSchema: { type: "object", properties: { name: { type: "string", minLength: 1, maxLength: 80 }, note: { type: "string", maxLength: 300 } }, required: ["name"], additionalProperties: false },
       outputSchema: { type: "object", properties: { name: { type: "string" }, seq: { type: "integer" }, next: { const: "history.list" } } },
       run: withAgent("Saving", async ({ name: n, note }) => ({ ...save(n, note), next: "history.list" })),

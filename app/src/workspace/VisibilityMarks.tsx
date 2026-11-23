@@ -1,4 +1,4 @@
-// The visibility pills show each block's sample layer. Widening access asks for approval.
+// The visibility pills show each block's layer. Widening access asks for approval; public is reached only through Publish.
 // The tree's rows are ohm-ui's, so the pills sit over them, measured from the rows.
 import { useLayoutEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
@@ -50,9 +50,11 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
 
   const change = (doc: Doc, to: Visibility) => {
     if (to === doc.visibility) return
+    if (to === "public") return notify({ message: "A block becomes public through Publish, which shows a preview and asks first.", tone: "info" })
     if (openness[to] > openness[doc.visibility]) return setAsking({ doc, to })
     setVisibility(doc.id, to)
-    notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" })
+      .then(() => notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" }))
+      .catch(err => notify({ message: (err as Error).message }))
   }
 
   if (!showVisibility) return null
@@ -96,15 +98,17 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
         <DialogHeader>
           <DialogTitle>Show “{asking && titleOf(asking.doc)}” to {asking && VISIBILITY[asking.to].label.toLowerCase()}?</DialogTitle>
           <DialogDescription>
-            This changes the block’s visibility in the sample home. Publishing requires a separate preview and approval.
+            Your vault service and your friends can read the shared copy. Publishing is a separate step with its own preview and approval.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="ghost" onClick={() => setAsking(null)}>Cancel</Button>
           <Button onClick={() => {
             if (!asking) return
-            setVisibility(asking.doc.id, asking.to)
-            notify({ message: `“${titleOf(asking.doc)}” now has ${asking.to} visibility in the sample home.`, tone: "info" })
+            const { doc, to } = asking
+            setVisibility(doc.id, to)
+              .then(() => notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" }))
+              .catch(err => notify({ message: (err as Error).message }))
             setAsking(null)
           }}>Change visibility</Button>
         </DialogFooter>

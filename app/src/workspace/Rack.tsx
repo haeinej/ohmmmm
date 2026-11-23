@@ -8,7 +8,7 @@ import { icons } from "@/lib/icons"
 import { Kbd } from "@/components/ui/kbd"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/cn"
-import { createDraft, me, openSettings, setSearchOpen, toggleSide, useWorkspace } from "./store"
+import { createDraft, me, openSettings, report, setSearchOpen, toggleSide, useWorkspace } from "./store"
 
 const rackButton = cn(
   "inline-flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none",
@@ -36,7 +36,7 @@ const RackIcon = ({ icon }: { icon: LucideIcon }) => <Icon icon={icon} />
 /** The rack: a column of icons on the page itself, apart from the panels. */
 export function Rack() {
   const { side, searchOpen } = useWorkspace()
-  const unread = inbox.filter(i => i.unread).length
+  const unread = inbox.length
   return (
     <nav aria-label="Workspace" className="flex w-[68px] shrink-0 flex-col items-center gap-1 py-3">
       {/* The ohm dot, at the size of an icon, in a slot the size of a button. */}
@@ -44,10 +44,10 @@ export function Rack() {
         <span className="size-icon rounded-full bg-primary dark:bg-foreground" />
       </span>
       <RackButton label="Search" shortcut="⌘K" active={searchOpen} onClick={() => setSearchOpen(true)}><RackIcon icon={icons.search} /></RackButton>
-      <RackButton label="New block" shortcut="⌘N" onClick={() => createDraft()}><RackIcon icon={icons.write} /></RackButton>
+      <RackButton label="New block" shortcut="⌘N" onClick={() => void report(createDraft())}><RackIcon icon={icons.write} /></RackButton>
       <div className="h-4" />
       <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
-      <RackButton label={unread ? `Inbox, ${unread} new` : "Inbox"} active={side === "inbox"} onClick={() => toggleSide("inbox")}>
+      <RackButton label={unread ? `Inbox, ${unread} proposed` : "Inbox"} active={side === "inbox"} onClick={() => toggleSide("inbox")}>
         <span className="relative flex">
           <RackIcon icon={InboxIcon} />
           {unread > 0 && <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-sidebar dark:bg-foreground dark:ring-background" />}

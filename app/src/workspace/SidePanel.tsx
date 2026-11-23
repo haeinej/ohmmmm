@@ -9,7 +9,8 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { FileTree, type FileTreeNode } from "@/components/ui/file-tree"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inbox, inOrder, placedIn, blocks, sees, titleOf, type Audience, type Doc, type InboxItem } from "@/data/workspace-data"
+import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inbox, inOrder, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience, type Doc } from "@/data/workspace-data"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/cn"
 import { DOC_DRAG } from "./drop"
 import { GraphView } from "./GraphView"
@@ -23,8 +24,10 @@ import { VisibilityMarks } from "./VisibilityMarks"
 import { startChannel } from "./PageActions"
 import { SETTINGS_TABS } from "./settings-tabs"
 import { panelTitle, SidePanelFrame } from "./Surface"
+import { InboxPanel } from "./Inbox"
+import { INBOX } from "@/data/source"
 import {
-  createDraft, kept, marks, me, moveBlock, moveChannel, open, openInbox, openSettings, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
+  createDraft, kept, marks, me, moveBlock, moveChannel, open, openSettings, report, signOut, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
 } from "./store"
 
 /**
@@ -51,7 +54,7 @@ function toTree(prime: string, docs: Doc[], order?: string[], placements = inSec
     subs.set(inner, [...(subs.get(inner) ?? []), { doc: d, id }])
     labels.set(top, subs)
   }
-  // Blocks in each channel's own order (data/sample.ts inOrder).
+  // Blocks in each channel's own order (its _channel.md, through workspace-data inOrder).
   const leaves = (path: string, list: { doc: Doc; id: string }[] = []): FileTreeNode[] => {
     const ordered = inOrder(path, list.map(l => l.doc))
     return ordered.map(d => list.find(l => l.doc === d)!).map(({ doc: d, id }) => ({ id, name: `${d.icon ? `${d.icon} ` : ""}${titleOf(d)}` }))
@@ -167,18 +170,20 @@ function useTreeDragDrop(ref: React.RefObject<HTMLDivElement | null>, deps: unkn
       e.preventDefault()
       try {
         if (was.kind === "channel") {
-          const { path, published } = moveChannel(was.path, t.channel)
-          if (path !== was.path) window.dispatchEvent(new CustomEvent("ohm:channel-renamed", { detail: { from: was.path, to: path } }))
-          notify({ message: `Moved ${shown(was.path.split("/").at(-1)!)} to ${t.channel ? shown(t.channel) : "the top"}${published ? `. ${published} ${published === 1 ? "post gets" : "posts get"} a new address when you publish` : ""}`, tone: "info" })
+          void report(moveChannel(was.path, t.channel).then(({ path }) => {
+            if (path !== was.path) window.dispatchEvent(new CustomEvent("ohm:channel-renamed", { detail: { from: was.path, to: path } }))
+            notify({ message: `Moved ${shown(was.path.split("/").at(-1)!)} to ${t.channel ? shown(t.channel) : "the top"}`, tone: "info" })
+          }))
           return
         }
         const id = was.id || e.dataTransfer?.getData(DOC_DRAG) || ""
         const doc = byId(id)
         if (!doc || !t.channel || t.block === id) return
         const from = was.from ?? locationOf(doc)
-        const { published } = moveBlock(id, from, t.channel, { keep: e.altKey, ...(t.where === "before" ? { before: t.block } : t.where === "after" ? { after: t.block } : {}) })
-        notify({ message: from === t.channel ? `Moved within ${shown(t.channel)}`
-          : `${e.altKey ? "Added" : "Moved"} “${titleOf(doc)}” to ${shown(t.channel)}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })
+        const into = t.channel, copy = e.altKey
+        void report(moveBlock(id, from, into, { keep: copy, ...(t.where === "before" ? { before: t.block } : t.where === "after" ? { after: t.block } : {}) })
+          .then(({ published }) => notify({ message: from === into ? `Moved within ${shown(into)}`
+            : `${copy ? "Added" : "Moved"} “${titleOf(doc)}” to ${shown(into)}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })))
       } catch (err) { notify({ message: (err as Error).message }) }
     }
     const end = () => { dragging = null; clear() }
@@ -256,12 +261,14 @@ function RepoPanel() {
   const [showArchived, setShowArchived] = useState(false)
   const [rows, setRows] = useState<HTMLDivElement | null>(null)
   // Empty channels show to you, unfiltered; seen as someone else, a channel shows only what they can see in it.
+  // The inbox channel has its own panel; what waits in it is not filed yet.
   const vaultTree = useMemo(() => toTree("vault", vaultDocs, undefined, inChannels,
-    audience === "private" && !filtering ? channelRecords.map(c => c.path) : []), [vaultDocs, audience, filtering, rev]) // eslint-disable-line react-hooks/exhaustive-deps
+    audience === "private" && !filtering ? channelRecords.map(c => c.path).filter(path => path !== INBOX) : []), [vaultDocs, audience, filtering, rev]) // eslint-disable-line react-hooks/exhaustive-deps
   const showCortex = scope.cortex, showVault = scope.vault
   const treeRef = useRef<HTMLDivElement | null>(null)
   useTreeDragDrop(treeRef, [repoMode])
-  const cortexLocked = audience !== "private"
+  // The cortex is yours alone, and opens only on a device that unlocked your keys.
+  const cortexLocked = audience !== "private" || cortexState !== "open"
   const allFolders = useMemo(() => [
     ...(showCortex ? ["prime:cortex", ...folderIds(cortexTree)] : []),
     ...(showVault ? ["prime:vault", ...folderIds(vaultTree)] : []),
@@ -403,10 +410,20 @@ function RepoPanel() {
           {showVault && <>
             <PrimeRow prime="vault" open={expanded.has("prime:vault")} onOpen={() => flip("prime:vault")}
               allOpen={primeAllOpen("vault")} onExpandAll={() => expandPrime("vault")} onOnly={() => setScope({ cortex: false, vault: true })}
-              onNew={() => createDraft()} onNewChannel={() => startChannel()} />
+              onNew={() => void report(createDraft())} onNewChannel={() => startChannel()} />
             {expanded.has("prime:vault") && (
               <FileTree aria-label="vault" className="ms-4 [--tree-inset:1rem] animate-in fade-in-0 slide-in-from-top-1 duration-(--ohm-duration-open)" nodes={vaultTree}
                 expanded={expanded} onExpandedChange={setExpanded} selected={selected} onSelect={id => open(docIdOf(id))} />
+            )}
+            {expanded.has("prime:vault") && !filtering && blocks.length === 0 && (
+              <Empty className="py-6">
+                <EmptyHeader>
+                  <EmptyTitle>Your vault is empty</EmptyTitle>
+                  <EmptyDescription>
+                    {privateLayer === "open" ? "Start a block, or drop a Markdown file here." : "Nothing shared is here yet. Private blocks show once this device unlocks your keys."}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             )}
           </>}
           {archived.length > 0 && <>
@@ -431,55 +448,6 @@ function RepoPanel() {
           <GraphView />
         </div>
       )}
-    </SidePanelFrame>
-  )
-}
-
-// ─── Inbox ────────────────────────────────────────────────────────────────────
-
-const KIND: Record<InboxItem["kind"], { icon: LucideIcon; label: string }> = {
-  reply: { icon: MessageCircleIcon, label: "Replied" },
-  mention: { icon: AtSignIcon, label: "Mentioned you" },
-  friend: { icon: UserPlusIcon, label: "Friend request" },
-  observation: { icon: BrainIcon, label: "Cortex" },
-}
-
-function InboxPanel() {
-  const { view, rev } = useWorkspace()
-  void rev
-  const unread = inbox.filter(i => i.unread).length
-  return (
-    <SidePanelFrame label="Inbox"
-      heading={<>
-        <h1 className={panelTitle}>Inbox</h1>
-        <p className="text-small text-muted-foreground">{unread ? `${unread} new` : "All read"}</p>
-      </>}>
-      <ul className="flex flex-col gap-0.5">
-        {inbox.map(i => {
-          const current = (view.kind === "inbox" && view.id === i.id) || (view.kind === "doc" && i.ref === view.id)
-          return (
-            <li key={i.id}>
-              <button type="button" onClick={() => openInbox(i.id)} aria-current={current || undefined}
-                className="flex w-full items-start gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-(--ohm-duration-state) hover:bg-muted aria-[current=true]:bg-muted">
-                <Avatar className="mt-0.5 size-8"><AvatarFallback className="bg-muted text-small text-muted-foreground">
-                  {i.from === "cortex" ? <Icon icon={BrainIcon} size="sm" /> : i.from.slice(0, 1).toUpperCase()}
-                </AvatarFallback></Avatar>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex items-center gap-2">
-                    <span className={cn("truncate text-body", i.unread && "font-semibold")}>{i.from === "cortex" ? "Cortex" : `@${i.from}`}</span>
-                    <span className="ms-auto flex-none text-small text-muted-foreground">{i.at.slice(5).replace("-", "/")}</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-small text-muted-foreground">
-                    <Icon icon={KIND[i.kind].icon} size="xs" />{KIND[i.kind].label}
-                  </span>
-                  <span className="line-clamp-2 text-body text-muted-foreground">{i.text}</span>
-                </span>
-                {i.unread && <span aria-label="New" className="mt-2 size-2 flex-none rounded-full bg-primary dark:bg-foreground" />}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
     </SidePanelFrame>
   )
 }
@@ -511,7 +479,8 @@ function ProfilePanel() {
           </Button>
         ))}
         <div className="mt-9 flex flex-col">
-          <Button variant="ghost" className={row} onClick={() => notify({ message: "Signing out is not part of this wireframe", tone: "info" })}>
+          {/* Signing out ends the ohm session, which lives with ohm's sign-in on this address. */}
+          <Button variant="ghost" className={row} onClick={() => void report(signOut())}>
             <Icon icon={LogOutIcon} size="sm" /><span>Sign out</span>
           </Button>
         </div>
@@ -522,6 +491,7 @@ function ProfilePanel() {
 
 export function SidePanel() {
   const { side } = useWorkspace()
+  if (side && homeStatus() !== "ready") return null
   if (side === "repo") return <RepoPanel />
   if (side === "inbox") return <InboxPanel />
   if (side === "profile") return <ProfilePanel />
