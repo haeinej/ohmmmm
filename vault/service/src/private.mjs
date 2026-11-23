@@ -1,4 +1,4 @@
-// The private layer's store: private blocks as `{ id, ciphertext, version }`, which the service
+// The sealed stores (the private layer's, and the cortex's): private blocks or cortex files as `{ id, ciphertext, version }`, which the service
 // keeps and cannot read (plans/encryption.md, "The two stores").
 //
 // - `id` is opaque: chosen on the member's device, it says nothing about the block. Its path, title,
@@ -67,27 +67,40 @@ export function sealedFile(ciphertext, what = 'A private block') {
 }
 
 // The sealed file of a block, by its opaque ID.
-export function sealedBlock(given) {
+export function sealedBlock(given, noun = 'private block') {
   const { id, ciphertext, ...more } = given ?? {};
-  if (Object.keys(more).length) refuse(`A private block is sent as id and ciphertext, and nothing else: ${Object.keys(more).join(', ')}`);
+  if (Object.keys(more).length) refuse(`A ${noun} is sent as id and ciphertext, and nothing else: ${Object.keys(more).join(', ')}`);
   opaqueId(id);
   const { text, generation } = sealedFile(ciphertext);
   return { id, text, generation };
 }
 
-export function privateStore(db) {
-  const current = (did, id) => db.prepare('SELECT version, ciphertext, generation, seq, rev FROM private_blocks WHERE did = ?1 AND id = ?2').bind(did, id).first();
-  const next = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM private_blocks WHERE did = ?1)';
-  const changed = (id, held) => new Refused(409, 'Changed', 'The private block has changed since the version this request names', { id, current: held?.version ?? null });
+// The sealed stores: the private layer's blocks, and the cortex's files. Each has its own tables
+// and the same rules. They share the member's master key, so one key rotation covers both.
+export const SEALED = {
+  private: { blocks: 'private_blocks', versions: 'private_block_versions', journal: 'private_journal', batches: 'private_batches', noun: 'private block' },
+  cortex: { blocks: 'cortex_files', versions: 'cortex_file_versions', journal: 'cortex_journal', batches: 'cortex_batches', noun: 'cortex file' },
+};
+
+export function privateStore(db, { kind = 'private' } = {}) {
+  const T = SEALED[kind];
+  if (!T) throw new Error(`No sealed store called ${kind}`);
+  const current = (did, id) => db.prepare(`SELECT version, ciphertext, generation, seq, rev FROM ${T.blocks} WHERE did = ?1 AND id = ?2`).bind(did, id).first();
+  const next = `(SELECT COALESCE(MAX(seq), 0) + 1 FROM ${T.blocks} WHERE did = ?1)`;
+  const changed = (id, held) => new Refused(409, 'Changed', `The ${T.noun} has changed since the version this request names`, { id, current: held?.version ?? null });
   const row = held => ({ ciphertext: JSON.parse(held.ciphertext), version: held.version, rev: held.rev });
   const rotationOf = did => db.prepare('SELECT target, state, started_at, finished_at FROM private_rotations WHERE did = ?1').bind(did).first();
   const olderKey = (id, floor) => new Refused(409, 'OlderKey', `This is sealed with an older master key than ${floor.target}, which the member ${floor.state === 'rotating' ? 'is rotating to' : 'rotated to'}. Unlock again, and seal it with the newer key`, { ...(id ? { id } : {}), target: floor.target });
   // What a rotation to `target` still has to re-wrap: kept versions (the latest of each block among
   // them) and journal entries sealed under an older key.
+  // Counted across every sealed store, since they share the master key.
   const below = async (did, target) => {
-    const versions = (await db.prepare('SELECT COUNT(*) AS count FROM private_block_versions WHERE did = ?1 AND generation < ?2').bind(did, target).first()).count;
-    const journal = (await db.prepare('SELECT COUNT(*) AS count FROM private_journal WHERE did = ?1 AND generation < ?2').bind(did, target).first()).count;
-    return Number(versions) + Number(journal);
+    let count = 0;
+    for (const each of Object.values(SEALED)) {
+      count += Number((await db.prepare(`SELECT COUNT(*) AS count FROM ${each.versions} WHERE did = ?1 AND generation < ?2`).bind(did, target).first()).count);
+      count += Number((await db.prepare(`SELECT COUNT(*) AS count FROM ${each.journal} WHERE did = ?1 AND generation < ?2`).bind(did, target).first()).count);
+    }
+    return count;
   };
   const generationOf = value => {
     const number = Number(value);
@@ -117,10 +130,10 @@ export function privateStore(db) {
   // or `{ id, remove: true, replaces }`, with an optional sealed journal entry describing them.
   // `batchId` makes the batch idempotent: sent again, it answers what it answered the first time.
   async function apply(did, given, { batchId = null, journal = null, now = new Date() } = {}) {
-    if (!Array.isArray(given) || !given.length || given.length > MOST) throw new Refused(400, 'InvalidRequest', `A batch changes 1 to ${MOST} private blocks`);
+    if (!Array.isArray(given) || !given.length || given.length > MOST) throw new Refused(400, 'InvalidRequest', `A batch changes 1 to ${MOST} ${T.noun}s`);
     if (batchId !== null && (typeof batchId !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(batchId))) throw new Refused(400, 'InvalidRequest', 'batchId is 8 to 128 letters, digits and . _ : -');
     if (batchId !== null) {
-      const done = await db.prepare('SELECT result FROM private_batches WHERE did = ?1 AND batch_id = ?2').bind(did, batchId).first();
+      const done = await db.prepare(`SELECT result FROM ${T.batches} WHERE did = ?1 AND batch_id = ?2`).bind(did, batchId).first();
       if (done) return { ...JSON.parse(done.result), replayed: true };
     }
     const changes = [];
@@ -131,7 +144,7 @@ export function privateStore(db) {
         if (Object.keys(rest).some(key => key !== 'id')) refuse('A removal is { id, remove: true, replaces }');
         changes.push({ id: opaqueId(rest.id), remove: true, replaces });
       } else {
-        const { id, text, generation } = sealedBlock(rest);
+        const { id, text, generation } = sealedBlock(rest, T.noun);
         changes.push({ id, text, generation, replaces, version: await privateVersion(text) });
       }
     }
@@ -141,30 +154,30 @@ export function privateStore(db) {
     const statements = [];
     for (const change of changes) {
       // The version it replaces is the one held (a removed block's is null, as a new one's).
-      statements.push(guard('(SELECT version FROM private_blocks WHERE did = ?1 AND id = ?2) IS NOT ?3', did, change.id, change.replaces));
+      statements.push(guard(`(SELECT version FROM ${T.blocks} WHERE did = ?1 AND id = ?2) IS NOT ?3`, did, change.id, change.replaces));
       if (change.remove) {
-        statements.push(db.prepare(`UPDATE private_blocks SET version = NULL, ciphertext = NULL, generation = NULL, size = NULL, seq = ${next}, updated_at = ?3 WHERE did = ?1 AND id = ?2`).bind(did, change.id, at));
+        statements.push(db.prepare(`UPDATE ${T.blocks} SET version = NULL, ciphertext = NULL, generation = NULL, size = NULL, seq = ${next}, updated_at = ?3 WHERE did = ?1 AND id = ?2`).bind(did, change.id, at));
         continue;
       }
       statements.push(guard(floorViolated('?2'), did, change.generation));
       statements.push(db.prepare(
-        `INSERT INTO private_blocks (did, id, version, ciphertext, generation, size, seq, rev, created_at, updated_at)
+        `INSERT INTO ${T.blocks} (did, id, version, ciphertext, generation, size, seq, rev, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ${next}, ${next}, ?7, ?7)
          ON CONFLICT (did, id) DO UPDATE SET version = excluded.version, ciphertext = excluded.ciphertext, generation = excluded.generation,
            size = excluded.size, seq = excluded.seq, rev = excluded.rev, updated_at = excluded.updated_at`,
       ).bind(did, change.id, change.version, change.text, change.generation, encoder.encode(change.text).length, at));
       statements.push(db.prepare(
-        `INSERT INTO private_block_versions (did, id, rev, version, ciphertext, generation, size, created_at)
-         SELECT did, id, rev, version, ciphertext, generation, size, updated_at FROM private_blocks WHERE did = ?1 AND id = ?2`,
+        `INSERT INTO ${T.versions} (did, id, rev, version, ciphertext, generation, size, created_at)
+         SELECT did, id, rev, version, ciphertext, generation, size, updated_at FROM ${T.blocks} WHERE did = ?1 AND id = ?2`,
       ).bind(did, change.id));
     }
     if (entry) {
       statements.push(guard(floorViolated('?2'), did, entry.generation));
-      statements.push(db.prepare(`INSERT INTO private_journal (did, seq, entry, generation, created_at) VALUES (?1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM private_journal WHERE did = ?1), ?2, ?3, ?4)`)
+      statements.push(db.prepare(`INSERT INTO ${T.journal} (did, seq, entry, generation, created_at) VALUES (?1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM ${T.journal} WHERE did = ?1), ?2, ?3, ?4)`)
         .bind(did, entry.text, entry.generation, at));
     }
     const result = { blocks: changes.map(change => (change.remove ? { id: change.id, removed: true } : { id: change.id, version: change.version })) };
-    if (batchId !== null) statements.push(db.prepare('INSERT INTO private_batches (did, batch_id, result, created_at) VALUES (?1, ?2, ?3, ?4)').bind(did, batchId, JSON.stringify(result), at));
+    if (batchId !== null) statements.push(db.prepare(`INSERT INTO ${T.batches} (did, batch_id, result, created_at) VALUES (?1, ?2, ?3, ?4)`).bind(did, batchId, JSON.stringify(result), at));
     if (await runBatch(statements)) {
       const revs = await Promise.all(changes.filter(change => !change.remove).map(async change => [change.id, (await current(did, change.id)).rev]));
       const byId = Object.fromEntries(revs);
@@ -178,7 +191,7 @@ export function privateStore(db) {
       if (!change.remove && floor && floor.target > change.generation) throw olderKey(change.id, floor);
     }
     if (entry && floor && floor.target > entry.generation) throw olderKey(null, floor);
-    throw new Refused(409, 'Changed', 'The private blocks changed while this batch was being applied. Read them again');
+    throw new Refused(409, 'Changed', `The ${T.noun}s changed while this batch was being applied. Read them again`);
   }
 
   return {
@@ -189,14 +202,14 @@ export function privateStore(db) {
       const under = below === undefined ? null : Number(below);
       if (under !== null && (!Number.isSafeInteger(under) || under < 1)) throw new Refused(400, 'InvalidRequest', 'below is a generation, a whole number from 1');
       const { results } = await db.prepare(
-        `SELECT id, version, generation, size, seq, rev FROM private_blocks
+        `SELECT id, version, generation, size, seq, rev FROM ${T.blocks}
          WHERE did = ?1 AND seq > ?2 ${since === undefined ? 'AND version IS NOT NULL' : ''} ${under === null ? '' : 'AND (version IS NULL OR generation < ?3)'}
          ORDER BY seq LIMIT ${PAGE + 1}`,
       ).bind(did, after, under).all();
       const page = results.slice(0, PAGE);
       const latest = page.length ? page.at(-1).seq
         : since !== undefined ? after
-        : (await db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM private_blocks WHERE did = ?1').bind(did).first()).seq;
+        : (await db.prepare(`SELECT COALESCE(MAX(seq), 0) AS seq FROM ${T.blocks} WHERE did = ?1`).bind(did).first()).seq;
       return {
         blocks: page.map(each => (each.version === null ? { id: each.id, removed: true } : { id: each.id, version: each.version, rev: each.rev, generation: each.generation, size: each.size })),
         cursor: String(latest),
@@ -206,14 +219,14 @@ export function privateStore(db) {
 
     async read(did, id) {
       const held = await current(did, opaqueId(id));
-      if (!held || held.version === null) throw new Refused(404, 'NotFound', 'There is no such private block');
+      if (!held || held.version === null) throw new Refused(404, 'NotFound', `There is no such ${T.noun}`);
       return { id, ...row(held) };
     },
 
     // One change, with compare-and-swap: `replaces` is the version being replaced, and nothing for a
     // new block. The same ciphertext again changes nothing.
     async write(did, given, { replaces = null, journal = null, now = new Date() } = {}) {
-      const { id, text } = sealedBlock(given);
+      const { id, text } = sealedBlock(given, T.noun);
       const version = await privateVersion(text);
       const held = await current(did, id);
       if (held?.version === version) return { id, version, rev: held.rev, unchanged: true };
@@ -233,7 +246,7 @@ export function privateStore(db) {
 
     // A block's kept versions, newest first: each by its `rev`, which never changes.
     async versions(did, id) {
-      const { results } = await db.prepare('SELECT rev, version, generation, size, created_at FROM private_block_versions WHERE did = ?1 AND id = ?2 ORDER BY rev DESC LIMIT 1000')
+      const { results } = await db.prepare(`SELECT rev, version, generation, size, created_at FROM ${T.versions} WHERE did = ?1 AND id = ?2 ORDER BY rev DESC LIMIT 1000`)
         .bind(did, opaqueId(id)).all();
       return { id, versions: results.map(each => ({ rev: each.rev, version: each.version, generation: each.generation, size: each.size, created: each.created_at })) };
     },
@@ -241,7 +254,7 @@ export function privateStore(db) {
     async readVersion(did, id, rev) {
       const at = Number(rev);
       if (!Number.isSafeInteger(at) || at < 1) throw new Refused(400, 'InvalidRequest', 'rev is a version\'s rev, from its block\'s versions');
-      const held = await db.prepare('SELECT rev, version, ciphertext FROM private_block_versions WHERE did = ?1 AND id = ?2 AND rev = ?3').bind(did, opaqueId(id), at).first();
+      const held = await db.prepare(`SELECT rev, version, ciphertext FROM ${T.versions} WHERE did = ?1 AND id = ?2 AND rev = ?3`).bind(did, opaqueId(id), at).first();
       if (!held) throw new Refused(404, 'NotFound', 'There is no such version');
       return { id, rev: held.rev, version: held.version, ciphertext: JSON.parse(held.ciphertext) };
     },
@@ -249,7 +262,7 @@ export function privateStore(db) {
     // The journal's sealed entries after `since`, oldest first.
     async journal(did, { since } = {}) {
       const after = cursorOf(since);
-      const { results } = await db.prepare(`SELECT seq, entry, generation, created_at FROM private_journal WHERE did = ?1 AND seq > ?2 ORDER BY seq LIMIT ${PAGE + 1}`).bind(did, after).all();
+      const { results } = await db.prepare(`SELECT seq, entry, generation, created_at FROM ${T.journal} WHERE did = ?1 AND seq > ?2 ORDER BY seq LIMIT ${PAGE + 1}`).bind(did, after).all();
       const page = results.slice(0, PAGE);
       return {
         entries: page.map(each => ({ seq: each.seq, entry: JSON.parse(each.entry), created: each.created_at })),
@@ -288,8 +301,8 @@ export function privateStore(db) {
     // What a rotation to `target` still has to re-wrap: versions by block and rev, journal entries by seq.
     async belowTarget(did, target) {
       const to = generationOf(target);
-      const { results: versions } = await db.prepare(`SELECT id, rev, generation FROM private_block_versions WHERE did = ?1 AND generation < ?2 ORDER BY rev LIMIT ${PAGE + 1}`).bind(did, to).all();
-      const { results: journal } = await db.prepare(`SELECT seq, generation FROM private_journal WHERE did = ?1 AND generation < ?2 ORDER BY seq LIMIT ${PAGE + 1}`).bind(did, to).all();
+      const { results: versions } = await db.prepare(`SELECT id, rev, generation FROM ${T.versions} WHERE did = ?1 AND generation < ?2 ORDER BY rev LIMIT ${PAGE + 1}`).bind(did, to).all();
+      const { results: journal } = await db.prepare(`SELECT seq, generation FROM ${T.journal} WHERE did = ?1 AND generation < ?2 ORDER BY seq LIMIT ${PAGE + 1}`).bind(did, to).all();
       return {
         target: to,
         versions: versions.slice(0, PAGE).map(each => ({ id: each.id, rev: each.rev, generation: each.generation })),
@@ -318,28 +331,28 @@ export function privateStore(db) {
       for (const given of versions) {
         const id = opaqueId(given?.id);
         const rev = Number(given?.rev);
-        const held = await db.prepare('SELECT version, ciphertext, generation FROM private_block_versions WHERE did = ?1 AND id = ?2 AND rev = ?3').bind(did, id, rev).first();
+        const held = await db.prepare(`SELECT version, ciphertext, generation FROM ${T.versions} WHERE did = ?1 AND id = ?2 AND rev = ?3`).bind(did, id, rev).first();
         if (!held) throw new Refused(404, 'NotFound', `There is no version ${given?.rev} of ${id}`);
         if (held.generation >= to) continue;
         const sealed = sealedFile(given.ciphertext);
         sameContents(held.ciphertext, sealed, `Version ${rev} of ${id}`);
         const version = await privateVersion(sealed.text);
         const size = encoder.encode(sealed.text).length;
-        statements.push(guard('(SELECT version FROM private_block_versions WHERE did = ?1 AND id = ?2 AND rev = ?3) IS NOT ?4', did, id, rev, held.version));
-        statements.push(db.prepare('UPDATE private_block_versions SET version = ?4, ciphertext = ?5, generation = ?6, size = ?7 WHERE did = ?1 AND id = ?2 AND rev = ?3')
+        statements.push(guard(`(SELECT version FROM ${T.versions} WHERE did = ?1 AND id = ?2 AND rev = ?3) IS NOT ?4`, did, id, rev, held.version));
+        statements.push(db.prepare(`UPDATE ${T.versions} SET version = ?4, ciphertext = ?5, generation = ?6, size = ?7 WHERE did = ?1 AND id = ?2 AND rev = ?3`)
           .bind(did, id, rev, version, sealed.text, sealed.generation, size));
-        statements.push(db.prepare(`UPDATE private_blocks SET version = ?4, ciphertext = ?5, generation = ?6, size = ?7, seq = ${next}, updated_at = ?8 WHERE did = ?1 AND id = ?2 AND rev = ?3 AND version IS NOT NULL`)
+        statements.push(db.prepare(`UPDATE ${T.blocks} SET version = ?4, ciphertext = ?5, generation = ?6, size = ?7, seq = ${next}, updated_at = ?8 WHERE did = ?1 AND id = ?2 AND rev = ?3 AND version IS NOT NULL`)
           .bind(did, id, rev, version, sealed.text, sealed.generation, size, at));
       }
       for (const given of journal) {
         const seq = Number(given?.seq);
-        const held = await db.prepare('SELECT entry, generation FROM private_journal WHERE did = ?1 AND seq = ?2').bind(did, seq).first();
+        const held = await db.prepare(`SELECT entry, generation FROM ${T.journal} WHERE did = ?1 AND seq = ?2`).bind(did, seq).first();
         if (!held) throw new Refused(404, 'NotFound', `There is no journal entry ${given?.seq}`);
         if (held.generation >= to) continue;
         const sealed = sealedFile(given.entry, 'A journal entry');
         sameContents(held.entry, sealed, `Journal entry ${seq}`);
-        statements.push(guard('(SELECT entry FROM private_journal WHERE did = ?1 AND seq = ?2) IS NOT ?3', did, seq, held.entry));
-        statements.push(db.prepare('UPDATE private_journal SET entry = ?3, generation = ?4 WHERE did = ?1 AND seq = ?2').bind(did, seq, sealed.text, sealed.generation));
+        statements.push(guard(`(SELECT entry FROM ${T.journal} WHERE did = ?1 AND seq = ?2) IS NOT ?3`, did, seq, held.entry));
+        statements.push(db.prepare(`UPDATE ${T.journal} SET entry = ?3, generation = ?4 WHERE did = ?1 AND seq = ?2`).bind(did, seq, sealed.text, sealed.generation));
       }
       if (statements.length && !(await runBatch(statements))) throw new Refused(409, 'Changed', 'Something being re-wrapped changed meanwhile. List what is below the target again');
       return { target: to, remaining: await below(did, to) };
@@ -352,8 +365,8 @@ export function privateStore(db) {
       const finished = await db.prepare(
         `UPDATE private_rotations SET state = 'finished', finished_at = ?3
          WHERE did = ?1 AND target = ?2 AND state = 'rotating'
-           AND NOT EXISTS (SELECT 1 FROM private_block_versions WHERE did = ?1 AND generation < ?2)
-           AND NOT EXISTS (SELECT 1 FROM private_journal WHERE did = ?1 AND generation < ?2)
+           ${Object.values(SEALED).map(each => `AND NOT EXISTS (SELECT 1 FROM ${each.versions} WHERE did = ?1 AND generation < ?2)
+           AND NOT EXISTS (SELECT 1 FROM ${each.journal} WHERE did = ?1 AND generation < ?2)`).join('\n           ')}
          RETURNING target`,
       ).bind(did, to, now.toISOString()).first();
       if (finished) return { target: to, state: 'finished' };

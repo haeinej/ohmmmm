@@ -36,15 +36,19 @@ export async function running() {
   const whoIs = createIdentity({ audience, members: [haein, jun, mina].map(each => each.did).join(','), get: async url => Response.json(documents[String(url)]) });
   const env = { DB: await testDatabase(), MEMBERS: '*', SERVICE_DID: audience, OHM_APP_ORIGIN: 'https://app.ohmmmm.test' };
   const service = createService({ whoIs, get: async () => Response.json(null) });
-  const ask = async (as, name, { query = {}, body } = {}) => {
-    const method = `com.ohmmmm.vault.${name}`;
+  // `raw` sends bytes as they are ({ bytes, type }), and answers the Response itself.
+  const ask = async (as, name, { query = {}, body, raw } = {}) => {
+    // A bare name is a vault request; `cortex.getFile` names another group.
+    const method = name.includes('.') ? `com.ohmmmm.${name}` : `com.ohmmmm.vault.${name}`;
     const url = new URL(`https://vault.ohmmmm.test/xrpc/${method}`);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    const sending = raw ?? (body === undefined ? undefined : { bytes: JSON.stringify(body), type: 'application/json' });
     const response = await service(new Request(url, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { Authorization: `Bearer ${await as.token(method)}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      method: sending === undefined ? 'GET' : 'POST',
+      headers: { Authorization: `Bearer ${await as.token(method)}`, ...(sending === undefined ? {} : { 'Content-Type': sending.type }) },
+      ...(sending === undefined ? {} : { body: sending.bytes }),
     }), env);
+    if (raw || (response.ok && !response.headers.get('Content-Type')?.startsWith('application/json'))) return response;
     return { status: response.status, ...(await response.json()) };
   };
   return { haein, jun, mina, stranger, ask, env };

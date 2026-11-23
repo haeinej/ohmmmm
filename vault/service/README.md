@@ -19,7 +19,7 @@ A member's vault: their posts, reached with a handful of requests. Every request
 
 ## What it can do
 
-The service groups requests into capabilities under [src/capabilities/](src/capabilities/): posts, structure, search, mirror, publish, export, account and identity. **[CAPABILITIES.md](CAPABILITIES.md) is the reference**: every request, what it takes and gives, who may ask it, every way the service says no, and which requests each of an agent's tools is made of. That page is written from the same tables the service runs on (`npm run capabilities`), and a test fails if the two differ.
+The service groups requests into capabilities under [src/capabilities/](src/capabilities/): posts, friends, private, channels, cortex, media, structure, search, mirror, publish, export, account and identity. **[CAPABILITIES.md](CAPABILITIES.md) is the reference**: every request, what it takes and gives, who may ask it, every way the service says no, and which requests each of an agent's tools is made of. That page is written from the same tables the service runs on (`npm run capabilities`), and a test fails if the two differ.
 
 A request sent twice ends the same as sent once. Saving a post, whatever it says about who may see it, changes only this copy.
 
@@ -92,18 +92,28 @@ An agent's `vault_mirror` approval covers the displayed counts and conversion ca
 | [src/worker.mjs](src/worker.mjs) | The router: settles who is asking, in the way the request says, and hands over to it |
 | [CAPABILITIES.md](CAPABILITIES.md) | The reference, written from those tables |
 | [schema.sql](schema.sql) | The database's tables: `posts`, `links`, `blocks` and `friends` |
-| [migrations/](migrations/) | One-off changes to an existing database. [0001_drop_cortex.sql](migrations/0001_drop_cortex.sql) drops the tables of the retired agent-memory prototype; apply it by hand to a database created before it was removed. [0002_friends_layer.sql](migrations/0002_friends_layer.sql) adds `blocks` and `friends`; it only adds, and is needed before the Friends requests work on an existing database |
+| [migrations/](migrations/) | One-off changes to an existing database. [0001_drop_cortex.sql](migrations/0001_drop_cortex.sql) drops the tables of the retired agent-memory prototype; apply it by hand to a database created before it was removed. [0002_friends_layer.sql](migrations/0002_friends_layer.sql) adds `blocks` and `friends`; it only adds, and is needed before the Friends requests work on an existing database. [0003_private_layer.sql](migrations/0003_private_layer.sql) adds the private layer. [0004_channels.sql](migrations/0004_channels.sql) adds `channels` and the batch `guard`; [0005_cortex.sql](migrations/0005_cortex.sql) adds the sealed cortex. Each only adds |
 
 Tests are in [../test/service.test.mjs](../test/service.test.mjs), [../test/identity.test.mjs](../test/identity.test.mjs) and, for the page's app-password sign-in, [../test/signin.test.mjs](../test/signin.test.mjs), and run against the SQLite built into Node, which is what Cloudflare D1 is.
 
 Account/reconnect regressions are in [../test/workspace-service.test.mjs](../test/workspace-service.test.mjs), complete listing checks in [../test/member.test.mjs](../test/member.test.mjs), and shell tests of the page's actual handlers with DOM/network doubles in [../test/vault-browser.test.mjs](../test/vault-browser.test.mjs). These test state and transport, not browser layout or a live PDS. [../test/mcp.test.mjs](../test/mcp.test.mjs) also checks mirror approval interleavings and malformed-request recovery on the ordered stdio queue.
 
+## Channels, the inbox, the cortex and media
+
+These hold everything personal; none of it reaches the member's PDS except through Publish ([words](../../docs/words.md#boundaries)).
+
+- **Channels** ([src/channels.mjs](src/channels.mjs)) keep each channel's `_channel.md` readable, like the friends layer, with compare-and-set on its version. Moving a channel moves every channel inside it and every friends-only block filed in or listed under it in one batch, or none of it. A channel that holds a published post does not move, since the post's address comes from its label. A private channel, and a mixed channel's private overlay, are sealed and kept with the private layer.
+- **The inbox** is the channel `inbox`. An agent's capture waits there marked `status: proposed`; `keepProposed` files it in a channel and clears the mark, and `declineProposed` removes it. Private captures are kept or declined on the member's device.
+- **The cortex** is kept sealed beside the private layer, in its own tables, by the same store ([src/private.mjs](src/private.mjs), kind `cortex`). The member's one key rotation covers both and cannot finish while either still holds anything under the older key. The device seals cortex files under the context `ohm-vault/cortex/v1`, which the account app's `packages/keys` has to provide.
+- **Media** ([src/media.mjs](src/media.mjs)): a picture or file is a block of kind `media` that saves its `origin`, hash and metadata; only its bytes are sent here, to the R2 bucket bound as `MEDIA`, once, under the member's DID. Readable media is named by its content address and can be shown smaller with the optional `IMAGES` binding; private media is sealed on the device under an opaque ID and never rendered here.
+- **The agenda** (`getAgenda`) counts what waits for the member and their curator (unlabelled posts, agents' proposals, media with no alt text) from the public and friends-only layers, without any model reading anything. The curator itself runs in the member's own coding agent.
+
 ## Deploying
 
-[wrangler.jsonc](wrangler.jsonc) is a template. Copy it, and in the copy set the account, the database's ID, the addresses the service is served at, `SERVICE_DID`, `MEMBERS`, `OHM_APP_ORIGIN`, and the Worker that `AUTH` reaches. Create the database, load [schema.sql](schema.sql) into it, and deploy with the copy. [public/.well-known/did.json](public/.well-known/did.json) names the service's own DID and has to match `SERVICE_DID`.
+[wrangler.jsonc](wrangler.jsonc) is a template. Copy it, and in the copy set the account, the database's ID, the addresses the service is served at, `SERVICE_DID`, `MEMBERS`, `OHM_APP_ORIGIN`, and the Worker that `AUTH` reaches. Create the database, load [schema.sql](schema.sql) into it, create the media bucket (`wrangler r2 bucket create ohm-vault-media`), and deploy with the copy. An existing database needs the migrations it is missing, applied in order. [public/.well-known/did.json](public/.well-known/did.json) names the service's own DID and has to match `SERVICE_DID`.
 
 The service is served at two addresses: its own, which is what its DID names and what tokens are issued for, and `/vault` on the app's address, where the page is.
 
 ## Not here yet
 
-Attachments and their cached copies, the endpoints for public and friends-only posts, serving a friends-only post to friends, earlier versions of a post, and holding a removed post so it can be brought back.
+Readable channels and media for friends, the endpoints for public and friends-only posts, serving a friends-only post to friends, earlier versions of a post, and holding a removed post so it can be brought back.
