@@ -3,7 +3,11 @@
 //
 //   { "roots": [
 //       { "name": "drive", "path": "~/Library/CloudStorage/GoogleDrive-…/My Drive/Research",
-//         "channel": "research", "include": ["**/*.pdf", "*.md"], "exclude": ["drafts/**"], "retain": "reference" } ] }
+//         "channel": "research", "include": ["**/*.pdf", "*.md"], "exclude": ["drafts/**"], "retain": "reference",
+//         "note": "Papers I cite. Newest at the top of each folder; the README in each says which are read." } ] }
+//
+// `note` is the person's guidance for agents: what lives here, which files to trust, how to use them.
+// vault_where gives it to agents with the root's counts.
 //
 // The vault's own folder is always the canonical root, named `vault`, and is not listed. Every listed
 // root is read-only: the vault indexes its files as blocks in the root's channel, with `origin` set
@@ -75,12 +79,14 @@ export function readConfig(value, { vault, home }) {
       return given;
     };
     const include = patterns('include'), exclude = patterns('exclude');
-    const extra = Object.keys(entry).filter(key => !['name', 'path', 'mode', 'channel', 'include', 'exclude', 'retain'].includes(key));
+    const note = entry.note;
+    if (note !== undefined && (typeof note !== 'string' || note.length > 4000)) said.push('has a note that is not text of at most 4,000 characters');
+    const extra = Object.keys(entry).filter(key => !['name', 'path', 'mode', 'channel', 'include', 'exclude', 'retain', 'note'].includes(key));
     if (extra.length) said.push(`has settings this vault does not know: ${extra.join(', ')}`);
     if (said.length) { problems.push(`${label} ${said.join('; ')}.`); continue; }
     const includes = include.map(globTest), excludes = exclude.map(globTest);
     roots.push({
-      name, path, mode, channel, retain, include, exclude, drive,
+      name, path, mode, channel, retain, include, exclude, drive, ...(note ? { note } : {}),
       takes: relative => includes.some(test => test(relative)) && !excludes.some(test => test(relative)),
     });
   }

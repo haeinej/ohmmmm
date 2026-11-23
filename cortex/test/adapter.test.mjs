@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ASK, ASK_AFTER, BUDGETS, chars } from '../src/adapter.mjs';
+import { ASK, ASK_AFTER, ASK_EVERY, ASK_MAX, BUDGETS, chars, promptWords } from '../src/adapter.mjs';
+import { RECENT } from '../src/folder.mjs';
 import { initCortex, openCortex } from '../src/folder.mjs';
 
 // Every person here is invented. The hook inputs are synthetic, shaped as each client documents them.
@@ -129,7 +130,55 @@ test('session-start answers in full without .cortex/, and when the hooks\' log c
   for (let turn = 0; turn < 3; turn++) assert.deepEqual((({ status, out }) => [status, out])(run('stop', dir, 'codex', codex.stop('s2'))), [0, '']);
 });
 
-test('prompt answers with nothing, without waiting for standard input', async () => {
+test(`stop asks again after ${ASK_EVERY} more turns with nothing recorded, at most ${ASK_MAX} times a session`, async () => {
+  const dir = await fresh();
+  run('session-start', dir, 'claude-code', claude['session-start']('long'));
+  let asks = 0;
+  const turns = ASK_AFTER + ASK_EVERY * (ASK_MAX + 2);
+  const askedAt = [];
+  for (let turn = 1; turn <= turns; turn++) {
+    if (asked(run('stop', dir, 'claude-code', claude.stop('long')).out)) { asks++; askedAt.push(turn); }
+  }
+  assert.equal(asks, ASK_MAX);
+  assert.deepEqual(askedAt.slice(0, 2), [ASK_AFTER, ASK_AFTER + ASK_EVERY]);
+
+  // An observation recorded after an ask holds off the next one.
+  const other = await fresh();
+  run('session-start', other, 'codex', codex['session-start']('s'));
+  for (let turn = 1; turn <= ASK_AFTER; turn++) run('stop', other, 'codex', codex.stop('s'));
+  await pause(5);
+  await openCortex(other, { actor: 'codex' }).observe({ id: 'late-correction', text: 'Wanted the report header changed to the new one.' });
+  let later = 0;
+  for (let turn = 1; turn <= ASK_EVERY; turn++) if (asked(run('stop', other, 'codex', codex.stop('s')).out)) later++;
+  assert.equal(later, 0);
+});
+
+test('the ask names corrections, mistakes and repeated requests', () => {
+  for (const words of [/correction/, /wrong|out of date/, /again/]) assert.match(ASK, words);
+});
+
+test('prompt words keep meaningful Latin words and Hangul, and drop common ones', () => {
+  assert.deepEqual(promptWords('Tidy the essays section, please'), ['tidy', 'essays', 'section']);
+  assert.deepEqual(promptWords('주간 보고서 헤더 바꿔줘'), ['주간', '보고서', '헤더', '바꿔줘']);
+});
+
+test('prompt recalls older matching observations once a session, and nothing when none match', async () => {
+  const dir = await fresh();
+  const cortex = openCortex(dir, { actor: 'member' });
+  await cortex.observe({ id: 'old-header', text: 'The weekly report uses the new header since November.' });
+  await pause(5);
+  for (let n = 0; n < RECENT; n++) await cortex.observe({ id: `newer-${n}`, text: `Something newer, ${n}.` });
+  const input = { ...claude.prompt('s1'), prompt: 'Draft the weekly report' };
+  const first = run('prompt', dir, 'claude-code', input);
+  assert.equal(first.status, 0);
+  const context = contextOf(first.out);
+  assert.match(context, /old-header/);
+  assert.doesNotMatch(context, /newer-/, 'session start already gave the newest');
+  assert.equal(run('prompt', dir, 'claude-code', input).out, '', 'given once a session');
+  assert.equal(run('prompt', dir, 'codex', { ...codex.prompt('s9'), prompt: 'Something unrelated entirely' }).out, '');
+});
+
+test('prompt answers with nothing when nothing matches, without waiting long for standard input', async () => {
   const dir = await fresh();
   for (const [agent, shape] of shapes) {
     const { status, out } = run('prompt', dir, agent, shape.prompt('s1'));
@@ -142,7 +191,7 @@ test('prompt answers with nothing, without waiting for standard input', async ()
   const status = await new Promise(resolve => child.on('exit', resolve));
   child.stdin.destroy();
   assert.equal(status, 0);
-  assert.ok(performance.now() - started < 800, 'did not wait for stdin to close');
+  assert.ok(performance.now() - started < 1000, 'did not wait for stdin to close');
 });
 
 test('a client that closes the pipe early sees no error', async () => {

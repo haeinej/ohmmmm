@@ -13,6 +13,11 @@
 //   vault hook   [--vault DIR] [--agent NAME] an agent's PostToolUse hook: reads the hook's JSON on
 //                                            standard input and journals a write inside the vault
 //   vault mcp    [--vault DIR] [--agent NAME] serve the selected vault to a local stdio client
+//   vault grants [--vault DIR]               what each agent may change (.vault/grants.json)
+//   vault grant AGENT write|link SCOPE       let an agent change files under a channel (* = everywhere)
+//   vault revoke AGENT [write|link [SCOPE]]  take a grant back; with no right, everything for that agent
+//   vault restore PATH ADDRESS               put a file back to a version kept in .vault/history/
+//   vault lint   [--vault DIR] [--limit N]   candidates for a semantic check, for an agent to judge
 //
 // --vault defaults to OHM_VAULT_FOLDER, then the vault of the home this runs in
 // (ohmmmm.<handle>/vault, ../../home/home.mjs), then the current folder. REF is a slug, a path in the vault,
@@ -25,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { defaultVault } from '../../home/home.mjs';
 
-const ACTIONS = ['init', 'add', 'index', 'status', 'inspect', 'search', 'hook', 'mcp'];
+const ACTIONS = ['init', 'add', 'index', 'status', 'inspect', 'search', 'hook', 'mcp', 'grants', 'grant', 'revoke', 'restore', 'lint'];
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   strict: false,
@@ -53,6 +58,28 @@ if (action === 'hook') {
     if (event) await appendEvents(vault, [event]);
   } catch {}
   process.exit(0);
+}
+
+// Grants are the person's: changed only here, never by an agent tool. No database is needed.
+if (['grants', 'grant', 'revoke'].includes(action)) {
+  try {
+    const { GRANTS, changeGrants, readGrants } = await import('../vault/grants.mjs');
+    const file = resolve(vault, GRANTS);
+    const held = await readFile(file, 'utf8').catch(problem => { if (problem.code === 'ENOENT') return null; throw problem; });
+    const value = held === null ? undefined : JSON.parse(held);
+    if (action === 'grants') print(readGrants(value));
+    else {
+      const [agent, right, scope] = rest;
+      const next = changeGrants(value, { agent, right, scope, give: action === 'grant' });
+      await mkdir(resolve(vault, '.vault'), { recursive: true });
+      await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
+      print({ grants: file, agent, ...readGrants(next).agents[agent] ? { now: readGrants(next).agents[agent] } : { now: 'nothing' } });
+    }
+  } catch (problem) {
+    console.error(problem.message);
+    process.exitCode = 1;
+  }
+  process.exit();
 }
 
 const sqlite = await import('node:sqlite').catch(() => null);
@@ -103,6 +130,32 @@ try {
         });
         const report = await scan({ vault, db });
         print({ ...added, index: { nodes: report.nodes, edges: report.edges, problems: report.problems } });
+      } else if (action === 'restore') {
+        const [path, address] = rest;
+        if (!path || !/^b[a-z2-7]{20,}$/.test(address ?? '')) throw new Error('Say which file and which kept version: ohm vault restore notes/idea.md <address from ohm vault inspect or vault_history>');
+        const { blobCid } = await import('../vault/core.mjs');
+        const { appendEvents } = await import('../vault/journal.mjs');
+        const { readNode } = await import('../vault/node.mjs');
+        const { HISTORY } = await import('../mcp/local.mjs');
+        if (path.split('/').some(part => !part || part.startsWith('.') || part === '..')) throw new Error('Give a path inside the vault.');
+        const kept = await readFile(resolve(vault, HISTORY, address), 'utf8').catch(() => { throw new Error('That version is not kept in history.'); });
+        const target = resolve(vault, path);
+        const before = await readFile(target, 'utf8').catch(() => undefined);
+        const keepIt = async text => { const at = await blobCid(Buffer.from(text)); await writeFile(resolve(vault, HISTORY, at), text, { flag: 'wx' }).catch(() => {}); return at; };
+        if (before !== kept) {
+          const prior = before === undefined ? {} : { before: await keepIt(before) };
+          await mkdir(resolve(target, '..'), { recursive: true });
+          await writeFile(target, kept);
+          await appendEvents(vault, [{ at: new Date().toISOString(), op: before === undefined ? 'added' : 'changed', root: 'vault', path, by: 'me', via: 'restore', ...prior, hash: address }]);
+        }
+        const report = await scan({ vault, db });
+        print({ path, restored: address, unchanged: before === kept, problems: readNode(path, kept)?.problems ?? [], index: { nodes: report.nodes } });
+      } else if (action === 'lint') {
+        const { lint } = await import('../vault/lint.mjs');
+        const limit = values.limit === undefined ? 30 : Number(values.limit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('--limit is a whole number from 1 to 100');
+        await scan({ vault, db });
+        print(lint(db, { limit }));
       } else if (action === 'index') print(counted(await scan({ vault, db })));
       else if (action === 'status') print(summary(db));
       else if (action === 'inspect') {

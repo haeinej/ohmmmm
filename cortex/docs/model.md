@@ -12,7 +12,7 @@ The cortex is what your agents know about you. It has four parts: your **profile
 2. **You can edit everything.** No part is read-only to you. Your edit always wins.
 3. **Less design, more model.** Store what was seen, not conclusions. The model works conclusions out when it reads.
 4. **Memory comes from use.** You never have to write it. Hooks capture it as you work with agents.
-5. **Agents never touch your writing.** An agent can't edit a block, link two blocks, or change your profile. It writes observations, which can *point at* blocks, and it proposes.
+5. **Agents touch your writing only where you let them.** By default an agent can't edit a block, link two blocks, or change your profile: it writes observations, which can *point at* blocks, and it proposes. You can grant an agent write or link on chosen channels (`ohm vault grant`); every change it makes there is journaled, its old version kept, and undone with `ohm vault restore`. The profile stays yours alone.
 6. **Everything has a history.** The journal records every change and who made it, and any change can be reverted. This part exists today and stays.
 
 ## The four parts
@@ -63,8 +63,8 @@ Observations replace `memory/`, settlement and inference. They are the cortex's 
 | Moment | Hook | What happens |
 | --- | --- | --- |
 | Session starts | `SessionStart` | The agent gets your profile, your skills and tools, and the recent and relevant observations |
-| You send a prompt | `UserPromptSubmit` | Later: observations that match the prompt, so a long history stays useful |
-| A turn ends | `Stop` | If the session has new ground and nothing was recorded yet, the agent is asked once to record what it learned, with `cortex_observe` |
+| You send a prompt | `UserPromptSubmit` | Up to five older observations that match the prompt's words, beyond the ones session start gave, each once a session, so a long history stays useful |
+| A turn ends | `Stop` | From the second turn, if nothing was recorded yet, the agent is asked to record what it learned with `cortex_observe`: corrections, what was wrong or missing or out of date, repeated requests, preferences. Asked again after eight more turns with nothing recorded, at most four times a session |
 | Session ends | `SessionEnd` | Nothing. The agent's turn has already ended, so it can't be asked |
 
 Agents can also record an observation whenever they notice something, without waiting for the hook.
@@ -205,7 +205,7 @@ So Spaces doesn't replace the private layer. That matches what ohmmmm decided on
 
 ## Decisions taken
 
-1. **When the Stop hook asks for observations:** once per session, from the second turn, unless the agent already wrote one in that session.
+1. **When the Stop hook asks for observations:** from the second turn, unless the agent already wrote one in that session; then again after eight more turns with nothing recorded since the last ask, at most four times a session (changed 2026-11-23, so a long session's later corrections are not lost).
 2. **Working memory:** removed. Observations cover it.
 3. **Agents editing their own observations:** allowed until the person or another agent has changed one, through cortex or by hand.
 4. **How many observations `cortex_start` gives:** the 30 most recent plus the pinned ones.

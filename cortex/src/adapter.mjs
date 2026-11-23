@@ -17,9 +17,17 @@ export const MOMENTS = ['session-start', 'prompt', 'stop', 'session-end'];
 // Any other agent gets the smaller budget, since we do not know its limit.
 export const BUDGETS = { 'claude-code': 9999, codex: 6000 };
 export const budgetFor = agent => BUDGETS[same(agent)] ?? BUDGETS.codex;
-export const ASK = 'Before you finish: if you learned something about the person or their vault this session that the next session should know, write it down with cortex_observe. If not, just finish.';
-// The stop hook asks once a session, from this many turns on, so a one-question session is never asked.
+export const ASK = 'Before you finish: did anything this session belong in the cortex for the next one? Record each with cortex_observe, about the blocks, channels or skills it concerns: a correction the person made (what you did, what they wanted instead); something you got wrong or could not find, or found out of date (a renamed field, a stale skill, a missing note); something they asked for again that could become a skill; a preference or fact about them or their vault. If nothing, just finish.';
+// The stop hook first asks from this many turns on, so a one-question session is never asked.
 export const ASK_AFTER = 2;
+// After an ask, it asks again once this many more turns have passed with nothing recorded, so a long
+// session's later corrections are not lost, at most ASK_MAX times a session.
+export const ASK_EVERY = 8;
+export const ASK_MAX = 4;
+// What the prompt hook may add: a few older observations that match the prompt's words, which the
+// session-start context did not already hold, each given once a session.
+export const RECALL_LIMIT = 5;
+export const RECALL_BUDGET = 2000;
 const POINTER = 'The playbook (agents/AGENTS.md) is too long to include here. Call cortex_start now: it returns the playbook in full. Follow it.';
 
 // Agents are matched by a plain form of their name, so `Codex` and `codex` agree.
@@ -76,6 +84,26 @@ function headCut(text, max) {
 // How one observation is shown to the model: one line to start, what it is about, who saw it, when.
 const shown = item => `- ${item.text.replace(/\s+/g, ' ')}${item.about?.length ? ` (about ${item.about.join(', ')})` : ''} [${item.id}, ${item.by}${item.at ? `, ${item.at.slice(0, 10)}` : ''}]`;
 
+// Words worth matching: letters and digits, lowercased; short Latin words and common ones are dropped.
+const COMMON = new Set('the and for with that this from have what your you are was were will would should could can not but all any into about there their them then than when which while where who how why also just like make more some such only very please lets let use using want need'.split(' '));
+export const promptWords = text => [...new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+  .filter(word => (/^[\p{Script=Latin}\p{N}]+$/u.test(word) ? word.length >= 4 : word.length >= 2) && !COMMON.has(word)))].slice(0, 24);
+
+// Older observations that match the prompt: not pinned and not among the newest, since session start
+// gave those, and not already given this session. Ranked by how many of the prompt's words they hold;
+// at least two must match, or the one word of a short prompt.
+export async function recall(dir, agent, prompt, given = new Set()) {
+  const words = promptWords(prompt);
+  if (!words.length) return [];
+  const need = Math.min(2, words.length);
+  const { observations } = await openCortex(dir, { actor: agent }).observations({ limit: 500 });
+  const older = observations.filter(item => !item.pin).slice(RECENT).filter(item => !given.has(item.id));
+  return older.map(item => {
+    const within = `${item.text} ${(item.about ?? []).join(' ')}`.toLowerCase();
+    return { item, score: words.filter(word => within.includes(word)).length };
+  }).filter(({ score }) => score >= need).sort((a, b) => b.score - a.score).slice(0, RECALL_LIMIT).map(({ item }) => item);
+}
+
 // The context put in front of the model at session start, cut to fit the agent's budget: the
 // playbook, the profile, the observations (pinned first, then the newest), and open dead ends near
 // the project. To fit, the oldest observations go first, then the playbook becomes a pointer to
@@ -118,8 +146,6 @@ export async function sessionContext(dir, agent, budget = budgetFor(agent), { pr
 // record once it has been written. A record that fails never takes the answer with it.
 export async function hook(moment, { dir, agent: given, input = {}, now = () => new Date() }) {
   if (!MOMENTS.includes(moment)) throw new Error(`No moment ${moment}`);
-  // Fitting observations to the prompt is later work; an empty answer must not slow a prompt.
-  if (moment === 'prompt') return { output: '' };
   await cortexAt(dir);
   const agent = agentName(given);
   const who = same(agent);
@@ -137,18 +163,31 @@ export async function hook(moment, { dir, agent: given, input = {}, now = () => 
     return { output, after };
   }
 
+  if (moment === 'prompt') {
+    const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+    const given = new Set(ours.flatMap(entry => Array.isArray(entry.recalled) ? entry.recalled : []));
+    const found = await recall(dir, agent, prompt, given);
+    if (!found.length) return { output: '' };
+    const context = headCut(['# From your cortex: older observations that match this prompt', ...found.map(shown)].join('\n'), RECALL_BUDGET);
+    const output = JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: context } });
+    return { output, after: () => tryRecord(dir, { agent, session, recalled: found.map(item => item.id) }) };
+  }
+
   if (moment === 'stop') {
     // stop_hook_active: the client is already continuing because a stop hook asked.
     if (input.stop_hook_active === true) return { output: '' };
     if (!(await tryRecord(dir, { agent, session, stopped: now().toISOString() }))) return { output: '' };
-    const turns = ours.filter(entry => typeof entry.stopped === 'string').length + 1;
-    // Asked once a session, and only once it has had a few turns.
-    if (turns < ASK_AFTER || ours.some(entry => typeof entry.asked === 'string')) return { output: '' };
-    // An agent that already wrote an observation in this session has done what the ask is for.
-    const start = ours.find(entry => typeof entry.started === 'string')?.started;
-    if (start) {
+    const asks = ours.filter(entry => typeof entry.asked === 'string');
+    if (asks.length >= ASK_MAX) return { output: '' };
+    // Turns since the last ask, or since the session started; this one counts.
+    const last = ours.findLastIndex(entry => typeof entry.asked === 'string');
+    const turns = ours.slice(last + 1).filter(entry => typeof entry.stopped === 'string').length + 1;
+    if (turns < (asks.length ? ASK_EVERY : ASK_AFTER)) return { output: '' };
+    // An agent that recorded an observation since then has done what the ask is for.
+    const since = asks.at(-1)?.asked ?? ours.find(entry => typeof entry.started === 'string')?.started;
+    if (since) {
       const { observations } = await openCortex(dir, { actor: agent }).observations({ by: agent, limit: 1 });
-      if (observations.some(item => item.at && item.at >= start)) return { output: '' };
+      if (observations.some(item => item.at && item.at >= since)) return { output: '' };
     }
     if (!(await tryRecord(dir, { agent, session, asked: now().toISOString() }))) return { output: '' };
     return { output: JSON.stringify({ decision: 'block', reason: ASK }) };
@@ -176,9 +215,8 @@ export async function runHook(moment, { dir, agent, stdin, stdout }) {
   try {
     // A client that closes the pipe early never sees a stack trace.
     stdout.on('error', () => {});
-    // prompt answers nothing, so it does not wait to read what it would not use.
-    if (moment === 'prompt') return;
-    const raw = await readInput(stdin);
+    // A prompt must not wait long on a client that keeps standard input open.
+    const raw = await readInput(stdin, moment === 'prompt' ? { wait: 300 } : undefined);
     const input = raw.trim() ? JSON.parse(raw) : {};
     if (!input || typeof input !== 'object' || Array.isArray(input)) return;
     const { output, after } = await hook(moment, { dir, agent, input });

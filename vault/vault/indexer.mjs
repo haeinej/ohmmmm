@@ -242,12 +242,17 @@ async function journal(vault, db, report, lastScan) {
       }
     }
   }
+  // A tool that changed or removed a file journaled it already, with the versions it kept.
+  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore'].includes(known.via) && (op === 'removed' || known.hash === hash);
   for (const { root, path } of report.changed) {
     const known = said(root, path);
+    if (recorded(known, 'changed', row.get(root, path)?.hash)) continue;
     events.push({ at, op: 'changed', root, path, by: known?.by ?? 'unknown', via: 'scan', ...(known?.session ? { session: known.session } : {}), ...(row.get(root, path)?.hash ? { hash: row.get(root, path).hash } : {}) });
   }
   for (const { root, from, to } of report.moved) events.push({ at, op: 'moved', root, path: to, from, by: said(root, to)?.by ?? 'unknown', via: 'scan' });
-  for (const { root, path } of report.removed) events.push({ at, op: 'removed', root, path, by: 'unknown', via: 'scan' });
+  for (const { root, path } of report.removed) {
+    if (!recorded(said(root, path), 'removed')) events.push({ at, op: 'removed', root, path, by: said(root, path)?.by ?? 'unknown', via: 'scan' });
+  }
   await appendEvents(vault, events);
   report.journaled = events.length;
   db.exec('DELETE FROM events');

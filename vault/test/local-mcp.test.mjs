@@ -100,8 +100,9 @@ test('ohm vault mcp serves only local tools over stdio', async t => {
   assert.equal(initialized.serverInfo.name, 'ohm-vault');
   assert.deepEqual(listed.tools.map(tool => tool.name), [
     'vault_local_search', 'vault_local_read', 'vault_neighbors', 'vault_capture', 'vault_collect', 'vault_index',
+    'vault_where', 'vault_lint', 'vault_history', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore',
   ]);
-  assert.equal(listed.tools.filter(tool => tool.annotations?.readOnlyHint).length, 3);
+  assert.equal(listed.tools.filter(tool => tool.annotations?.readOnlyHint).length, 6);
   assert.equal(indexed.isError, undefined);
 });
 

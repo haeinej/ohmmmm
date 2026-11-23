@@ -183,6 +183,27 @@ Ask the agent to run `vault_index`, then search for a block, open it with its hi
 
 To try a capture, ask it to save `https://example.test/reading` to the Inbox. You get a proposed block and a source reference in your folder. Ask it to collect the block in `reading` to make it appear there too. The journal records both actions under the agent name you chose. If another collection is running in the same vault, try again once it finishes.
 
+### Letting an agent change things
+
+By default an agent can only propose: captures land in the Inbox as `proposed`. When you trust an agent with part of your vault, grant it, one channel at a time:
+
+```sh
+npx github:haeinej/ohmmmm vault grant claude-code link notes     # may link blocks in notes/ to others
+npx github:haeinej/ohmmmm vault grant claude-code write projects # may also write, replace and remove there
+npx github:haeinej/ohmmmm vault grants                           # what each agent may do
+npx github:haeinej/ohmmmm vault revoke claude-code               # take everything back
+```
+
+Nothing is lost. Each time an agent writes, links, removes or restores, the version before and the version after are kept in `.vault/history/`, and the journal says which agent did it. To undo one, look up the version with `ohm vault inspect` or ask the agent for `vault_history`, then run `ohm vault restore notes/idea.md <address>`. An agent can't change its own grant, `.vault/`, or your captured sources, and it must show it read the latest version before replacing a file, so it never writes over an edit you just made.
+
+### Telling agents where your data lives
+
+Give each root a `note` in `.vault/config.json`: what is there, what to trust, how to use it ("Board queries. Join on account_id, not user_id."). Agents read it with `vault_where` before they search, together with the counts and kinds of files in each root and what you let them change. A root without a note is one an agent will ask you about.
+
+### Checking the vault
+
+`vault_lint` (or `ohm vault lint`) gathers what is worth a second look: links to notes that don't exist, notes nothing points to, pairs of notes about the same thing with no link between them, notes with the same title, and proposals you haven't decided on. The vault can't tell whether two notes agree; your agent can. The [lint skill](../skills/lint/SKILL.md) has it read each pair, write what it finds to your cortex, fix what you granted, and ask you about the rest.
+
 ## Using the vault from the cortex
 
 The cortex (`cortex/` in ohmmmm) keeps what agents learn about you, and reads your vault to find what that learning rests on. It asks a vault a few questions: what channels there are, one block, whether blocks still exist, what changed since last time, and a search. Connect cortex to the vault with this vault's own reader:

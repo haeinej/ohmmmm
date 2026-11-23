@@ -12,4 +12,7 @@ and agent documentation. Its folder contains:
 - [Usage guide](document-work/README.md): what to expect and how to invoke it.
 - [Agent contract](document-work/contract.md): integration and maintenance of the skill itself.
 
+[lint](lint/SKILL.md) checks a vault for meaning: candidates from `vault_lint`, judged
+by the agent, recorded as cortex observations and fixed only within the person's grant.
+
 The [repository README](../README.md) lists the other bundled skills.
