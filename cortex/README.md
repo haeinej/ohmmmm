@@ -67,7 +67,7 @@ node /path/to/cortex/bin/cortex.mjs mcp ~/cortex
 | `cortex accept <id> [dir]` | The person | Adds a proposed line to the profile |
 | `cortex decline <id> [dir]` | The person | Turns one down; that line is not proposed again |
 | `cortex observations [dir] [--about <id>] [--json]` | The person | Lists what agents observed, newest first |
-| `cortex observe <text> [dir] [--about <ids>] [--pin]` | The person | Writes an observation of their own |
+| `cortex observe <text> [dir] [--about <ids>] [--settles <ids>] [--pin]` | The person | Writes an observation of their own; with `--settles`, the decision that settles flags marked `needs: curator` |
 | `cortex forget <id> [dir]` | The person | Removes an observation; it is kept in history |
 | `cortex mcp [dir]` | An agent | Serves the fourteen `cortex_*` tools over standard input and output |
 | `cortex serve [dir] [--port 8765] [--host 127.0.0.1]` | The person | Serves the same tools over HTTP at `/mcp`, for clients that connect to a server |

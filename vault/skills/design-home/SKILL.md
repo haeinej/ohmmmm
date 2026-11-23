@@ -41,16 +41,16 @@ Mark as you go:
 
 Before proposing a structure, read the journals. They show the person's habits better than any default.
 
-- `.vault/journal.jsonl` (`vault_history`, or read the file): `moved`, `changed` and `added` events `by: me` are the person's own filing.
+- `.vault/journal.jsonl`, read as a file: the vault-wide record. `moved`, `changed` and `added` events `by: me` are the person's own filing. (`vault_history` gives one file's events only, by its `path`; use it to follow one block.)
 - The cortex journal (`cortex_history`): observations about channels, corrections, what was declined.
 - `cortex_recall` with `needs: curator`: what working agents flagged.
-- The **agenda**, when the vault service has one: a list the service makes without a model, of flags waiting, blocks with no channel and records with no label. Read it with the vault's tools, and treat each entry as a candidate for the report, never as a decision. If there is no agenda, the list above is enough.
+- The **agenda**, when the person's vault service serves one (`com.ohmmmm.vault.getAgenda`): a list the service makes without a model, of flags waiting, blocks with no channel and records with no label. No local tool reads it yet; when it is not reachable, make the same list yourself from `vault_lint` and `cortex_recall` with `needs: curator`. Treat each entry as a candidate for the report, never as a decision.
 
 When there is no vault or cortex yet, say so in the report: there are no traces to read.
 
 ## 2. Report
 
-Fill the [home report template](../../docs/agents/home-report.md), every section in order. Write it as a **private block** in the person's vault (for example `vault/home-report.md` inside their home), not in a site folder. Show it to them.
+Fill the [home report template](../../docs/agents/home-report.md), every section in order, and show it to them in the conversation. Writing it is a change, so it waits like any other: keep it only if they say where (their first row in the decisions log), then save it as a **private block** through the vault's tools: `vault_write` where your grant allows, otherwise `vault_capture` into the Inbox as a proposal. Never in a site folder, and never with a plain file write.
 
 Propose channels by **shape**, not by name: "one channel would hold the 19 essays; it is `?` (as found: writing/)". Put every naming question in Open label questions, one decision per row.
 
@@ -67,9 +67,10 @@ Only rows in the decisions log, and only within the grant `vault_where` shows. E
 | Decision | How |
 | --- | --- |
 | A folder becomes a root | The person adds it to `.vault/config.json` under `roots` (you may draft the entry): their name for it, the absolute path, `retain: text` for notes and `reference` for large media, `exclude` for what they kept out (`.DS_Store`, thumbnails if they said so), and a `note`. Then `vault_index`. This is the connect flow's "record in place": nothing is copied, and nothing is written in a root ([roots](../../docs/agents/vault-format.md#roots-and-the-index)). Do not use `ohm vault add` for a site's files: it copies Markdown into the vault |
-| A channel and what it holds | `vault_collect({ block, channel })` per block, channel names in their words |
+| A channel for a root's files | The root's `channel` in `.vault/config.json`, in their words: every file in the root is filed under it, and its subfolders become sub-channels. To split a root across channels, make it two roots, or `exclude` what goes elsewhere. `vault_collect` refuses blocks in a root, and capturing a copy breaks "record in place", so never do either to file a root's files |
+| A channel for a block in the canonical vault | `vault_collect({ block, channel })` per block, channel names in their words |
 | Media records | Recorded by the root's scan; fill alt text and dimensions only from what the site says. Missing alt text stays missing |
-| A label or sublabel for a public post | [suggest-labels](../suggest-labels/SKILL.md) step 5, then the publish command's `--label` and `--sublabel` |
+| A label or sublabel for a post | Write it in the decisions log in their words, with [suggest-labels](../suggest-labels/SKILL.md) step 5. You do not publish: the owner uses it with the publish command's `--label` and `--sublabel` when they publish. There is no command yet to relabel a post already published; list those for them |
 | A site moves onto records | [migrate-site](../migrate-site/SKILL.md), from its first step |
 | PDS records under an old type | Report only. Moving them to `com.ohmmmm.post` is migrate-site's, with the owner's approval and a preview |
 

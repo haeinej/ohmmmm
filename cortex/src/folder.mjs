@@ -67,7 +67,10 @@ export const checkAccount = value => {
 export const OBSERVATION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 // Who an observation is waiting for. A working agent flags what only the curator settles (labels,
 // channels, moves, merges) with needs: curator; the curator answers with an observation of its own
-// that settles it.
+// that settles it. A settle names the flag at the version it answered, so a flag rewritten with a
+// new question is open again. The cortex cannot tell a curator subagent from the agent it runs in
+// (they share one name), so a flag is settled by the person, or by an agent other than the one that
+// raised it; nothing else counts.
 export const NEEDS = ['curator'];
 // How many observations a session is handed, besides the pinned ones.
 export const RECENT = 30;
@@ -164,7 +167,10 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
   const readObservationFile = (id, content) => {
     const { properties, body } = splitFront(content);
     const about = Array.isArray(properties.about) ? properties.about.filter(item => typeof item === 'string') : [];
-    const settles = Array.isArray(properties.settles) ? properties.settles.filter(item => typeof item === 'string') : [];
+    // Each settle is written <flag id>@<the flag's version it answered>.
+    const settled = (Array.isArray(properties.settles) ? properties.settles : [])
+      .map(item => (typeof item === 'string' ? /^([^@]+)@(c[0-9a-f]+)$/.exec(item) : null)).filter(Boolean)
+      .map(([, flag, version]) => ({ id: flag, version }));
     return {
       id, text: body.trim(), by: typeof properties.by === 'string' ? properties.by : 'you',
       at: typeof properties.at === 'string' ? properties.at : null,
@@ -172,12 +178,12 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
       ...(about.length ? { about } : {}),
       ...(properties.pin === true ? { pin: true } : {}),
       ...(NEEDS.includes(properties.needs) ? { needs: properties.needs } : {}),
-      ...(settles.length ? { settles } : {}),
+      ...(settled.length ? { settles: settled.map(item => item.id), settled } : {}),
     };
   };
-  const observationFile = ({ text: said, by, at: when, session, about, pin, needs, settles }) =>
+  const observationFile = ({ text: said, by, at: when, session, about, pin, needs, settled }) =>
     writeFront({ at: when, by, ...(session ? { session } : {}), ...(about?.length ? { about } : {}), ...(pin ? { pin: true } : {}),
-      ...(needs ? { needs } : {}), ...(settles?.length ? { settles } : {}) }, `${said.trim()}\n`);
+      ...(needs ? { needs } : {}), ...(settled?.length ? { settles: settled.map(item => `${item.id}@${item.version}`) } : {}) }, `${said.trim()}\n`);
   async function heldObservation(id) {
     const content = await text(observationPath(id));
     if (content === null) return null;
@@ -767,22 +773,33 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
       if (session !== undefined && !oneLine(session, 200)) throw new Refused('InvalidRequest', 'session is one line, at most 200 characters');
       if (pin !== undefined && typeof pin !== 'boolean') throw new Refused('InvalidRequest', 'pin is true or false');
       if (pin !== undefined && !person) throw new Refused('PersonOnly', 'Only the person pins an observation');
-      if (needs !== undefined && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}`);
+      // needs: null withdraws a flag when its author rewrites it.
+      if (needs !== undefined && needs !== null && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}, or null to withdraw a flag`);
+      const held = await heldObservation(id);
+      let settled;
       if (settles !== undefined) {
         if (!Array.isArray(settles) || settles.length > 20 || new Set(settles).size !== settles.length || settles.includes(id)) throw new Refused('InvalidRequest', 'settles is up to 20 distinct IDs of other observations');
+        // A flag this observation already settles keeps the version it answered, even if it has
+        // since been removed, so a retry or a rewrite of the answer still works.
+        const already = new Map((held?.observation.settled ?? []).map(item => [item.id, item.version]));
+        settled = [];
         for (const flag of settles) {
           checkObservationId(flag);
-          if (!(await heldObservation(flag))?.observation.needs) throw new Refused('NotFound', `There is no observation ${flag} waiting to be settled`);
+          if (already.has(flag)) { settled.push({ id: flag, version: already.get(flag) }); continue; }
+          const target = await heldObservation(flag);
+          if (!target?.observation.needs) throw new Refused('NotFound', `There is no observation ${flag} waiting to be settled`);
+          if (!person && target.observation.by === authorOf(actor)) throw new Refused('PersonOnly', `${flag} was raised under your own name, so the person settles it: ask them, and they run cortex observe with --settles ${flag}`);
+          settled.push({ id: flag, version: target.version });
         }
       }
       const why = checkReason(reason);
       const checked = await checkAbout(about);
       const spec = nodeOf(`observation/${id}`);
-      const held = await heldObservation(id);
       if (held) {
-        const was = held.observation;
+        const { settles: _ids, settled: wasSettled, needs: wasNeeds, ...was } = held.observation;
+        const keptNeeds = needs === undefined ? wasNeeds : needs ?? undefined;
         const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}),
-          ...(needs !== undefined ? { needs } : {}), ...(settles !== undefined ? { settles } : {}) };
+          ...(keptNeeds ? { needs: keptNeeds } : {}), settled: settled ?? wasSettled };
         const content = observationFile(next);
         if (replaces === undefined) {
           // A retry of the same observation is not a second one.
@@ -794,7 +811,7 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
         return { id, ...await edit(spec, 'update', content, { before: held.version, reason: why, session }) };
       }
       if (replaces !== undefined && replaces !== null) throw changed(`observation ${id}`, null);
-      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin, needs, settles });
+      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin, needs: needs ?? undefined, settled });
       return { id, ...await edit(spec, 'create', content, { reason: why, session }) };
     },
 
@@ -823,14 +840,19 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
 
     // Observations, newest first: all of them, those about something (a block ID or channel:<path>),
     // or those whose words match. Words in the text count, and so do the IDs and channels it is about.
-    // With needs, only the flags waiting for that agent: marked needs and not settled by another.
+    // With needs, only the flags waiting for that agent: marked needs, and not settled at their
+    // current version by the person or by an agent other than the flag's author.
     async observations({ q, about, by, needs, limit = 50 } = {}) {
       if (needs !== undefined && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}`);
       if (q !== undefined && (typeof q !== 'string' || !q.trim() || q.length > 2000)) throw new Refused('InvalidRequest', 'q is one or more words, at most 2,000 characters');
       if (about !== undefined && (typeof about !== 'string' || !about.trim())) throw new Refused('InvalidRequest', 'about is a block ID, or a channel written channel:<path>');
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Refused('InvalidRequest', 'limit is a whole number from 1 to 500');
       let { observations: found } = await all();
-      const settled = new Set(found.flatMap(item => item.settles ?? []));
+      const flags = new Map(found.filter(item => item.needs).map(item => [item.id, item]));
+      const settled = new Set(found.flatMap(answer => (answer.settled ?? []).filter(({ id: flag, version }) => {
+        const target = flags.get(flag);
+        return target && target.version === version && (answer.by === 'you' || answer.by !== target.by);
+      }).map(item => item.id)));
       if (about !== undefined) found = found.filter(item => item.about?.includes(about));
       if (by !== undefined) found = found.filter(item => item.by === by);
       if (needs !== undefined) found = found.filter(item => item.needs === needs && !settled.has(item.id));
