@@ -12,7 +12,7 @@ import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type BlockRef, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
+import { type BlockRef, type FriendRequest, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -376,9 +376,32 @@ async function publishBlock(held: { ref: BlockRef; version: string }, block: Doc
 
 // Agents' requests for moves they may not finish, waiting for the member.
 let moveRequests: MoveRequest[] = []
-/** When the home opens: what agents asked for, and sealing what they hid. Neither keeps the home from opening. */
+// People asking to be friends, waiting for the member, as devices wait on a private network.
+let friendRequests: FriendRequest[] = []
+export const waitingFriends = () => friendRequests
+export async function loadFriendRequests() {
+  friendRequests = await live().friendRequests.list()
+  set(bump())
+  return friendRequests
+}
+/** Lets someone who asked into the friends layer, for every channel or only some. Consequential: the person approves in a dialog first. */
+export async function approveFriend(id: string, channels: "*" | string[]) {
+  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
+  await live().friendRequests.approve(id, channels)
+  await loadFriendRequests()
+  return { id, channels }
+}
+export async function declineFriend(id: string) {
+  await live().friendRequests.decline(id)
+  await loadFriendRequests()
+  return { id, declined: true }
+}
+
+/** When the home opens: who asks to be a friend, what agents asked for, and sealing what they hid. None keeps the home from opening. */
 async function movesOnOpen() {
   moveRequests = []
+  friendRequests = []
+  try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
   try {
     await loadMoveRequests()
     await sealHidden()

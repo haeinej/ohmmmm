@@ -11,7 +11,7 @@ This page is the whole list. It is written from the same tables the service and 
 | Capability | What it is for | Requests | Where |
 | --- | --- | --- | --- |
 | **Posts** | Read and change the posts in a vault, one at a time. Every change names the version it replaces, so two edits never overwrite each other unseen. | `listPosts`, `getPost`, `putPost`, `deletePost` | [posts.mjs](src/capabilities/posts.mjs) |
-| **Friends** | The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here. | `listBlocks`, `getBlock`, `putBlock`, `deleteBlock`, `listFriends`, `addFriend`, `removeFriend`, `listShared`, `getShared` | [friends.mjs](src/capabilities/friends.mjs) |
+| **Friends** | The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here. | `listBlocks`, `getBlock`, `putBlock`, `deleteBlock`, `listFriends`, `addFriend`, `removeFriend`, `askFriend`, `listFriendRequests`, `approveFriend`, `declineFriend`, `setFriendChannels`, `listShared`, `getShared` | [friends.mjs](src/capabilities/friends.mjs) |
 | **Private** | The private layer: private blocks, kept only as ciphertext sealed on the member's devices. The service stores and syncs them and cannot read them; no friend or agent can be given their contents by the service. Each is `{ id, ciphertext, version }`, with an opaque ID and compare-and-swap on the version. Several change together or not at all; every version is kept for restoring; the journal is sealed too; and a key rotation re-wraps every kept version and journal entry. | `listPrivateBlocks`, `getPrivateBlock`, `putPrivateBlock`, `putPrivateBlocks`, `listPrivateVersions`, `getPrivateVersion`, `listPrivateJournal`, `beginPrivateRotation`, `getPrivateRotation`, `listPrivateBelow`, `rewrapPrivate`, `finishPrivateRotation`, `deletePrivateBlock` | [private.mjs](src/capabilities/private.mjs) |
 | **Visibility** | Moves between the public, friends and private layers, by one set of rules the cockpit and the agent tools share. Every move is previewed first and journalled with who asked, who approved and why; the journal names a block by its ID only. Showing a block to more people is the member's move: an agent asks, and its request waits in the cockpit until the member answers. An agent with a write grant may start a move to private, which hides the block from friends at once; the member's device seals it when next unlocked. Public is reached only through Publish. | `previewMove`, `hideBlock`, `requestMove`, `listMoveRequests`, `declineMoveRequest`, `recordMove`, `listMoves` | [visibility.mjs](src/capabilities/visibility.mjs) |
 | **Channels** | Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here. | `listChannels`, `getChannel`, `putChannel`, `deleteChannel`, `moveChannel` | [channels.mjs](src/capabilities/channels.mjs) |
@@ -151,7 +151,7 @@ Who may read the member's friends layer.
 | Reads or changes | Reads only (`GET`) |
 | Who may ask | The member |
 | Takes | Nothing |
-| Gives | `friends` (did, added) |
+| Gives | `friends` (did, added, channels: `*` or a list, name, email) |
 
 ### `com.ohmmmm.vault.addFriend`
 
@@ -174,6 +174,61 @@ Stops one DID reading the member's friends layer. What they read before cannot b
 | Who may ask | The member |
 | Takes | `did`: the friend's DID |
 | Gives | `did`, `removed`, and `unchanged` when they were not a friend |
+
+### `com.ohmmmm.vault.askFriend`
+
+Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend. The member sees their name and email from their ohm account, and their DID, and answers in the cockpit. Asking again, or asking someone who already let them in, changes nothing, and the answer is the same either way.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `owner`: the DID of the member asked<br>`message`: optional: a line for the member |
+| Gives | `asked` |
+
+### `com.ohmmmm.vault.listFriendRequests`
+
+Who has asked to be the member's friend and is waiting for an answer, oldest first.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | Nothing |
+| Gives | `requests` (id, did, name, email, message, asked, state) |
+
+### `com.ohmmmm.vault.approveFriend`
+
+The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend's own agents read with the friend's access.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `id`: the request's ID<br>`channels`: optional: `*`, or a list of channel paths |
+| Gives | `did`, `channels` |
+
+### `com.ohmmmm.vault.declineFriend`
+
+The member declines someone who asked. They are not told.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `id`: the request's ID |
+| Gives | `id`, `declined` |
+
+### `com.ohmmmm.vault.setFriendChannels`
+
+Changes which channels one friend sees: `*` for every channel, or a list of channel paths. Only the member, signed in to ohm.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `friend`: the friend's DID<br>`channels`: `*`, or a list of channel paths |
+| Gives | `did`, `channels` |
 
 ### `com.ohmmmm.vault.listShared`
 
@@ -995,6 +1050,11 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | --- | --- | --- |
 | `listPosts` | Posts | It is for keeping a copy in step: every post's version, and what changed since. The tools read the structure instead |
 | `addFriend` | Friends | Only the member can widen who can read the friends layer, through their ohm session |
+| `askFriend` | Friends | A person asks, signed in to ohm, from the cockpit or a member's site |
+| `listFriendRequests` | Friends | The member answers requests in the cockpit. An agent never lets anyone in |
+| `approveFriend` | Friends | Only the member can widen who can read the friends layer, through their ohm session |
+| `declineFriend` | Friends | The member answers requests in the cockpit |
+| `setFriendChannels` | Friends | Only the member changes what a friend sees, through their ohm session |
 | `listPrivateBlocks` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `getPrivateBlock` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `putPrivateBlock` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |

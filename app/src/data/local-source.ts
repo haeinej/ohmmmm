@@ -18,6 +18,7 @@ export const localSource: HomeSource = {
   moveVisibility: unavailable,
   listFriends: unavailable,
   removeFriend: unavailable,
+  friendRequests: { list: unavailable, approve: unavailable, decline: unavailable, setChannels: unavailable },
   listShared: unavailable,
   readShared: unavailable,
   publishPlan: unavailable,

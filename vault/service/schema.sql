@@ -133,13 +133,32 @@ CREATE TABLE IF NOT EXISTS private_rotations (
   finished_at TEXT
 );
 
--- Who may read a member's friends layer, by DID. The member adds and removes them.
+-- Who may read a member's friends layer, by DID (their ohm account). The member approves and removes
+-- them. `channels` is a JSON list of the channels they see, or empty for every channel; `name` and
+-- `email` are from their ohm account when they asked (src/friendship.mjs).
 CREATE TABLE IF NOT EXISTS friends (
   did TEXT NOT NULL,
   friend TEXT NOT NULL,
   added_at TEXT NOT NULL,
+  channels TEXT,
+  name TEXT,
+  email TEXT,
   PRIMARY KEY (did, friend)
 );
+-- Someone signed in to ohm asking to be a member's friend, waiting until the member answers.
+CREATE TABLE IF NOT EXISTS friend_requests (
+  did TEXT NOT NULL,
+  id TEXT NOT NULL,
+  friend TEXT NOT NULL,
+  name TEXT,
+  email TEXT,
+  message TEXT,
+  asked_at TEXT NOT NULL,
+  state TEXT NOT NULL,
+  answered_at TEXT,
+  PRIMARY KEY (did, id)
+);
+CREATE INDEX IF NOT EXISTS friend_requests_waiting ON friend_requests (did, state);
 CREATE INDEX IF NOT EXISTS friends_of ON friends (friend);
 
 -- Channels: each member's channel files (`_channel.md`), kept readable like the friends layer.
