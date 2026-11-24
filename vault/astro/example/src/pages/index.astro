@@ -1,0 +1,13 @@
+---
+import { getCollection } from 'astro:content';
+const essays = (await getCollection('essays')).sort((a, b) =>
+  b.data.publishedAt.localeCompare(a.data.publishedAt));
+---
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Alice's essays</title></head>
+  <body>
+    <h1>Essays</h1>
+    <ul>{essays.map(entry => <li><a href={entry.data.permalink}>{entry.data.title || entry.id}</a></li>)}</ul>
+  </body>
+</html>
