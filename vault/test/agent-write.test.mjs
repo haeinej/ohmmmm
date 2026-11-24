@@ -69,6 +69,12 @@ test('an agent writes within its grant, replaces only what it read, and every ve
   const original = await readFile(join(vault, 'notes/walk.md'), 'utf8');
   const changed = await call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\n---\n\nRewritten.\n', replaces: read.file.hash });
   assert.equal(changed.before, read.file.hash);
+  // The same write tried again, its answer lost, is not refused: the file says it already.
+  const retried = await call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\n---\n\nRewritten.\n', replaces: read.file.hash });
+  assert.deepEqual([retried.unchanged, retried.hash], [true, changed.hash]);
+  const madeAgain = await call('vault_write', { path: 'notes/new.md', text: 'A new idea about lanterns.' });
+  assert.deepEqual([madeAgain.made, madeAgain.unchanged, madeAgain.hash], [false, true, made.hash]);
+  await assert.rejects(call('vault_write', { path: 'notes/new.md', text: 'Another idea.' }), /replaces/);
   const { events: history } = await call('vault_history', { path: 'notes/walk.md' });
   assert.equal(history[0].via, 'write');
   assert.equal(history[0].by, 'agent:helper');

@@ -305,14 +305,22 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content) > 600_000) refuse('Give the file\'s text, at most 600 KB.');
       await mayChange('write', path);
       const before = await current(parts);
-      await checkReplaces(before, replaces);
-      let after = content;
-      const node = readable(path, after);
-      if (before === undefined && node.type === 'block') {
-        // A new block from an agent says so and starts private: only the person shows a block to more people.
-        if (!node.post && !node.by) after = setProperty(after, 'by', by);
-        if ((node.post?.visibility ?? node.visibility) !== 'private') after = setProperty(after, 'visibility', 'private');
+      const node = readable(path, content);
+      // A new block from an agent says so and starts private: only the person shows a block to more people.
+      const asNew = () => {
+        let made = content;
+        if (node.type !== 'block') return made;
+        if (!node.post && !node.by) made = setProperty(made, 'by', by);
+        if ((node.post?.visibility ?? node.visibility) !== 'private') made = setProperty(made, 'visibility', 'private');
+        return made;
+      };
+      // The file says this already, as when the same write is tried again after its answer was lost.
+      if (before !== undefined && (before === content || before === asNew())) {
+        const hash = await addressOf(before);
+        return { path, made: false, unchanged: true, hash, before: hash };
       }
+      await checkReplaces(before, replaces);
+      const after = before === undefined ? asNew() : content;
       readable(path, after);
       sameLayer(path, before, after);
       await mkdir(dirname(join(vault, path)), { recursive: true });

@@ -444,7 +444,10 @@ async function keep(vault, text) {
 /**
  * Writes one file as the person, only over the version it was read at: `replaces` is that version,
  * or null for a file that must not exist yet. `text` undefined removes it. Returns the new version.
- * Refusals carry the HTTP status they answer with: 412 when the file is not at that version any more.
+ * A file that already says `text` (or is already gone, for a removal) is left as it is and answered
+ * `unchanged`, whatever `replaces` says, so the same change tried again after its answer was lost
+ * is not refused. Refusals carry the HTTP status they answer with: 412 when the file is not at that
+ * version any more.
  */
 export async function writeAsPerson({ vault, path, text, replaces }) {
   if (!editablePath(path)) throw Object.assign(new Error('Give the path of a Markdown file inside the vault, such as notes/idea.md'), { status: 400 });
@@ -456,6 +459,8 @@ export async function writeAsPerson({ vault, path, text, replaces }) {
   const file = await inVault(vault, path);
   const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
   const now = before === undefined ? null : await versionOf(before);
+  if (text === undefined && before === undefined) return { path, removed: true, unchanged: true };
+  if (text !== undefined && before === text) return { path, version: now, created: false, unchanged: true };
   if (now !== replaces) throw Object.assign(new Error(now === null ? 'There is no such file any more' : replaces === null ? 'A file is already there' : 'The file changed since it was read'), { status: 412, version: now });
   const at = new Date().toISOString();
   if (text === undefined) {
@@ -532,10 +537,11 @@ export async function moveAsPerson({ vault, path, to, replaces, asked, why }) {
   const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
   if (before === undefined) throw Object.assign(new Error('There is no such file any more'), { status: 412, version: null });
   const version = await versionOf(before);
-  if (replaces !== undefined && replaces !== version) throw Object.assign(new Error('The file changed since it was read'), { status: 412, version });
   const was = layerOf(path, before);
   const text = withVisibility(path, before, to);
+  // Already where it goes, as when the same move is tried again: nothing to refuse or write.
   if (text === before) return { path, text, version, layer: to, unchanged: true };
+  if (replaces !== undefined && replaces !== version) throw Object.assign(new Error('The file changed since it was read'), { status: 412, version });
   const kept = await keep(vault, before);
   const hash = await keep(vault, text);
   const temp = join(dirname(file), `.edit-${randomUUID()}`);
@@ -975,6 +981,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         const done = await withCollectLock(layout.vault, DatabaseSync, async () => {
           const request = (await readRequests(layout.vault)).find(each => each.id === deciding[1]);
           if (!request) throw new VaultProblem('There is no such request.');
+          // Decided already (the answer was lost): the same decision answers the request, another is refused. Nothing moves again.
+          if (request.status !== 'waiting') return { request: await decideRequest(layout.vault, request.id, decision.approve ? 'approved' : 'declined') };
           if (!decision.approve) return { request: await decideRequest(layout.vault, request.id, 'declined') };
           try {
             const file = await moveAsPerson({ vault: layout.vault, path: request.path, to: request.to, asked: request.by, why: request.why });
