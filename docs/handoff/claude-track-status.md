@@ -12,7 +12,7 @@ Where the work stands, for a fresh session on your own machine. The plan is [vau
 | [#43](https://github.com/haeinej/ohmmmm/pull/43) | `home/friend-access` | **Friends approved like devices.** Someone asks, signed in to ohm (their DID is their account); you see their name and email and approve them for every channel or some; their agents read with their access; no expiry |
 | [#45](https://github.com/haeinej/ohmmmm/pull/45) | `home/connections` | **Agents in ohm:** every two-step agent action waits for **Approve** in the rack's **Agents** panel, which also pauses or disconnects an agent. An agent asks by email (`vault_friends_ask`, `vault_connections`), gets a mail draft approved (`vault_mail_ask`) and sends it itself, and the connections skill finds friends in the member's inbox with the agent's own mail tools. **Connections** in the rack (people as a list or a graph, Make friends by email, read what each shares with you), **Settings › Friends** (channels per friend, stop sharing), an ask delivered when that person joins ohm, and **one invite email** (from "<you> via ohm", replies to your email, once per address, at most 20 a day) |
 
-Every PR passed the root `npm test` when last pushed; #45 passed CI at `a6a599d`, and Auto-fix watches it from the Claude session that built the Agents panel. Nothing is merged and nothing is deployed.
+Every PR passed the root `npm test` when last pushed; #45 passed CI at `d08b06b`, and Auto-fix watches it from the Claude session that built the Agents panel. Nothing is merged and nothing is deployed.
 
 ## Before deploying (all yours)
 
@@ -32,6 +32,7 @@ Every PR passed the root `npm test` when last pushed; #45 passed CI at `a6a599d`
 ## Open questions
 
 - Confirm the defaults in #43: a new friend starts with every channel; a block is visible if any channel it is filed in is allowed; earlier friends keep every channel; a declined person isn't told.
+- A cortex timing test, "no moment takes longer than 200 ms on a cortex with 300 observations", failed CI once on #45 at 201 ms, on a docs-only commit (`faf21e4`). It passed before and since. Should its budget leave room for slow CI machines, or stay strict?
 - Confirm the extra request names in #41: `content.view`, `addSite`, `listSites`, `removeSite`.
 - `design-home` on #34 still says "capture into the Inbox": who updates it, Devin's D3 or Claude?
 - Agents' PDS tokens look the same to the service as the command line's, so "agents only ask" is enforced in the tools and the cockpit, not in `putPost`/`putBlock`. The Agents panel's approvals, pause and disconnect have the same limit. Closing it needs a key per agent that the member can take back.
@@ -58,7 +59,7 @@ The owner asked for agents' actions to be confirmed on screen, with control over
 
 - **What the member sees.** **Agents** in the rack shows a dot while anything waits. The panel lists each agent that used ohm's tools:
   - its state, its last tool and its recent calls;
-  - a card for each waiting action. A card is closed to a title, one line and when it was asked; clicking it opens ohm-ui's `ApprovalCard` (`@ohm/elements-approval-card`) with the whole action, **Approve** and Decline, then a receipt. It is red for actions that remove something for good. One card is open at a time;
+  - a card for each waiting action. A card is closed to a title, one line and when it was asked; clicking it opens ohm-ui's `ApprovalCard` (`@ohm/elements-approval-card`) with the whole action, **Approve** and Decline, then a receipt. Approve is forest, like every primary button, and red for actions that remove something for good. `app/src/theme.css` sets the card's radius, keeps a message's line breaks and makes Approve forest, all by slot rules, so the installed copy is unchanged. One card is open at a time;
   - **Pause**, **Resume**, **Disconnect** (behind a dialog; it also declines what the agent waited for) and **Allow again**.
 - **How the tools use it** (`vault/mcp/tools.mjs`):
   - Every call first runs `agentCheckIn`, which is refused when the agent is paused or disconnected.
@@ -74,7 +75,7 @@ The owner asked for agents' actions to be confirmed on screen, with control over
 - **Docs:** `vault/docs/agents-panel.md` (people) and `vault/docs/agents/agents-panel.md` (agents), the vault and connections skills, the MCP server's instructions, and `docs/words.md`.
 - **Checked:**
   - tests: `vault/test/mcp.test.mjs` covers waiting, using an approval once, decline, pause and disconnect; `app/test/agents.test.ts` covers the panel;
-  - by hand against the test fixture, in light and dark, on desktop and on a phone. It has not been checked against a live service.
+  - by hand against the test fixture, in light and dark, on desktop and on a phone (375 px), including the `ApprovalCard` and its forest and red Approve. It has not been checked against a live service.
 - **Limit:** enforced in ohm's tools, as in Open questions.
 
 ## Rules for the next session
