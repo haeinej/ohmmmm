@@ -14,6 +14,7 @@
 //   /vault/unpublish   POST takes a published block's post down, then moves the block back, as the person
 //   /vault/keys        GET the paired browsers and the agents with keys; POST /self names this browser;
 //                      DELETE /<id> forgets one browser
+//   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -64,6 +65,7 @@ import { memoryKv, ownStores, pdsStore } from '../vault/vault/stores.mjs';
 import { createVault } from '../vault/vault/vault.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
+import { cortexRoutes } from './cortex-routes.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
@@ -840,6 +842,7 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
     req.on('error', fail);
   });
 
+  const cortexRoute = cortexRoutes({ dir: layout.cortex, send, said, body });
   const json = async (req, limit) => {
     try { return JSON.parse((await body(req, limit)).toString('utf8')); } catch { return undefined; }
   };
@@ -932,6 +935,10 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
+      }
+      if (url.pathname.startsWith('/cortex/')) {
+        if (!await cortexReady()) return said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
+        if (await cortexRoute(req, res, url)) return;
       }
       if (url.pathname === '/vault/journal' && req.method === 'GET') {
         const limit = Number(url.searchParams.get('limit') ?? 500);
@@ -1062,11 +1069,11 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
           // Who the key that asked is: the app, an agent by the name its key holds, or the shared agent key.
           you: who.kind === 'app' ? { app: true } : who.name ? { agent: who.name } : { agent: null, shared: true },
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish', keys: '/vault/keys' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish', keys: '/vault/keys', cortexParts: '/cortex/parts', cortexJournal: '/cortex/journal' },
           publishing: { config: Boolean(await siteSettings(config).catch(() => null)), password: Boolean(env.ATPROTO_APP_PASSWORD) },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /vault/publish, /vault/unpublish, /vault/keys and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /vault/publish, /vault/unpublish, /vault/keys, /cortex/parts, /cortex/journal, /cortex/profile, /cortex/observation, /cortex/skill, /cortex/tool and /media/<cid>');
     } catch (problem) {
       // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
       if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');

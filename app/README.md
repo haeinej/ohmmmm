@@ -26,7 +26,7 @@ A light, Obsidian-like workspace over the signed-in member's own home, the first
 
 Channels are files (`_channel.md`) on the service, each with its own version. Renaming or moving one moves it with everything filed in it, at the service, then refiles the sealed blocks on this device; a channel with published posts in it moves through Publish instead.
 
-Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
+Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and your cortex, and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
 
 New blocks start private: sealed on this device and sent as ciphertext, so writing needs a device that has unlocked the account's keys. Shared blocks (friends) and published posts are read and kept by the service. The cortex is sealed too, under its own context, and opens only on an unlocked device.
 

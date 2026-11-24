@@ -23,7 +23,8 @@ Cortex is what a person's agents know about them, kept as a folder of Markdown f
 src/core.mjs       names, versions, the Markdown property format, the Refused error
 src/journal.mjs    the journal: the one writer of .cortex/journal.jsonl, its line types, and actors
 src/vault.mjs      the vault contract, and a folder vault that answers it
-src/folder.mjs     the folder store: profile, observations, skills, tools, nodes, history, sessions, migrate
+src/folder.mjs     the folder store: profile, observations, skills, tools, nodes, history, sessions, migrate,
+                   and the person's own operations the app uses through ohmmmm serve (home/cortex-routes.mjs)
 src/tools.mjs      the MCP tools an agent is given, built only from folder operations, and the server's instructions
 src/adapter.mjs    the hooks: what session-start, prompt, stop and session-end answer
 src/filing.mjs     filing advice

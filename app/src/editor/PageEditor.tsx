@@ -28,11 +28,11 @@ import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { isBlock, locationOf, bySlug, channelRecords, channelsOf, blocks, titleOf, type Doc } from "@/data/workspace-data"
+import { isBlock, isCortexKind, locationOf, bySlug, channelRecords, channelsOf, blocks, titleOf, type Doc } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
 import { DOC_DRAG, dragOut, openDropped, saveExport } from "@/workspace/drop"
-import { addImage, autosave, bodyRevision, canGo, go, marks, MAX_IMAGE_BYTES, me, moveBlock, open, openFile, report, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
+import { addImage, autosave, bodyRevision, editCortex, canGo, go, marks, MAX_IMAGE_BYTES, me, moveBlock, open, openFile, report, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
 import { exportBlock, exportNow, preload } from "@/media/export"
 import { unescapeEmbeds } from "@/media/embeds"
 import { InlineRename, requestDelete } from "@/workspace/PageActions"
@@ -47,6 +47,8 @@ import { LastEdited, TableControls } from "./TableControls"
 import { LinkPreview } from "./LinkPreview"
 import { ConnectionsButton } from "./ConnectionsCard"
 import { HistoryButton } from "@/history/History"
+import { CortexActions, ObserveButton } from "./CortexActions"
+import { observationTitle } from "@/data/local-cortex"
 import "./editor.css"
 
 /**
@@ -238,10 +240,13 @@ function BlockMenu({ editor, block, updated, onClose }: { editor: Editor; block:
 
 export function PageEditor({ doc }: { doc: Doc }) {
   const { agentsAllowed, offered } = useWorkspace()
-  const editable = isBlock(doc) && doc.visibility === "private"
+  // A private block is edited here; so is every part of your cortex, which only you see.
+  const privateBlock = isBlock(doc) && doc.visibility === "private"
+  const cortexPart = !isBlock(doc) && isCortexKind(doc.kind)
+  const editable = privateBlock || cortexPart
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   // The vault trims the saved title. Keep spaces in the input while the saved title matches.
-  const title = editable && titleDraft?.trim() === doc.title ? titleDraft : doc.title
+  const title = privateBlock && titleDraft?.trim() === doc.title ? titleDraft : doc.title
   const [plusOpen, setPlusOpen] = useState(false)
   const [iconOpen, setIconOpen] = useState(false)
   const [block, setBlock] = useState<{ node: PMNode; pos: number } | null>(null)
@@ -267,7 +272,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
     const body = unsaved.current
     unsaved.current = null
     if (body === null || bodyRevision(doc) !== base.current) return
-    void report(autosave(doc.id, { body }))
+    void report(cortexPart ? editCortex(doc.id, body) : autosave(doc.id, { body }))
   }
 
   const editor = useEditor({
@@ -340,7 +345,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
   }, [])
 
   // The block's one primary action is saving, and it is also a tool while a private block is open.
-  const offer = editable && agentsAllowed && offered["workspace.save-draft"]
+  const offer = privateBlock && agentsAllowed && offered["workspace.save-draft"]
   useEffect(() => {
     if (!offer || !editor) return
     const ac = new AbortController()
@@ -367,7 +372,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
   }, [offer, editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The toolbar's Image is also a tool: an agent gives the bytes, and the same handler makes the media block.
-  const offerImage = editable && agentsAllowed && offered["workspace.add-image"]
+  const offerImage = privateBlock && agentsAllowed && offered["workspace.add-image"]
   useEffect(() => {
     if (!offerImage || !editor || !doc.homeChannel) return
     const channel = doc.homeChannel
@@ -407,7 +412,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
   if (!editor) return null
   const updated = lastEdited(doc)
   const dragKind = (dt: DataTransfer) =>
-    [...dt.items].some(i => i.kind === "file" && i.type.startsWith("image/")) ? (editable ? "image" : null)
+    [...dt.items].some(i => i.kind === "file" && i.type.startsWith("image/")) ? (privateBlock ? "image" : null)
       : dt.types.includes(DOC_DRAG) || dt.types.includes("Files") ? "open" : null
 
   return (
@@ -430,7 +435,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
             <ToolButton label="Forward (⌘])" icon={ArrowRightIcon} disabled={!canGo(1)} onClick={() => go(1)} />
           </div>
           <PathPill doc={doc} markdown={() => toMarkdown(editor)} onPickFile={() => fileInput.current?.click()} />
-          {editable && (
+          {privateBlock && (
             <div className={pill}>
               <ToolButton label="Text" icon={TypeIcon} onClick={() => insertText(editor)} />
               <ToolButton label="Image" icon={ImageIcon} onClick={() => insertImage(editor)} />
@@ -445,6 +450,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
               </Popover>
             </div>
           )}
+          {cortexPart && <CortexActions doc={doc} />}
           {!editable && (
             <span className="flex min-w-0 items-center gap-1.5 ps-1 text-small whitespace-nowrap text-muted-foreground"
               title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}>
@@ -458,6 +464,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
           {isBlock(doc) && (
             <div className={pill}>
               <ConnectionsButton doc={doc} editable={editable} variant="toolbar" side="bottom" />
+              <ObserveButton doc={doc} className={pillButton} />
             </div>
           )}
           <div className={pill}>
@@ -477,13 +484,14 @@ export function PageEditor({ doc }: { doc: Doc }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">
           {doc.icon && (
-            <button type="button" aria-label="Change icon" disabled={!editable} onClick={() => setIconOpen(true)}
+            <button type="button" aria-label="Change icon" disabled={!privateBlock} onClick={() => setIconOpen(true)}
               className="mb-3 -ms-1 rounded-md p-1 text-[44px] leading-none transition-transform duration-(--ohm-duration-press) ease-(--ohm-ease-out) animate-in fade-in-0 zoom-in-90 hover:bg-muted active:scale-95">
               {doc.icon}
             </button>
           )}
-          <div className="group/title relative">
-            {editable && (
+          {/* An observation has no title of its own: its first line is its title, so it is shown once, in the text. */}
+          {!(doc.kind === "observation" && observationTitle(doc.body) === doc.title) && <div className="group/title relative">
+            {privateBlock && (
               <Popover open={iconOpen} onOpenChange={setIconOpen}>
                 <PopoverTrigger render={
                   <button type="button" aria-label={doc.icon ? "Change icon" : "Add icon"}
@@ -497,7 +505,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                 </PopoverContent>
               </Popover>
             )}
-            <textarea ref={titleRef} rows={1} value={title} readOnly={!editable} placeholder="Untitled block" aria-label="Title"
+            <textarea ref={titleRef} rows={1} value={title} readOnly={!privateBlock} placeholder="Untitled block" aria-label="Title"
               onChange={e => {
                 const next = e.target.value
                 setTitleDraft(next)
@@ -513,7 +521,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                 }
               }}
               className="block w-full resize-none overflow-hidden bg-transparent text-h2 font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60" />
-          </div>
+          </div>}
 
           <div ref={setCanvas} className="relative mt-6">
             {editable && (
@@ -552,7 +560,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
       <input ref={fileInput} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden
         onChange={async e => { const f = e.target.files?.[0]; if (f) void report(openFile(f.name, await f.text())); e.target.value = "" }} />
 
-      {editable && <SelectionToolbar editor={editor} docId={doc.id} />}
+      {privateBlock && <SelectionToolbar editor={editor} docId={doc.id} />}
       <SlashMenu />
     </div>
   )

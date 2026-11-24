@@ -14,21 +14,24 @@
 //
 // It answers the same HomeSource as the vault service (service-source.ts), so the workspace runs one
 // way for both: channels are their `_channel.md` files, a move between layers is `moveVisibility`,
-// agents' requests are `moves`. What this source cannot do yet says so: the cortex, until it is read
-// through the bridge, and the agenda.
+// agents' requests are `moves`, and the cortex is its files through the cortex's own routes
+// (home/cortex-routes.mjs), which keep what they replace and journal each change. What this source
+// cannot do yet says so: the agenda.
 import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { heldNow, original } from "@/media/cache"
 import { docOf, fileOf } from "./block-document"
 import { bridgeFetch, type Bridge } from "./bridge"
-import { createJournal, snap, YOU, type Actor, type ChangeOp, type JournalEntry, type Snapshot } from "./journal"
+import { createJournal, snap, YOU, type Actor, type ChangeOp, type DeadEnd, type JournalEntry, type Snapshot } from "./journal"
 import { createMemorySearch } from "./memory-search"
 import {
-  emptyPlan, mediaName, visibilityMove, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove, type HomeFile, type HomeSource,
+  emptyPlan, mediaName, visibilityMove, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove, type CortexFile, type HomeFile, type HomeSource,
   type Layer, type MoveRecord, type MoveRequest, type MoveTarget, type VaultEvidence,
 } from "./source"
+import { cortexDocOf, cortexFileOf } from "./cortex-document"
+import { cortexDocs, cortexPast, waitingOf, type CortexJournal, type CortexParts } from "./local-cortex"
 import { journalOf } from "./workspace-data"
-import type { Doc, Entity } from "./workspace-model"
+import type { CortexWaiting, Doc, Entity } from "./workspace-model"
 
 const visibleLayers: readonly Layer[] = ["public", "friends", "private"]
 const stale = () => new DOMException("The block changed. Read it again before saving.", "InvalidStateError")
@@ -108,8 +111,10 @@ export type PublishDraft = {
 /** Where a post is filed on the site: a label, and a sublabel inside it. */
 export type PostLabel = { label: string; sublabel?: string }
 
-/** A change the vault's journal holds from before the workspace read the home. */
-export type PastChange = { at: string; node: string; actor: Actor; op?: ChangeOp; before?: Snapshot; after: Snapshot }
+/** A change the vault's or the cortex's journal holds from before the workspace read the home. */
+export type PastChange = { at: string; node: string; actor: Actor; op?: ChangeOp; before?: Snapshot; after: Snapshot; reason?: string }
+/** A session an agent recorded in the cortex's journal. */
+export type PastSession = { at: string; actor: Actor; done: string; deadEnds: DeadEnd[] }
 
 export type JournalEvent = { at: string; op: string; path: string; from?: string; by: string; via?: string; before?: string; hash?: string }
 const actorOf = (by: string): Actor => (by === "me" ? YOU : by.startsWith("agent:") ? { kind: "agent", name: by.slice(6) } : { kind: "human", name: "outside ohm" })
@@ -158,14 +163,23 @@ export function pastChanges({ events, texts }: { events: readonly JournalEvent[]
  * itself (journal.ts `recordChange`), with the versions they name. A removal keeps no line: there is
  * no version after it to show.
  */
-export function pastEntries(past: readonly PastChange[]): JournalEntry[] {
+export function pastEntries(past: readonly PastChange[], sessions: readonly PastSession[] = []): JournalEntry[] {
   const docs = new Map<string, Doc>()
   const scratch = createJournal(() => [...docs.values()])
-  for (const change of past) {
+  // The vault's and the cortex's journals, as one timeline, by when each was made.
+  const timeline = [...past.map(change => ({ at: change.at, change })), ...sessions.map(session => ({ at: session.at, session }))]
+    .sort((a, b) => a.at.localeCompare(b.at))
+  for (const item of timeline) {
+    if ("session" in item) {
+      const { actor, done, deadEnds, at } = item.session
+      scratch.recordSession(actor, done, deadEnds, new Date(at))
+      continue
+    }
+    const change = item.change
     if (change.op === "remove") { docs.delete(change.node); continue }
     const doc = { ...(docs.get(change.node) ?? { id: change.node, slug: change.node, updated: change.at.slice(0, 10), visibility: "private" }), ...change.after, id: change.node } as Doc
     docs.set(change.node, doc)
-    scratch.recordChange(doc, change.op ?? (change.before ? "edit" : "create"), { at: new Date(change.at), by: change.actor })
+    scratch.recordChange(doc, change.op ?? (change.before ? "edit" : "create"), { at: new Date(change.at), by: change.actor, ...(change.reason ? { reason: change.reason } : {}) })
   }
   return scratch.historyLines().map(line => scratch.entryOf(line))
 }
@@ -203,7 +217,11 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
   }))
   const owner: Entity = { did: "", handle: listed.home, name: listed.home }
   const idAt = (path: string) => [...pathOf].find(([, at]) => at === path)?.[0]
-  const entries = journaled ? pastEntries(pastChanges(journaled, idAt)) : []
+  // The cortex beside it, when the home has one; its history joins the vault's.
+  const read = <T,>(path: string) => bridgeFetch(path, {}, bridge).then(response => (response.ok ? response.json() as Promise<T> : undefined)).catch(() => undefined)
+  let parts = await read<CortexParts>("/cortex/parts")
+  const remembered = await read<CortexJournal>("/cortex/journal?limit=500").then(journal => journal ? cortexPast(journal) : { past: [], sessions: [] })
+  const entries = pastEntries([...(journaled ? pastChanges(journaled, idAt) : []), ...remembered.past], remembered.sessions)
   const pastJournal = createJournal(() => [], entries)
   const versions = new Map<string, number>()
   let sequence = 0
@@ -344,6 +362,76 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     const done = await response.json() as { request: VisibilityRequest; file?: { path: string; text: string; version: string } }
     if (done.file) { settle([done.file]); await reread }
     return done.request
+  }
+
+  // ---- The cortex, through its routes ----
+  const noCortex = () => new DOMException("This home has no cortex yet. Start one with: ohmmmm init <handle>", "NotSupportedError")
+  const journalEntries = entries.map((entry, seq) => ({ seq, created: entry.line.at, entry: entry as unknown as Record<string, unknown> }))
+  const asJsonBody = (value: unknown) => ({ body: JSON.stringify(value), headers: { "Content-Type": "application/json" } })
+  /** The cortex's name for a part: an observation's id, or a skill's or tool's name, from the app's ID. */
+  const names = new Map<string, string>()
+  /** Each part's kind, and the app's ID for a part made in this session, by its kind and name. */
+  const kinds = new Map<string, string>()
+  const madeHere = new Map<string, string>()
+  const cortexCall = async (path: string, init: RequestInit & { version?: string | null }) => {
+    const { version, ...rest } = init
+    const response = await bridgeFetch(path, {
+      ...rest, headers: { ...rest.headers, ...(version === undefined ? {} : version ? { "If-Match": `"${version}"` } : { "If-None-Match": "*" }) },
+    }, bridge)
+    if (!response.ok) throw await failed(response)
+    return response.json() as Promise<{ version?: string | null }>
+  }
+  /** The cortex as it is on disk now. */
+  const cortexParts = async () => {
+    const response = await bridgeFetch("/cortex/parts", {}, bridge)
+    if (response.status === 404) throw noCortex()
+    if (!response.ok) throw await failed(response)
+    parts = await response.json() as CortexParts
+    return parts
+  }
+  const versionIn = (now: CortexParts, doc: Doc) => doc.kind === "profile" ? now.profile.version
+    : doc.kind === "observation" ? now.observations.find(each => `observation-${each.id}` === doc.id)?.version
+      : doc.kind === "skill" ? now.skills.find(each => `skill-${each.name}` === doc.id)?.version
+        : now.tools.find(each => `tool-${each.name}` === doc.id)?.version
+  const cortexFiles = (now: CortexParts): CortexFile[] => cortexDocs(now).map(doc => {
+    const name = doc.kind === "profile" ? "profile" : doc.id.slice(doc.kind.length + 1)
+    const id = madeHere.get(`${doc.kind}:${name}`) ?? doc.id
+    names.set(id, name)
+    kinds.set(id, doc.kind)
+    return { id, ...cortexFileOf(doc), version: versionIn(now, doc) ?? "" }
+  })
+  async function saveCortex(id: string, file: HomeFile, replaces: string | null, journal?: Record<string, unknown>) {
+    if (!parts) throw noCortex()
+    await queue
+    const doc = cortexDocOf({ id, ...file, version: replaces ?? "" })
+    if (!doc) throw new DOMException("Give a cortex file: profile.md, or one in observations, skills or tools.", "DataError")
+    // A new part is an observation; its name in the cortex is its file's.
+    const name = names.get(id) ?? (doc.kind === "observation" && replaces === null ? doc.slug.replace(/^observation-/, "") : undefined)
+    if (!name) throw new DOMException("Only an observation is new in the cortex here. Skills and tools are proposed by agents, and approved in Settings › Cortex.", "DataError")
+    const line = (journal as { line?: { actor?: Actor; reason?: string } } | undefined)?.line
+    const agent = line?.actor?.kind === "agent" ? line.actor.name.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 64) || "agent" : undefined
+    const body = doc.body.trim()
+    let done: { version?: string | null }
+    if (doc.kind === "profile") done = await cortexCall("/cortex/profile", { method: "PUT", body, headers: { "Content-Type": "text/markdown" }, version: replaces })
+    else if (doc.kind === "observation") {
+      // An agent's new observation, approved by the person in the page, is written as that agent's; never pinned.
+      const sent = agent && replaces === null ? { text: body, about: doc.about ?? [], agent, ...(line?.reason ? { why: line.reason } : {}) } : { text: body, about: doc.about ?? [], pin: !!doc.pin }
+      done = await cortexCall(`/cortex/observation?id=${encodeURIComponent(name)}`, { method: "PUT", ...asJsonBody(sent), version: replaces })
+    } else if (doc.kind === "skill") done = await cortexCall(`/cortex/skill?name=${encodeURIComponent(name)}`, { method: "PUT", body, headers: { "Content-Type": "text/markdown" }, version: replaces })
+    else done = await cortexCall(`/cortex/tool?name=${encodeURIComponent(name)}`, { method: "PUT", ...asJsonBody({ body, on: !!doc.on }), version: replaces })
+    if (!names.has(id)) madeHere.set(`${doc.kind}:${name}`, id)
+    names.set(id, name)
+    kinds.set(id, doc.kind)
+    if (!done.version) throw new DOMException("The cortex did not say which version it wrote.", "InvalidStateError")
+    return { version: done.version }
+  }
+  async function removeCortex(id: string, replaces: string) {
+    if (!parts) throw noCortex()
+    await queue
+    const kind = kinds.get(id)
+    const name = names.get(id)
+    if (!name || (kind !== "observation" && kind !== "skill")) throw new DOMException("Only an observation or a skill is removed here.", "DataError")
+    await cortexCall(`/cortex/${kind}?${kind === "observation" ? "id" : "name"}=${encodeURIComponent(name)}`, { method: "DELETE", version: replaces })
   }
 
   const source = {
@@ -601,16 +689,41 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       return { path, text: mergeFile(files.get(path)!.text, path, fileOf({ ...doc, ...snapshot }).text, doc.visibility) }
     },
     visibilityMove,
-    /** The cortex is not read through the bridge yet; its journal holds the vault's past changes. */
+    /**
+     * The cortex as files, through its own routes: the profile, observations, skills and tools, each
+     * with the version the cortex gave it. A new file is an observation (agents propose skills and
+     * tools; the person approves them). The cortex journals each change as the person's, or as the
+     * agent's whose change the person approved in the page.
+     */
     cortex: {
-      list: async () => { throw notHere("The cortex") },
-      read: async () => { throw notHere("The cortex") },
-      save: async () => { throw notHere("The cortex") },
-      saveMany: async () => { throw notHere("The cortex") },
-      remove: async () => { throw notHere("The cortex") },
+      list: async () => cortexFiles(await cortexParts()),
+      async read(id: string) {
+        const found = cortexFiles(await cortexParts()).find(file => file.id === id)
+        if (!found) throw new DOMException("There is no such part of your cortex.", "NotFoundError")
+        return found
+      },
+      save: (id: string, file: HomeFile, replaces: string | null, journal?: Record<string, unknown>) => saveCortex(id, file, replaces, journal),
+      async saveMany(changes, journal) {
+        const out: { id: string; version?: string; removed?: boolean }[] = []
+        for (const change of changes) {
+          if ("remove" in change) { await removeCortex(change.id, change.replaces); out.push({ id: change.id, removed: true }) }
+          else out.push({ id: change.id, ...(await saveCortex(change.id, change.file, change.replaces, journal)) })
+        }
+        return out
+      },
+      remove: (id: string, replaces: string) => removeCortex(id, replaces),
       history: async () => [],
-      readVersion: async () => { throw notHere("The cortex") },
-      journal: async () => entries.map((entry, seq) => ({ seq, created: entry.line.at, entry: entry as unknown as Record<string, unknown> })),
+      readVersion: async () => { throw notHere("A kept version of a cortex file") },
+      journal: async () => journalEntries,
+    },
+    /** What agents proposed, waiting for the person: profile lines, skills and tools. */
+    cortexWaiting: (): CortexWaiting => parts ? waitingOf(parts) : { profile: [], skills: [], tools: [] },
+    /** The person's answer to a proposed profile line or skill. */
+    async answerCortex(kind: "profile" | "skill", id: string, yes: boolean) {
+      await queue
+      if (kind === "profile") await cortexCall(`/cortex/profile/${encodeURIComponent(id)}`, { method: "POST", ...asJsonBody({ accept: yes }) })
+      else await cortexCall(`/cortex/skills/${encodeURIComponent(id)}`, { method: "POST", ...asJsonBody({ approve: yes }) })
+      await cortexParts()
     },
     /** A media block's bytes go to the home with the block itself (saveBlock); images missing here are read from the home (bridgeMedia). */
     media: {
@@ -627,6 +740,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     async publishPlan() { return emptyPlan() },
   } satisfies HomeSource<"sync"> & {
     home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean
+    cortexWaiting(): CortexWaiting; answerCortex(kind: "profile" | "skill", id: string, yes: boolean): Promise<void>
     planPublish(ref: BlockRef, label?: PostLabel): Promise<PublishDraft>
     publishBlock(ref: BlockRef, draft: PublishDraft): Promise<{ address: string; update: boolean }>
     unpublishBlock(ref: BlockRef, to: "private" | "friends"): Promise<{ removed: boolean; address?: string }>

@@ -80,4 +80,4 @@ This repository joins three projects with their full histories. The original `ha
 ## Status
 
 - Built and tested locally: the home, the shared contract, the vault and its service, the friends layer, the private store, and the cortex.
-- The [app](app/) still runs on sample data. The private store awaits deployment, migration and integration with the account app.
+- The [app](app/) runs on sample data, or, paired with `ohmmmm serve`, on the person's own home: their vault and their cortex ([docs/serve.md](docs/serve.md)). The private store awaits deployment, migration and integration with the account app.

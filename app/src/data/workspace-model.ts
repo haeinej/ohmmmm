@@ -36,6 +36,12 @@ export type Doc = {
   about?: string[]
   /** Who wrote an observation or a block: an agent by name, or "you". */
   by?: string
+  /** An observation the person pinned, so every agent session is handed it. */
+  pin?: boolean
+  /** A tool switched on, so agents may use it. */
+  on?: boolean
+  /** A skill's or a tool's one line on what it is for. */
+  description?: string
   /** The versions of the blocks an observation is about, as they were when it was written. */
   evidence?: { node: string; version: string }[]
   /** A media block's image: its bytes by CID, and what to say about it. Its file is the one its body embeds. */
@@ -47,6 +53,14 @@ export type Doc = {
  * them can show it; the block never holds a browser address.
  */
 export type Media = { hash: string; mime: string; width?: number; height?: number; alt?: string }
+
+/** What agents proposed and asked for, waiting for the person: profile lines, skills and tools. */
+export type CortexWaiting = {
+  profile: { id: string; heading: string; line: string; by: string; quote?: string }[]
+  skills: { name: string; description: string; text: string; by: string | null }[]
+  tools: { name: string; description: string; by: string | null }[]
+}
+export const isCortexKind = (kind: string): kind is CortexKind => kind === "profile" || kind === "observation" || kind === "skill" || kind === "tool"
 
 export const isBlock = (doc?: Doc | null): doc is Doc & { kind: BlockKind; homeChannel: string } =>
   doc != null && isBlockKind(doc.kind) && doc.homeChannel !== undefined
