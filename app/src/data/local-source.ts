@@ -8,9 +8,11 @@
 // stay as they were. Moving a block or a channel to another folder goes through the bridge's rename
 // (vault/vault/rename.mjs), which rewrites what used the old path. History starts from the vault's
 // own journal. Who sees a block moves between Only you and Friends in its file, once the person has
-// approved; an agent's request for a move waits for them (/vault/requests). Public is Publish's.
-// What this source cannot do yet is said, and the file left as it is: public. The cortex is read
-// beside the vault, into the workspace's own part, and written back through its own routes (local-cortex.ts).
+// approved; an agent's request for a move waits for them (/vault/requests). Public is Publish's: the
+// person approves a plan (planPublish), and the bridge writes the post to their PDS with the app
+// password kept on this computer, then marks the file (publishBlock; unpublishBlock takes it down).
+// The cortex is read beside the vault, into the workspace's own part, and written back through its
+// own routes (local-cortex.ts).
 import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { heldNow, original } from "@/media/cache"
@@ -89,6 +91,18 @@ const snapOf = (path: string, text: string) => {
 /** An agent's request to change who sees a block (vault/vault/visibility.mjs). */
 export type VisibilityRequest = { id: string; at: string; by: string; path: string; from: Layer; to: Layer; why?: string; status: "waiting" | "approved" | "declined"; note?: string }
 
+/** What publishing a block would do, as the bridge plans it (POST /vault/publish/plan, docs/serve.md). */
+export type PublishDraft = {
+  path: string; version: string; layer: Layer; update: boolean
+  title?: string; slug: string; label: string; sublabel: string; labelSaved: boolean
+  address?: string; form?: string; publishedAt?: string
+  attachments: { id: string; path: string; mime: string; size: number }[]
+  notes: string[]; problems: string[]; needs: { what: "site" | "password"; say: string }[]
+  ready: boolean; confirm?: string
+}
+/** Where a post is filed on the site: a label, and a sublabel inside it. */
+export type PostLabel = { label: string; sublabel?: string }
+
 export type JournalEvent = { at: string; op: string; path: string; from?: string; by: string; via?: string; before?: string; hash?: string }
 const actorOf = (by: string): Actor => (by === "me" ? YOU : by.startsWith("agent:") ? { kind: "agent", name: by.slice(6) } : { kind: "human", name: "outside ohm" })
 
@@ -131,9 +145,14 @@ export function pastChanges({ events, texts }: { events: readonly JournalEvent[]
   return out
 }
 
+/** What the person reads when the bridge no longer takes this browser's key. */
+export const UNPAIRED = "This browser's key no longer opens your home, so this is the sample. In your home, run ohmmmm pair and open the link it prints."
+
 /** Reads the home through the bridge, and gives the workspace its working copy. */
 export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, onChange = () => {} }: LocalOptions = {}) {
   const answer = await bridgeFetch("/vault/files", {}, bridge)
+  // A key the bridge does not take (replaced, or the agent key) opens nothing of the person's.
+  if (answer.status === 401 || answer.status === 403) throw new DOMException(UNPAIRED, "NotAllowedError")
   if (!answer.ok) throw new DOMException(`Your home did not answer (HTTP ${answer.status}).`, "NetworkError")
   const listed = await answer.json() as { home: string; files: { path: string; text: string; version: string }[] }
   // The vault's own history; without it the workspace still opens, with history from now.
@@ -279,7 +298,19 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     const done = await response.json() as { path: string; text: string; version: string }
     settle([done])
   })
-  const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish (ohm publish), which is not in the app yet."
+  const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish: choose Everyone on the block, and approve the plan."
+  const asJson = (body: unknown, version?: string) => ({
+    method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", ...(version ? { "If-Match": `"${version}"` } : {}) },
+  })
+  // The block's file, once every change before it has reached the disk, as publishing reads it.
+  const onDisk = async (ref: BlockRef) => {
+    await queue
+    const path = pathOf.get(findDoc(ref).id)!
+    const held = files.get(path)!
+    if (refused.has(path)) throw new DOMException(`${path} has changes your home did not take. Open your home again first.`, "InvalidStateError")
+    return { path, held }
+  }
 
   const findDoc = (ref: BlockRef) => {
     const doc = blocks.find(each => each.id === ref.id)
@@ -481,6 +512,39 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       if (done.file) settle([done.file])
       return done.request
     },
+    /** What publishing the block would write, and what this computer still needs; `label` tries another place on the site. Writes nothing. */
+    async planPublish(ref: BlockRef, label?: PostLabel): Promise<PublishDraft> {
+      const { path } = await onDisk(ref)
+      const response = await bridgeFetch("/vault/publish/plan", asJson({ path, ...(label ? { label: label.label, sublabel: label.sublabel ?? "" } : {}) }), bridge)
+      if (!response.ok) throw await failed(response)
+      return await response.json() as PublishDraft
+    },
+    /**
+     * Publishes the block as the plan the person approved: the bridge writes its post to their PDS,
+     * then marks its file public (and keeps the label on its channel). Refused when the block changed
+     * since the plan.
+     */
+    async publishBlock(ref: BlockRef, draft: PublishDraft): Promise<{ address: string; update: boolean }> {
+      const { path, held } = await onDisk(ref)
+      if (!draft.confirm || path !== draft.path || held.version !== draft.version) throw new DOMException("It changed since you saw the plan. Look at it again.", "InvalidStateError")
+      const response = await bridgeFetch("/vault/publish", asJson({ path, confirm: draft.confirm, label: draft.label, sublabel: draft.sublabel }, held.version), bridge)
+      if (!response.ok) throw await failed(response)
+      const done = await response.json() as { address: string; update: boolean; files: { path: string; text: string; version: string }[] }
+      settle(done.files)
+      journal.syncJournal()
+      return { address: done.address, update: done.update }
+    },
+    /** Takes the block's post down from the PDS, then keeps the block for `to`. */
+    async unpublishBlock(ref: BlockRef, to: "private" | "friends"): Promise<{ removed: boolean; address?: string }> {
+      const { path, held } = await onDisk(ref)
+      if (!held.version) throw missing()
+      const response = await bridgeFetch("/vault/unpublish", asJson({ path, to }, held.version), bridge)
+      if (!response.ok) throw await failed(response)
+      const done = await response.json() as { path: string; text: string; version: string; removed: boolean; address?: string }
+      settle([done])
+      journal.syncJournal()
+      return { removed: done.removed, ...(done.address ? { address: done.address } : {}) }
+    },
     vault(layers: readonly Layer[] = visibleLayers) {
       return readVault([...files].filter(([path, held]) => {
         const node = nodeOf(path, held.text)
@@ -512,7 +576,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       return { path, text: mergeFile(files.get(path)!.text, path, fileOf({ ...doc, ...snapshot }).text, doc.visibility) }
     },
     visibilityMove,
-    async moveVisibility(): Promise<never> { throw new DOMException("Who sees a block in your home is changed through Publish, which is not built here yet.", "NotSupportedError") },
+    async moveVisibility(): Promise<never> { throw new DOMException("Who sees a block in your home is changed with its visibility control: Friends and Only you in its file, Everyone through Publish.", "NotSupportedError") },
     async listFriends() { return [] },
     async removeFriend() { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
     async listShared() { return [] },
@@ -521,6 +585,9 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
   } satisfies HomeSource<"sync"> & {
     demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean; moveChannel(from: string, to: string): void
     requests(): Promise<VisibilityRequest[]>; decide(id: string, approve: boolean): Promise<VisibilityRequest>
+    planPublish(ref: BlockRef, label?: PostLabel): Promise<PublishDraft>
+    publishBlock(ref: BlockRef, draft: PublishDraft): Promise<{ address: string; update: boolean }>
+    unpublishBlock(ref: BlockRef, to: "private" | "friends"): Promise<{ removed: boolean; address?: string }>
   }
   return source
 }

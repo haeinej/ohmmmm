@@ -68,12 +68,14 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
 | C1 | Show who each block is for | Click the eye in the home header | Each block shows an icon at its end: globe (Everyone), people (Friends), lock (Only you); the label is on hover | See at a glance what is shared | *UI only* |
-| C2 | **Make a block less private** | Click a block's icon → Friends or Everyone → **confirm** | The block is *marked* for that audience. It is **not published**: it reaches your site and other apps only when you publish. On your home through `ohmmmm serve`, Friends rewrites its file and the icon says "not shared yet" until your home syncs; Everyone is greyed out, "through Publish" | Decide who a block is for | `visibility.move`, which always asks first · **asks first** |
+| C2 | **Make a block less private** | Click a block's icon → Friends or Everyone → **confirm** | The block is *marked* for that audience. It is **not published**: it reaches your site and other apps only when you publish. On your home through `ohmmmm serve`, Friends rewrites its file and the icon says "not shared yet" until your home syncs; Everyone opens Publish (C6) | Decide who a block is for | `visibility.move`, which always asks first · **asks first** |
 | C3 | Make a block more private | Click its icon → Friends or Only you | Marked at once (no confirmation needed); an agent's move to it still asks | Pull something back | `visibility.move` (asks first) |
 | C3a | What a move would do | — | The move, its warning, and where it is written | Let an agent explain a move before asking | `visibility.preview` |
 | C3b | **An agent on this computer asks** | It calls `vault_request_visibility`; the app shows "<agent> asks: …" with its reason, when it opens, regains focus, or every 20 seconds | Approve: the block moves, journaled with who asked and why. Decline: nothing changes. The agent sees which (`vault_requests`) | Agents never change who sees a block themselves | *UI only* (the request is the agent's tool) · **asks first** |
 | C4 | **View as someone else** | Hover the eye → View as You / Friends / Public | The tree, graph and block show only what that audience can see; the cortex is locked; a bar says "Viewing as…" with Back to you. If the open block is one they can't see, the editor says so instead of showing it | Check what others actually see before you publish | *UI only* |
 | C5 | Back to yourself | Back to you, choose You, or hide visibility | Everything is visible again | Return to editing | *UI only* |
+| C6 | **Publish a block** (your home through `ohmmmm serve`) | Click its icon → Everyone · Publish… → the plan: address, label and sublabel (the channel's, editable), its images, links that become words, and what this computer still needs → **Publish** | Its post is on your PDS and the notice gives its address (Open); the file is marked public and the icon is the globe; a new label is kept on its channel. On a public block, Everyone · Update… rewrites the post, keeping its address and date. Cancel writes nothing | Put a block on your site, in your own words for where it goes | *UI only*: no agent publishes · **asks first** |
+| C7 | **Take a post down** (your home) | Click a public block's icon → Only you or Friends · Take down… → **Take down** (red) | The post is removed from your PDS first, then the block is kept for that audience; copies others made are not recalled | Pull something off your site | *UI only*: no agent takes down · **asks first** |
 
 ## D. The graph
 
@@ -176,7 +178,7 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
 | `cortex.observe` | Asks to keep an observation about the open block | J5 | consequential: waits for your Approve | An observation, written as the agent's, once you approved |
 
-Nothing an agent can do here is public. Making a block visible to others, deleting, and publishing are not tools yet. When they become tools, they will be marked consequential and ask the person first, as the UI does now.
+Nothing an agent can do here is public. Moving a block to Friends is a tool that always asks first (`visibility.move`). Deleting is not a tool yet. Publishing and taking a post down will never be tools: the owner decided that no agent publishes (vault/plans/standard-site.md).
 
 ## J. Your cortex ([flows/cortex.md](cortex.md))
 
@@ -198,6 +200,8 @@ Everything in the cortex is yours to change. On the home on this computer each c
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
 | Marking who a block is for | It is marked, not published. Showing it to more people needed your yes |
+| Publishing (your home) | Its post is on your PDS at the address the plan showed, the file says public, and nothing else of your vault left your computer |
+| Taking a post down | The record is gone from your PDS before the block moved; the block is kept |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |
@@ -210,7 +214,7 @@ Everything in the cortex is yours to change. On the home on this computer each c
 These show a notice saying what they will do. Each will become a path above once its service exists:
 - **Agent features:** ask an agent (from search and from selected text), and generate or visualise.
 - **Version history.**
-- **Publishing and taking down.** Its own flow, with an approval card.
+- **Publishing from the sample, and through the vault service.** On your home through `ohmmmm serve` it is built (C6, C7).
 - **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
 - **Signing out.**

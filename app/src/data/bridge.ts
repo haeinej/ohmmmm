@@ -1,6 +1,8 @@
 // The home's bridge on this machine, `ohmmmm serve` (docs/serve.md). The app pairs with it once, from
-// the link the bridge prints: `<app>/#bridge=<its address>&token=<the home's token>`. The token rides
-// in the fragment, which a browser never sends to a server, and is kept in this browser only.
+// the link the bridge (or `ohmmmm pair`) prints: `<app>/#bridge=<its address>&token=<this browser's
+// key>`. The key rides in the fragment, which a browser never sends to a server, and is kept in this
+// browser only: the home keeps no copy of it, only its hash. Agents have a key of their own, which
+// reaches only the bridge's MCP endpoints.
 //
 // For now the media cache reads through it: an image this browser does not hold is fetched from the
 // home folder by its CID (vault/plans/media.md, step 3). The local home source comes next.
@@ -54,9 +56,9 @@ export function pairFromLocation(
 
 export const forgetBridge = (store: Store | null = storage()) => store?.removeItem(KEY)
 
-/** A request to the paired bridge, signed with the home's token. */
+/** A request to the paired bridge, signed with this browser's key. */
 export function bridgeFetch(path: string, init: RequestInit = {}, bridge = currentBridge()) {
-  if (!bridge) return Promise.reject(new DOMException("No bridge is paired. Run ohmmmm serve and open the link it prints.", "NotFoundError"))
+  if (!bridge) return Promise.reject(new DOMException("No bridge is paired. Run ohmmmm serve, or ohmmmm pair, and open the link it prints.", "NotFoundError"))
   return fetch(`${bridge.url}${path}`, { ...init, headers: { ...init.headers, Authorization: `Bearer ${bridge.token}` } })
 }
 

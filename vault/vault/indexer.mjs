@@ -17,7 +17,7 @@ import { blobCid, FILE_TYPES, kindOf as mediaKind } from './core.mjs';
 import { slugOf } from './file.mjs';
 import { formerNames, nameKey, renamesBetween } from './names.mjs';
 import { evidence, nodeKey, originKind, readVault, SOURCES } from './node.mjs';
-import { appendEvents, downloadedFrom, HISTORY, readEvents } from './journal.mjs';
+import { appendEvents, downloadedFrom, HISTORY, POST_OPS, readEvents } from './journal.mjs';
 import { CANONICAL, CONFIG, readConfig } from './roots.mjs';
 import { words } from './words.mjs';
 
@@ -246,7 +246,7 @@ async function journal(vault, db, report, lastScan) {
   const { events: before, unreadable } = await readEvents(vault);
   if (unreadable) report.problems.push({ root: CANONICAL, path: '.vault/journal.jsonl', problems: [`${unreadable} line(s) of the journal cannot be read and are skipped. The rest is used.`] });
   const told = new Map();
-  for (const event of before) if (event.at > lastScan && event.via !== 'scan') told.set(`${event.root}\u0000${event.path}`, event);
+  for (const event of before) if (event.at > lastScan && event.via !== 'scan' && !POST_OPS.includes(event.op)) told.set(`${event.root}\u0000${event.path}`, event);
   const row = db.prepare('SELECT abs, hash FROM files WHERE root = ? AND path = ?');
   const twins = db.prepare("SELECT root, path, abs FROM files WHERE hash = ? AND NOT (root = ? AND path = ?) ORDER BY root = 'vault', root, path LIMIT 1");
   const at = report.at;
@@ -271,7 +271,7 @@ async function journal(vault, db, report, lastScan) {
     }
   }
   // A tool that changed or removed a file journaled it already, with the versions it kept.
-  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore', 'rename', 'editor', 'visibility'].includes(known.via) && (op === 'removed' || known.hash === hash);
+  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore', 'rename', 'editor', 'visibility', 'publish'].includes(known.via) && (op === 'removed' || known.hash === hash);
   // A move a tool journaled already is not journaled again.
   const toldMove = new Set(before.filter(event => event.op === 'moved' && event.via !== 'scan' && event.at > lastScan)
     .map(event => `${event.root}\u0000${event.from}\u0000${event.path}`));

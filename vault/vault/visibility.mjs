@@ -30,11 +30,30 @@ export function layerOf(path, text) {
  * a post. Public, either way, is refused: that is Publish.
  */
 export function withVisibility(path, text, to) {
+  const node = blockOf(path, text);
+  if (to === 'public' || node.visibility === 'public' || node.kind === 'post') refuse(THROUGH_PUBLISH);
+  return inLayer(path, text, node, to);
+}
+
+/**
+ * Publish's own move (publish-block.mjs, through the bridge): the block's file marked public once its
+ * post is written, and moved back to Only you or Friends once the post is taken down. Nothing else
+ * may call it: every other move goes through withVisibility.
+ */
+export function publishedLayer(path, text, to) {
+  const node = blockOf(path, text);
+  if (node.kind === 'post') refuse('This file is a post from your site. Posts are published by syncing with the vault service.');
+  return inLayer(path, text, node, to);
+}
+
+function blockOf(path, text) {
   const read = readNode(path, text);
   if (read?.node?.type !== 'block') refuse('Only a block has a visibility.');
-  const node = read.node;
+  return read.node;
+}
+
+function inLayer(path, text, node, to) {
   if (!LAYERS.includes(to)) refuse(`A visibility is one of: ${LAYERS.join(', ')}.`);
-  if (to === 'public' || node.visibility === 'public' || node.kind === 'post') refuse(THROUGH_PUBLISH);
   if ((node.visibility ?? 'private') === to) return text;
   let next = node.kindGiven ? text : setProperty(text, 'kind', node.kind);
   next = setProperty(next, 'visibility', to === 'private' ? undefined : to);

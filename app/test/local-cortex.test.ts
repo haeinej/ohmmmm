@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 import { initHome } from "../../bin/ohmmmm.mjs"
-import { homeBridge, homeToken, listenHome } from "../../home/serve.mjs"
+import { homeBridge, listenHome, pairApp } from "../../home/serve.mjs"
 import { openCortex as openFolder } from "../../cortex/src/folder.mjs"
 import { createLocalSource } from "../src/data/local-source"
 import { cortexPast, observationTitle } from "../src/data/local-cortex"
@@ -38,8 +38,8 @@ async function withHome(t: test.TestContext) {
   await agent.proposeSkill({ text: "---\nname: short-titles\ndescription: Keep titles short\n---\nThree words.\n" })
   await agent.proposeTool({ name: "send-mail", description: "Sends a mail", inputs: "to, text", outputs: "sent" })
 
-  const token = await homeToken(layout.home)
-  const server = await listenHome(homeBridge({ layout, token, DatabaseSync, agent: undefined }), { port: 0 }) as import("node:http").Server
+  const token = await pairApp(layout.home) as string
+  const server = await listenHome(homeBridge({ layout, DatabaseSync, agent: undefined }), { port: 0 }) as import("node:http").Server
   const bridge = { url: `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`, token }
   const problems: string[] = []
   const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) }, onChange: sourceChanged })

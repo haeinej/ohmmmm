@@ -226,6 +226,8 @@ Nothing is lost. Each time an agent writes, links, removes or restores, the vers
 
 An agent never changes who can see a block, even where it may write. It asks instead (`vault_request_visibility`, with its reason), and the request waits for you. With `ohmmmm serve` running, the app shows each request: approve it and the block moves, or decline it and nothing changes. The agent can see how its requests went (`vault_requests`).
 
+Publishing is yours alone. With `ohmmmm serve` running and an app password set, choosing Everyone on a block in the app shows the plan, and Publish writes the block as a post on your PDS, kept under the block's `id` so a rename never moves it. The file gets `visibility: public`, and the label you chose is kept on its channel as `site: {"label": "Walks"}` in `_channel.md`. The journal says `published`, with the post's address, and `unpublished` when you take it down. See [the bridge's guide](../../docs/serve.md).
+
 ### Telling agents where your data lives
 
 Give each root a `note` in `.vault/config.json`: what is there, what to trust, how to use it ("Board queries. Join on account_id, not user_id."). Agents read it with `vault_where` before they search, together with the counts and kinds of files in each root and what you let them change. A root without a note is one an agent will ask you about.

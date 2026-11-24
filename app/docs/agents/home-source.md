@@ -61,7 +61,10 @@ if a write response is lost. The vault TID stays inside the sealed file.
 A private-to-Friends copy discloses its contents to
 the vault service and friends. Publication starts with `publishPlan`, which
 previews the changes. The member-facing confirmation and publishing flows can
-use these operations when connected.
+use these operations when connected. On the home on this computer, publishing
+one block is built: the local source's `planPublish`, `publishBlock` and
+`unpublishBlock` call the bridge, which holds the app password
+([docs/serve.md](../../../docs/serve.md), "Publishing").
 
 After `npm ci --prefix app`, run `npm --prefix app run build` and
 `npm --prefix app test` with only the app installed. Vite and the Node test
@@ -72,7 +75,7 @@ listed in the [root README](../../../README.md) and run `npm test`. The app
 typecheck includes test files. Adapter tests cover
 the selected workspace, compare-and-set, XRPC routing and a synthetic keys
 fixture. Live sign-in, the account app's unlock screens, and publishing
-await app integration and live verification. Kept versions in the service
+through the vault service await app integration and live verification. Kept versions in the service
 adapter currently cover private files. The local source's history starts from
 the vault's own journal (`/vault/journal`, `pastChanges`), and it moves blocks and
 channels through the bridge's rename.

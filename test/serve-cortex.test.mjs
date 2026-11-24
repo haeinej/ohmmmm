@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { initHome } from '../bin/ohmmmm.mjs';
-import { homeBridge, homeToken, listenHome } from '../home/serve.mjs';
+import { agentKey, homeBridge, listenHome, pairApp } from '../home/serve.mjs';
 import { openCortex } from '../cortex/src/folder.mjs';
 import { newNodeId } from '../vault/vault/node.mjs';
 
@@ -20,8 +20,9 @@ async function setUp(t) {
   const walk = newNodeId();
   await mkdir(join(layout.vault, 'notes'), { recursive: true });
   await writeFile(join(layout.vault, 'notes/walk.md'), `---\nid: ${walk}\ntitle: Slow walk\n---\n\nYanaka, lanterns, cats.\n`);
-  const token = await homeToken(layout.home);
-  const server = await listenHome(homeBridge({ layout, token, DatabaseSync }), { port: 0 });
+  const token = await pairApp(layout.home);
+  const agent = (await agentKey(layout.home)).key;
+  const server = await listenHome(homeBridge({ layout, DatabaseSync }), { port: 0 });
   t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
   const port = server.address().port;
   const call = (method, path, { headers = {}, body } = {}) => new Promise((done, fail) => {
@@ -38,11 +39,11 @@ async function setUp(t) {
   });
   const asJson = (version, value) => ({ headers: { 'Content-Type': 'application/json', ...(version === null ? { 'If-None-Match': '*' } : version ? { 'If-Match': `"${version}"` } : {}) }, body: JSON.stringify(value) });
   const journal = async () => (await readFile(join(layout.cortex, '.cortex', 'journal.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  return { layout, walk, call, asJson, journal };
+  return { layout, walk, call, asJson, journal, agent };
 }
 
 test('the app reads the cortex whole: profile, observations, skills, tools, and what waits', async t => {
-  const { layout, call } = await setUp(t);
+  const { layout, call, agent: agentKeyText } = await setUp(t);
   const agent = openCortex(layout.cortex, { actor: 'claude-code' });
   await agent.observe({ id: 'titles-short', text: 'Keeps titles to three words.' });
   await agent.proposeProfile({ heading: 'Preferences', line: 'Titles stay short.' });
@@ -57,8 +58,10 @@ test('the app reads the cortex whole: profile, observations, skills, tools, and 
   assert.deepEqual(json.skills.map(each => each.name), ['file-a-source']);
   assert.deepEqual(json.proposedSkills.map(each => [each.name, each.by]), [['short-titles', 'claude-code']]);
   assert.deepEqual(json.tools.map(each => [each.name, each.on]), [['vault-search', false]]);
-  // Without the token, nothing.
+  // Without a key, nothing; with the agent key, not the person's cortex routes either.
   assert.equal((await call('GET', '/cortex/parts', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await call('GET', '/cortex/parts', { headers: { Authorization: `Bearer ${agentKeyText}` } })).status, 403);
+  assert.equal((await call('PUT', '/cortex/profile', { headers: { Authorization: `Bearer ${agentKeyText}`, 'If-Match': `"${json.profile.version}"` }, body: 'An agent\'s profile' })).status, 403);
 });
 
 test('the person edits the profile only over the version read, and accepts or declines a line', async t => {
