@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { blockStore } from '../service/src/blocks.mjs';
 import { contentStore } from '../service/src/content.mjs';
+import { friendshipStore } from '../service/src/friendship.mjs';
 import { links } from '../service/src/ohm.mjs';
 import { createService } from '../service/src/worker.mjs';
 import { newPostId } from '../vault/file.mjs';
@@ -165,6 +166,29 @@ test('asking by email sends one invite from ohm with the asker\'s name, replies 
   // Without mail set up, asking works and nothing is sent.
   delete env.MAIL;
   assert.deepEqual(await ask('askFriend', { body: { email: 'quiet@example.test' }, cookie: 'session=bo' }), { asked: true });
+});
+
+test('invite emails are claimed before they are sent: asks at the same moment send once, the day\'s limit holds, and a failed send is tried again', async () => {
+  const db = await testDatabase();
+  const friendship = friendshipStore(db);
+  const sent = [];
+  // Each send takes a moment, so asks made together are all in flight at once.
+  const mail = async invite => { await new Promise(done => setTimeout(done, 5)); sent.push(invite.to); return true; };
+  const asking = email => friendship.askByEmail({ viewer: bo, email, name: 'Bo', ownEmail: 'bo@example.test', didByEmail: async () => null, mail });
+  await Promise.all(Array.from({ length: 5 }, () => asking('new@example.test')));
+  assert.deepEqual(sent, ['new@example.test']);
+  // 19 sent today; 5 new addresses at once: only one more goes.
+  for (let index = 0; index < 18; index++) await asking(`person${index}@example.test`);
+  assert.equal(sent.length, 19);
+  await Promise.all(Array.from({ length: 5 }, (_, index) => asking(`late${index}@example.test`)));
+  assert.equal(sent.length, 20);
+  // A send that fails gives its claim back, so asking again sends it; the ask itself is kept.
+  const other = 'did:web:pds.cy.test';
+  const failing = async () => { throw new Error('The mail service is down'); };
+  await assert.rejects(friendship.askByEmail({ viewer: other, email: 'dee@example.test', name: 'Cy', didByEmail: async () => null, mail: failing }), /down/);
+  assert.equal(db.sqlite.prepare('SELECT mailed_at FROM friend_asks WHERE viewer = ? AND email = ?').get(other, 'dee@example.test').mailed_at, null);
+  await friendship.askByEmail({ viewer: other, email: 'dee@example.test', name: 'Cy', didByEmail: async () => null, mail });
+  assert.equal(sent.at(-1), 'dee@example.test');
 });
 
 test('a member\'s agent asks by email with the member\'s token, named from their ohm account', async () => {

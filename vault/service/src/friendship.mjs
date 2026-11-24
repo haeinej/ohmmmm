@@ -72,13 +72,21 @@ export function friendshipStore(db) {
       await db.prepare('INSERT INTO friend_asks (viewer, email, message, asked_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (viewer, email) DO UPDATE SET message = excluded.message').bind(viewer, typed, message || null, now.toISOString()).run();
       const owner = await didByEmail(typed);
       if (owner && owner !== viewer) await this.ask(owner, { viewer, name, email: ownEmail, message, now });
-      // One invite email per address, and at most DAILY a day for each asker.
+      // One invite email per address, and at most DAILY a day for each asker. The send is claimed
+      // first, in one statement that checks both, so asks at the same moment or a retry send once and
+      // never past the day's limit. A send that did not go gives its claim back, to be tried again.
       if (mail) {
-        const held = await db.prepare('SELECT mailed_at FROM friend_asks WHERE viewer = ?1 AND email = ?2').bind(viewer, typed).first();
+        const at = now.toISOString();
         const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-        const today = (await db.prepare('SELECT COUNT(*) AS sent FROM friend_asks WHERE viewer = ?1 AND mailed_at > ?2').bind(viewer, since).first()).sent;
-        if (!held?.mailed_at && today < DAILY && await mail({ to: typed, asker: name, askerEmail: ownEmail, message })) {
-          await db.prepare('UPDATE friend_asks SET mailed_at = ?3 WHERE viewer = ?1 AND email = ?2').bind(viewer, typed, now.toISOString()).run();
+        const claimed = await db.prepare(`UPDATE friend_asks SET mailed_at = ?3 WHERE viewer = ?1 AND email = ?2 AND mailed_at IS NULL
+          AND (SELECT COUNT(*) FROM friend_asks WHERE viewer = ?1 AND mailed_at > ?4) < ?5 RETURNING email`).bind(viewer, typed, at, since, DAILY).first();
+        if (claimed) {
+          let went = false;
+          try {
+            went = Boolean(await mail({ to: typed, asker: name, askerEmail: ownEmail, message }));
+          } finally {
+            if (!went) await db.prepare('UPDATE friend_asks SET mailed_at = NULL WHERE viewer = ?1 AND email = ?2 AND mailed_at = ?3').bind(viewer, typed, at).run();
+          }
         }
       }
       return { asked: true };
