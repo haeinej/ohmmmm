@@ -53,6 +53,7 @@ cortex/
 │   ├── working/          working memory, one file per agent: this session, and what was left open
 │   ├── journal.jsonl     every change, observation, settlement, session and save, with who did it
 │   ├── hooks.jsonl       the hooks' checkpoints on this machine: when to ask for a distill. Not committed
+│   ├── write.lock        held by a write while it checks, writes and journals, so the bridge and the MCP server never write over each other. Not committed
 │   ├── identity.jsonl    identity facts proposed, confirmed and turned down
 │   └── history/          every earlier version of every file, by version
 ├── .gitignore            policy: secrets and temporary files never leave the machine

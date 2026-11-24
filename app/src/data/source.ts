@@ -41,8 +41,8 @@ export type MoveRequest = {
   id: string; block: string; store: BlockRef["store"]; from: Layer; to: Layer; version?: string
   askedBy: string; reason?: string; asked: string; state: "waiting" | "approved" | "declined"
 }
-/** A move the member made, for the journal (vault.recordMove). */
-export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string }
+/** A move the member made, for the journal (vault.recordMove). `moveId` names it, so sending it again journals nothing more. */
+export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string; moveId?: string }
 export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: string }
 /** A channel's `_channel.md` on the vault service, with the version compare-and-set names. */
 export type ChannelHead = { path: string; version: string; title?: string; kind?: string }

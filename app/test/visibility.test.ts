@@ -45,6 +45,22 @@ test("an agent's request waits until the member approves it, and the move is the
   }
 })
 
+test("an approval whose journal line failed is finished by approving again, and answers the request once", async () => {
+  const fixture = createFixtureSource()
+  await setSource(fixture)
+  try {
+    const request = fixture.ask({ block: fixtureIds.scans, store: "block", from: "friends", to: "private", askedBy: "agent:helper" })
+    await loadMoveRequests()
+    fixture.failing.record = 1
+    await assert.rejects(approveMoveRequest(request.id), { name: "NetworkError" })
+    const moved = await approveMoveRequest(request.id)
+    assert.deepEqual(waitingRequests(), [])
+    assert.deepEqual(fixture.journalOfMoves.filter(move => move.request === request.id).map(move => [move.sealedAs, move.state]), [[moved.id, "done"]])
+  } finally {
+    await setSource(null)
+  }
+})
+
 test("declining moves nothing; a request for a block that changed since is reviewed again", async () => {
   const fixture = createFixtureSource()
   await setSource(fixture)
@@ -129,6 +145,37 @@ test("someone asking to be a friend waits for the member, who approves them for 
     const friends = await fixture.listFriends()
     assert.deepEqual(friends.find(each => each.did === bo.did), { did: bo.did, added: "2026-11-24", channels: ["writing"], name: "Bo", email: "bo@example.test" })
     assert.equal(friends.some(each => each.did === cy.did), false)
+  } finally {
+    await setSource(null)
+  }
+})
+
+test("a move to private that sealed its copy but failed after finishes only what is left when moved again: one sealed copy", async () => {
+  const fixture = createFixtureSource()
+  await setSource(fixture)
+  try {
+    const sealedCount = () => fixture.listBlocks(["private"]).length
+    const before = sealedCount()
+    // The friends copy could not be removed: it stays in the tree, and the move says so.
+    fixture.failing.delete = 1
+    const first = await setVisibility(fixtureIds.address, "private")
+    assert.equal(first.cleanupPending, true)
+    assert.equal(byId(fixtureIds.address)?.visibility, "friends")
+    assert.equal(fixture.journalOfMoves.at(-1)?.state, "cleanup-pending")
+    // Moved again, it only removes the friends copy: no second sealed copy, and the journal says done.
+    const again = await setVisibility(fixtureIds.address, "private")
+    assert.deepEqual([again.id, again.cleanupPending], [first.id, false])
+    assert.equal(sealedCount(), before + 1)
+    assert.equal(byId(fixtureIds.address), undefined)
+    assert.equal(fixture.listBlocks(["friends"]).some(head => head.id === fixtureIds.address), false)
+    assert.deepEqual(fixture.journalOfMoves.filter(move => move.sealedAs === first.id).map(move => move.state), ["cleanup-pending", "done"])
+
+    // The journal could not be reached: moved again, the move is only recorded, once.
+    fixture.failing.record = 1
+    await assert.rejects(setVisibility(fixtureIds.dusk, "private"), { name: "NetworkError" })
+    const recorded = await setVisibility(fixtureIds.dusk, "private")
+    assert.equal(sealedCount(), before + 2)
+    assert.deepEqual(fixture.journalOfMoves.filter(move => move.sealedAs === recorded.id).map(move => [move.block, move.state]), [[fixtureIds.dusk, "done"]])
   } finally {
     await setSource(null)
   }

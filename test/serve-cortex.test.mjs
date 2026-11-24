@@ -94,6 +94,10 @@ test('the person writes, edits, pins and forgets observations; what they are abo
   const file = await readFile(join(layout.cortex, 'observations', 'you-walks.md'), 'utf8');
   assert.match(file, /by: "you"/);
   assert.match(file, new RegExp(`about: \\["${walk}"\\]`));
+  // A new one sent again, say after the answer was lost, is the same one; other words are refused.
+  const retried = await call('PUT', '/cortex/observation?id=you-walks', asJson(null, { text: 'Walks before writing.', about: [walk] }));
+  assert.deepEqual([retried.status, retried.json.unchanged, retried.json.version], [201, true, made.json.version]);
+  assert.equal((await call('PUT', '/cortex/observation?id=you-walks', asJson(null, { text: 'Runs before writing.', about: [walk] }))).status, 412);
   assert.equal((await call('PUT', '/cortex/observation?id=you-gone', asJson(null, { text: 'About nothing there.', about: [newNodeId()] }))).status, 404);
   assert.equal((await call('PUT', '/cortex/observation?id=you-walks', { body: '{}' })).status, 428);
   const pinned = await call('PUT', '/cortex/observation?id=you-walks', asJson(made.json.version, { text: 'Walks before writing, most mornings.', about: [walk], pin: true }));

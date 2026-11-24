@@ -107,11 +107,15 @@ export async function requestVisibility(vault, { by, path, from, to, why, now = 
   return request;
 }
 
-/** The person's decision on a waiting request: `approved` or `declined`, with when, and why it could not be done. */
+/**
+ * The person's decision on a waiting request: `approved` or `declined`, with when, and why it could
+ * not be done. Deciding a request again the same way returns it as it was decided; another way is refused.
+ */
 export async function decideRequest(vault, id, decision, { note, now = new Date() } = {}) {
   const requests = await load(vault);
   const request = requests.find(each => each.id === id);
   if (!request) refuse('There is no such request.');
+  if (request.status === decision) return request;
   if (request.status !== 'waiting') refuse(`That request was ${request.status} already.`);
   Object.assign(request, { status: decision, decided: now.toISOString(), ...(note ? { note } : {}) });
   await save(vault, requests);

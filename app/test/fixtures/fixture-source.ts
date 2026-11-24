@@ -7,8 +7,8 @@ import { docOf, fileOf } from "../../src/data/block-document"
 import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
-  emptyPlan, mediaName, visibilityMove,
-  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type VaultEvidence,
+  emptyPlan, mediaName, moveVisibility, visibilityMove,
+  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveResult, type MoveTarget, type MoveRequest, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
 import { createMemorySearch } from "../../src/data/memory-search"
@@ -39,6 +39,9 @@ export function createFixtureSource() {
   const requests: MoveRequest[] = []
   const journalOfMoves: (MoveRecord & { state: string })[] = []
   const hidden = new Set<string>()
+  /** Failures to come, as a dropped connection would cause: the next delete, or the next record. */
+  const failing = { delete: 0, record: 0 }
+  const dropped = () => new DOMException("The connection dropped.", "NetworkError")
 
   const channelText = (path: string, created: string) => writeNoteFile({ properties: { id: newNodeId(), created } })
   function ensureChannel(path: string, created: string) {
@@ -103,6 +106,7 @@ export function createFixtureSource() {
       return { version: versionOf(saved) }
     },
     deleteBlock(ref: BlockRef, replaces: string) {
+      if (failing.delete) { failing.delete--; throw dropped() }
       const doc = find(ref, replaces)
       blocks.splice(blocks.indexOf(doc), 1)
     },
@@ -127,11 +131,10 @@ export function createFixtureSource() {
       return fileOf({ ...doc, ...snapshot })
     },
     visibilityMove,
-    async moveVisibility(ref: BlockRef, { layer: to }: { layer: Layer }, replaces: string) {
-      visibilityMove(ref, to)
-      const doc = find(ref, replaces)
-      doc.visibility = to
-      return { ref: { id: ref.id, layer: to, store: storeOf(doc) }, version: versionOf(fileOf(doc)), cleanupPending: false }
+    // The service source's move: copy into the other store (under the opaque ID for private), then
+    // remove the old copy.
+    async moveVisibility(ref: BlockRef, to: MoveTarget, replaces: string): Promise<MoveResult> {
+      return moveVisibility(source as unknown as Pick<HomeSource, "readBlock" | "saveBlock" | "deleteBlock">, ref, to, replaces)
     },
     async listFriends() { return structuredClone(friendList) },
     friendRequests: {
@@ -238,6 +241,10 @@ export function createFixtureSource() {
         journalOfMoves.push({ block: request.block, from: request.from, to: request.to, request: id, state: "declined" })
       },
       async record(move: MoveRecord) {
+        if (failing.record) { failing.record--; throw dropped() }
+        // A move named by the cockpit is journalled once, however often it is sent.
+        const earlier = move.moveId && journalOfMoves.find(line => line.moveId === move.moveId)
+        if (earlier) return { state: earlier.state }
         if (move.request) {
           const request = requests.find(each => each.id === move.request && each.state === "waiting")
           if (!request) throw new DOMException("This request has been answered already", "InvalidStateError")
@@ -271,7 +278,7 @@ export function createFixtureSource() {
     friendAsks.push(made)
     return made
   }
-  return Object.assign(source, { fixtureIds, owner, ask, hide, askFriend, journalOfMoves })
+  return Object.assign(source, { fixtureIds, owner, ask, hide, askFriend, journalOfMoves, failing })
 }
 
 export type FixtureSource = ReturnType<typeof createFixtureSource>

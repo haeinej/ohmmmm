@@ -55,10 +55,10 @@ import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
 import { pdsConfig, webUrl } from '../vault/feed/pds.mjs';
 import { signIn } from '../vault/scripts/rpc.mjs';
-import { blobCid, FILE_TYPES, isSlug, VaultProblem } from '../vault/vault/core.mjs';
+import { blobCid, FILE_TYPES, isSlug, recordVersion, VaultProblem } from '../vault/vault/core.mjs';
 import { isPostId, setProperty, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
-import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
+import { appendEvents, keepVersion, readEvents } from '../vault/vault/journal.mjs';
 import { CHANNEL_FILE, isChannelPath, newNodeId, nodeFile, readNode, SOURCES } from '../vault/vault/node.mjs';
 import { blockPost, publishedAddresses } from '../vault/vault/publish-block.mjs';
 import { memoryKv, ownStores, pdsStore } from '../vault/vault/stores.mjs';
@@ -436,17 +436,15 @@ async function inVault(vault, path) {
 }
 
 // A version kept once by its address, as the vault's tools keep theirs, so `ohm vault restore` can bring it back.
-async function keep(vault, text) {
-  const address = await versionOf(text);
-  await mkdir(join(vault, HISTORY), { recursive: true });
-  await writeFile(join(vault, HISTORY, address), text, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-  return address;
-}
+const keep = (vault, text) => keepVersion(vault, text);
 
 /**
  * Writes one file as the person, only over the version it was read at: `replaces` is that version,
  * or null for a file that must not exist yet. `text` undefined removes it. Returns the new version.
- * Refusals carry the HTTP status they answer with: 412 when the file is not at that version any more.
+ * A file that already says `text` (or is already gone, for a removal) is left as it is and answered
+ * `unchanged`, whatever `replaces` says, so the same change tried again after its answer was lost
+ * is not refused. Refusals carry the HTTP status they answer with: 412 when the file is not at that
+ * version any more.
  */
 export async function writeAsPerson({ vault, path, text, replaces }) {
   if (!editablePath(path)) throw Object.assign(new Error('Give the path of a Markdown file inside the vault, such as notes/idea.md'), { status: 400 });
@@ -458,6 +456,8 @@ export async function writeAsPerson({ vault, path, text, replaces }) {
   const file = await inVault(vault, path);
   const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
   const now = before === undefined ? null : await versionOf(before);
+  if (text === undefined && before === undefined) return { path, removed: true, unchanged: true };
+  if (text !== undefined && before === text) return { path, version: now, created: false, unchanged: true };
   if (now !== replaces) throw Object.assign(new Error(now === null ? 'There is no such file any more' : replaces === null ? 'A file is already there' : 'The file changed since it was read'), { status: 412, version: now });
   const at = new Date().toISOString();
   if (text === undefined) {
@@ -505,12 +505,13 @@ export async function recentHistory(vault, { limit = 500 } = {}) {
  * A rename or move as the person (vault/vault/rename.mjs): `{ channel, to }`, or `{ block, slug?,
  * title?, home? }`. Every file that used the old name is rewritten; all of it is journaled `by: me`,
  * `via: rename`. Answers what the rename did, and each file it moved or wrote as it is on disk now.
+ * The same rename tried again after it stopped part-way finishes what is left (planRename's `events`).
  */
 export async function renameAsPerson({ vault, change }) {
   const { files, paths } = await readVaultFolder(vault, { open: path => inVault(vault, path) });
   const plan = planRename(files, change.block === undefined
     ? { channel: change.channel, to: change.to }
-    : { block: change.block, ...(change.slug === undefined ? {} : { slug: change.slug }), ...(change.title === undefined ? {} : { title: change.title }), ...(change.home === undefined ? {} : { channel: change.home }) }, { paths });
+    : { block: change.block, ...(change.slug === undefined ? {} : { slug: change.slug }), ...(change.title === undefined ? {} : { title: change.title }), ...(change.home === undefined ? {} : { channel: change.home }) }, { paths, events: (await readEvents(vault)).events });
   const done = await applyRename({ vault, plan, by: 'me', keep: text => keep(vault, text) });
   const touched = [...new Set([...plan.moves.map(move => move.to), ...plan.writes.map(write => write.path)])].filter(path => path.endsWith('.md'));
   const now = [];
@@ -533,10 +534,11 @@ export async function moveAsPerson({ vault, path, to, replaces, asked, why }) {
   const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
   if (before === undefined) throw Object.assign(new Error('There is no such file any more'), { status: 412, version: null });
   const version = await versionOf(before);
-  if (replaces !== undefined && replaces !== version) throw Object.assign(new Error('The file changed since it was read'), { status: 412, version });
   const was = layerOf(path, before);
   const text = withVisibility(path, before, to);
+  // Already where it goes, as when the same move is tried again: nothing to refuse or write.
   if (text === before) return { path, text, version, layer: to, unchanged: true };
+  if (replaces !== undefined && replaces !== version) throw Object.assign(new Error('The file changed since it was read'), { status: 412, version });
   const kept = await keep(vault, before);
   const hash = await keep(vault, text);
   const temp = join(dirname(file), `.edit-${randomUUID()}`);
@@ -651,45 +653,92 @@ async function writePublished(vault, path, before, text, extra) {
   return { event: { op: before === undefined ? 'added' : 'changed', root: 'vault', path, by: 'me', via: 'publish', ...extra, ...(kept ? { before: kept } : {}), hash }, file: { path, text, version: hash } };
 }
 
+// Whether the file is at the version the person read, or was taken from it only by an earlier try of
+// this same publish: its ID written (a `changed` with the `key`), then marked public. So a publish
+// tried again, after its answer was lost or a step after the post failed, is still the one they approved.
+async function publishedFrom(vault, path, replaces, version) {
+  if (version === replaces) return true;
+  let at = replaces;
+  for (const event of (await readEvents(vault)).events) {
+    if (event.path !== path || event.via !== 'publish' || event.op !== 'changed' || event.before !== at) continue;
+    if (event.key || event.layer === 'public') at = event.hash;
+  }
+  return at === version;
+}
+
+// Whether the post held on the PDS already says what publishing would write: the same fields, and the
+// same files under the same IDs. Its dates aside.
+async function holdsPost(held, post) {
+  const fields = ({ media: _, publishedAt: __, updatedAt: ___, ...rest }) => recordVersion(rest);
+  const files = list => recordVersion(list.map(([id, cid]) => [id, cid]).sort((a, b) => a[0].localeCompare(b[0])));
+  return await fields(held) === await fields(post.record)
+    && await files((held.media ?? []).map(item => [item?.id, item?.file?.ref?.$link])) === await files(post.attachments.map(each => [each.id, each.cid]));
+}
+
 /**
  * Publishes a block as the person, over the version read (`replaces`) and only as the plan they saw
- * (`confirm`, from planPublish). The post goes to their PDS first, under the block's ID (one is given
- * and written into the file when it has none); then the file is marked public, and the label is saved
- * on the block's channel when it is new. Journaled `changed` (`via: publish`, `layer`, `was`) and
- * `published` (`key`, `address`). An update keeps the post's address, label and date.
+ * (`confirm`, from planPublish). A block with no ID is given one, written into its file before
+ * anything reaches the PDS, so a publish tried again uses the same key and never makes a second post.
+ * Then the post goes to their PDS under the block's ID, the file is marked public, and the label is
+ * saved on the block's channel when it is new. Journaled `changed` (`via: publish`, `key`) for the
+ * ID, `changed` (`via: publish`, `layer`, `was`) and `published` (`key`, `address`). An update
+ * keeps the post's address, label and date. Tried again over the same version and plan, it finishes
+ * what the first try left undone, and answers what that try did once the post is already there.
  */
 export async function publishAsPerson({ vault, path, replaces, label, sublabel, confirm, config, password = process.env.ATPROTO_APP_PASSWORD, get = fetch, token }) {
   const settings = await siteSettings(config);
   const needs = needsOf({ settings, config, password });
   if (needs.length) throw new VaultProblem(needs.map(need => need.say).join(' '));
-  const read = await readForPublish({ vault, path, settings, get, key: newNodeId() });
-  if (read.version !== replaces) throw Object.assign(fail('The file changed since it was read', 412), { version: read.version });
-  const post = await blockPost({
+  let read = await readForPublish({ vault, path, settings, get, key: newNodeId() });
+  if (!await publishedFrom(vault, path, replaces, read.version)) throw Object.assign(fail('The file changed since it was read', 412), { version: read.version });
+  const plan = held => blockPost({
     files: read.files, paths: read.paths, path, read: readBytes(vault), label, sublabel, key: read.key,
-    held: read.published?.record, addresses: read.addresses, ...settings,
+    held, addresses: read.addresses, ...settings,
   });
+  let post = await plan(read.published?.record);
   if (post.problems.length) throw new VaultProblem(post.problems.join('\n'));
+  // Tried again after the first try wrote the post: the plan the person saw was for a new post.
+  let written = null;
+  if (post.confirm !== confirm && read.published && read.version !== replaces) {
+    const first = await plan(undefined);
+    if (first.confirm === confirm && await holdsPost(read.published.record, post)) {
+      written = read.published;
+      post = first;
+    }
+  }
   if (post.confirm !== confirm) throw new VaultProblem('It changed since you saw the plan. Look at it again before publishing.');
-  const written = await publicVault(settings, { get, token: token ?? signedIn(settings, password) }).save({
+  const session = token ?? signedIn(settings, password);
+  if (!written && typeof session === 'function') await session();
+
+  const was = layerOf(path, read.text);
+  const at = new Date().toISOString();
+  const events = [];
+  // Each file this publish wrote, once, as it is at the end.
+  const changed = [];
+  const wrote = file => changed.splice(changed.some(each => each.path === file.path) ? changed.findIndex(each => each.path === file.path) : changed.length, 1, file);
+  // The ID first, in the file and the journal, so the key is kept whatever happens next.
+  if (!read.node.id) {
+    const done = await writePublished(vault, path, read.text, setProperty(read.text, 'id', read.key), { key: read.key });
+    await appendEvents(vault, [{ at, ...done.event }]);
+    wrote(done.file);
+    read = { ...read, text: done.file.text, version: done.file.version };
+  }
+  written ??= await publicVault(settings, { get, token: session }).save({
     key: read.key, record: post.record, visibility: 'public', files: post.files,
     ...(read.published ? { version: read.published.version } : {}),
   });
 
-  // The file: its ID when it had none, and marked public.
-  const was = layerOf(path, read.text);
-  const at = new Date().toISOString();
-  const events = [];
-  const changed = [];
-  let text = read.node.id ? read.text : setProperty(read.text, 'id', read.key);
-  text = publishedLayer(path, text, 'public');
+  // The file, marked public.
+  const text = publishedLayer(path, read.text, 'public');
   if (text !== read.text) {
     const done = await writePublished(vault, path, read.text, text, { layer: 'public', was });
     events.push({ at, ...done.event });
-    changed.push(done.file);
+    wrote(done.file);
   }
   // The label, kept on the channel for next time.
   const home = read.node.home;
-  if (home && !read.published && !post.labelSaved && post.label) {
+  const first = !read.published || written === read.published;
+  if (home && first && !post.labelSaved && post.label) {
     const channel = `${home}/${CHANNEL_FILE}`;
     const before = read.files.find(file => file.path === channel)?.text;
     const site = { label: post.label, ...(post.sublabel ? { sublabel: post.sublabel } : {}) };
@@ -699,13 +748,23 @@ export async function publishAsPerson({ vault, path, replaces, label, sublabel, 
     if (after !== before) {
       const done = await writePublished(vault, channel, before, after, {});
       events.push({ at, ...done.event });
-      changed.push(done.file);
+      wrote(done.file);
     }
   }
   const last = changed.find(file => file.path === path)?.version ?? read.version;
-  events.push({ at, op: 'published', root: 'vault', path, by: 'me', via: 'publish', key: read.key, address: post.address, record: written.version, hash: last });
+  const journal = written === read.published ? (await readEvents(vault)).events : [];
+  if (!journal.some(event => event.op === 'published' && event.path === path && event.key === read.key && event.record === written.version)) {
+    events.push({ at, op: 'published', root: 'vault', path, by: 'me', via: 'publish', key: read.key, address: post.address, record: written.version, hash: last });
+  }
   await appendEvents(vault, events);
-  return { path, key: read.key, address: post.address, update: Boolean(read.published), files: changed };
+  // Tried again with nothing left to do: the block and its channel as the first try left them.
+  if (written === read.published && !changed.length) {
+    for (const each of [path, ...(home ? [`${home}/${CHANNEL_FILE}`] : [])]) {
+      const held = read.files.find(file => file.path === each);
+      if (held) changed.push({ path: each, text: held.text, version: await versionOf(held.text) });
+    }
+  }
+  return { path, key: read.key, address: post.address, update: Boolean(read.published) && written !== read.published, files: changed };
 }
 
 /**
@@ -924,6 +983,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         const done = await withCollectLock(layout.vault, DatabaseSync, async () => {
           const request = (await readRequests(layout.vault)).find(each => each.id === deciding[1]);
           if (!request) throw new VaultProblem('There is no such request.');
+          // Decided already (the answer was lost): the same decision answers the request, another is refused. Nothing moves again.
+          if (request.status !== 'waiting') return { request: await decideRequest(layout.vault, request.id, decision.approve ? 'approved' : 'declined') };
           if (!decision.approve) return { request: await decideRequest(layout.vault, request.id, 'declined') };
           try {
             const file = await moveAsPerson({ vault: layout.vault, path: request.path, to: request.to, asked: request.by, why: request.why });

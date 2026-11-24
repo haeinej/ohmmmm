@@ -44,7 +44,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 
 ## Boundaries
 
-- **PDS boundary:** the member's own PDS (for example Cirrus on their Cloudflare account). It holds only public posts (`com.ohmmmm.post`) and their blobs, written only by the member when they publish.
+- **PDS boundary:** the member's own PDS (for example Cirrus on their Cloudflare account). It holds only public posts (each a `site.standard.document` with `com.ohmmmm.post` content), their publication and their blobs, written only by the member when they publish.
 - **Personal boundary:** everything else: Friends blocks, sealed private blocks, the sealed cortex, the media cache, and the folders a vault reads. Nothing crosses to the PDS except through Publish.
 - **Content reads:** what a member's site reads by their DID (`com.ohmmmm.content.*`). An **entry** is a block as a site sees it. The **audience** is who is looking: anyone sees what is published on the PDS, a friend also sees Friends, and no one sees private.
 - **Friend:** a DID (an ohm account) the member approved, like a device on a private network, for every channel or some. A friend's agents read with the friend's access. Someone **asks**; the member sees their name and email and **approves** or declines.

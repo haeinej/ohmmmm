@@ -26,6 +26,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 async function fakePds(t) {
   const asked = [];
   const records = new Map();
+  // Set to lose the answer to the next document written: the PDS keeps it, the bridge never hears.
+  const pds = { lose: false };
   let written = 0;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -53,6 +55,7 @@ async function fakePds(t) {
     if (method === 'com.atproto.repo.createRecord') {
       if (records.has(at)) return answer(400, { error: 'InvalidRequest', message: 'Record already exists' });
       records.set(at, { value: body.record, cid: `cid-${++written}` });
+      if (pds.lose && body.collection === DOCUMENT) { pds.lose = false; return answer(502, { error: 'UpstreamFailure' }); }
       return answer(200, { uri: `at://${body.repo}/${at}`, cid: records.get(at).cid });
     }
     if (method === 'com.atproto.repo.putRecord') {
@@ -69,7 +72,7 @@ async function fakePds(t) {
   });
   await new Promise(done => server.listen(0, '127.0.0.1', done));
   t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
-  return { asked, records, origin: `http://127.0.0.1:${server.address().port}` };
+  return Object.assign(pds, { asked, records, origin: `http://127.0.0.1:${server.address().port}` });
 }
 
 async function setUp(t, { config = true, password = 'app-password' } = {}) {
@@ -169,6 +172,8 @@ test('publishing writes the post under the block\'s ID, marks the file public an
   await call('GET', '/vault/journal');
   const mine = (await readEvents(layout.vault)).events.filter(event => event.path === 'notes/walk.md' || event.path === 'notes/_channel.md');
   assert.deepEqual(mine.filter(event => event.via !== 'scan' || event.op !== 'added').map(event => [event.op, event.path, event.via, event.layer, event.was, event.key, event.address]), [
+    // The ID first, before anything reached the PDS.
+    ['changed', 'notes/walk.md', 'publish', undefined, undefined, walk.id, undefined],
     ['changed', 'notes/walk.md', 'publish', 'public', 'private', undefined, undefined],
     ['changed', 'notes/_channel.md', 'publish', undefined, undefined, undefined, undefined],
     ['published', 'notes/walk.md', 'publish', undefined, undefined, walk.id, `${site}/posts/walks/walk`],
@@ -197,6 +202,46 @@ test('publishing writes the post under the block\'s ID, marks the file public an
   assert.match(after.body, /long rain/);
   assert.ok(after.updatedAt);
   assert.equal(pds.records.size, 3);
+});
+
+test('a publish tried again never makes a second post: it finishes what the first try left, or answers what it did', async t => {
+  const { layout, post, pds, file } = await setUp(t);
+  const planned = (await post('/vault/publish/plan', { path: 'notes/walk.md' })).json;
+  const publish = () => post('/vault/publish', { path: 'notes/walk.md', confirm: planned.confirm }, { 'If-Match': `"${planned.version}"` });
+  const documents = () => [...pds.records.keys()].filter(key => key.startsWith(`${DOCUMENT}/`));
+
+  // The PDS keeps the post, but its answer is lost: the block already carries the key it went under.
+  pds.lose = true;
+  const lost = await publish();
+  assert.equal(lost.status, 409, JSON.stringify(lost.json));
+  const id = readNode('notes/walk.md', await file('notes/walk.md')).node.id;
+  assert.ok(id);
+  assert.deepEqual(documents(), [`${DOCUMENT}/${id}`]);
+  assert.doesNotMatch(await file('notes/walk.md'), /visibility/);
+
+  // Tried again over the version and plan the person saw: the same post, now finished, not a second one.
+  const again = await publish();
+  assert.equal(again.status, 200, JSON.stringify(again.json));
+  assert.deepEqual([again.json.key, again.json.address, again.json.update], [id, `${site}/posts/field-notes/walk`, false]);
+  assert.deepEqual(documents(), [`${DOCUMENT}/${id}`]);
+  assert.equal(readNode('notes/walk.md', await file('notes/walk.md')).node.visibility, 'public');
+  const writes = pds.asked.filter(each => /createRecord|putRecord/.test(each)).length;
+
+  // And again, as when the answer to that one was lost: nothing is written, and it answers the same.
+  const third = await publish();
+  assert.equal(third.status, 200, JSON.stringify(third.json));
+  assert.deepEqual([third.json.key, third.json.address, third.json.update], [id, `${site}/posts/field-notes/walk`, false]);
+  assert.deepEqual(third.json.files.map(each => each.path), ['notes/walk.md', 'notes/_channel.md']);
+  assert.equal(third.json.files[0].text, await file('notes/walk.md'));
+  assert.equal(pds.asked.filter(each => /createRecord|putRecord/.test(each)).length, writes);
+  const published = (await readEvents(layout.vault)).events.filter(event => event.op === 'published');
+  assert.deepEqual(published.map(event => event.key), [id]);
+
+  // Another plan, or a version the publish did not make, is still refused.
+  const other = await post('/vault/publish', { path: 'notes/walk.md', label: 'Elsewhere', confirm: planned.confirm }, { 'If-Match': `"${planned.version}"` });
+  assert.equal(other.status, 409);
+  await writeFile(join(layout.vault, 'notes/walk.md'), (await file('notes/walk.md')).replace('Yanaka', 'Nezu'));
+  assert.equal((await publish()).status, 412);
 });
 
 test('taking a post down removes its record first, then moves the block; agents have no way to publish', async t => {
