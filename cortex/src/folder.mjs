@@ -13,9 +13,10 @@
 // until the person has changed one), propose profile lines and skills, and ask for tools. Every
 // write is a change line in the journal that says who made it, and can be reverted.
 import { homeVaultFor } from '../../home/home.mjs';
-import { appendFile, cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, sep } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { vaultFrom } from './vault.mjs';
 import { actorOf, openJournal, order, PEOPLE } from './journal.mjs';
 import { cortexVersion, NAME, Refused, splitFront, writeFront } from './core.mjs';
@@ -31,11 +32,60 @@ const known = (name, what) => {
 };
 const oneLine = (value, max = 500) => typeof value === 'string' && value.trim() && [...value].length <= max && !/[\r\n]/.test(value);
 
+// A file is written whole under a name no other write shares, then moved into place, so a reader
+// never sees half of it and two writes never write into one temporary file.
 async function put(path, content) {
   await mkdir(dirname(path), { recursive: true });
-  const partial = `${path}.${process.pid}.tmp`;
-  await writeFile(partial, content);
-  await rename(partial, path);
+  const partial = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(partial, content, { flag: 'wx' });
+    await rename(partial, path);
+  } catch (problem) {
+    await rm(partial, { force: true });
+    throw problem;
+  }
+}
+
+// The cortex's lock (.cortex/write.lock). The bridge and the cortex MCP server are separate
+// processes that write one folder, so every write holds it from the moment it reads the version it
+// checks until its change line is in the journal: no write lands between another's check and its
+// write, and two lines never take one seq. A lock left by a process that has gone, or held longer
+// than 30 seconds, is taken. A write that calls another write inside the same lock does not wait
+// for itself.
+export const LOCK = join('.cortex', 'write.lock');
+const holding = new AsyncLocalStorage();
+const gone = pid => {
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  try { process.kill(pid, 0); return false; } catch (problem) { return problem.code === 'ESRCH'; }
+};
+export async function withCortexLock(dir, work) {
+  const key = resolve(dir);
+  if (holding.getStore()?.has(key)) return work();
+  const lock = join(key, LOCK);
+  await mkdir(dirname(lock), { recursive: true });
+  const mine = `${process.pid} ${randomUUID()}\n`;
+  for (let waited = 0; ; waited += 25) {
+    try {
+      await writeFile(lock, mine, { flag: 'wx' });
+      break;
+    } catch (problem) {
+      if (problem.code !== 'EEXIST') throw problem;
+      const held = await stat(lock).catch(() => null);
+      const owner = Number.parseInt(await readFile(lock, 'utf8').catch(() => ''), 10);
+      if (held && (Date.now() - held.mtimeMs > 30_000 || gone(owner))) {
+        // Taken only if it is still the lock that was found stale, so two waiters never both take it.
+        if (await readFile(lock, 'utf8').catch(() => null) !== null && (await stat(lock).catch(() => null))?.mtimeMs === held.mtimeMs) await rm(lock, { force: true });
+        continue;
+      }
+      if (waited > 10_000) throw new Refused('Busy', `The cortex is being written by another process (${lock}). Try again; if no cortex is running, remove that file.`);
+      await new Promise(done => setTimeout(done, 25));
+    }
+  }
+  try {
+    return await holding.run(new Set([...(holding.getStore() ?? []), key]), work);
+  } finally {
+    if (await readFile(lock, 'utf8').catch(() => null) === mine) await rm(lock, { force: true });
+  }
 }
 
 const checkReason = reason => {
@@ -801,9 +851,10 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
         const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}),
           ...(keptNeeds ? { needs: keptNeeds } : {}), settled: settled ?? wasSettled };
         const content = observationFile(next);
-        if (replaces === undefined) {
-          // A retry of the same observation is not a second one.
+        if (replaces === undefined || replaces === null) {
+          // A retry of the same observation is not a second one, whether or not it said it was new.
           if (content === held.content) return { id, version: held.version, unchanged: true };
+          if (replaces === null) throw changed(`observation ${id}`, held.version);
           throw new Refused('NameTaken', 'An observation already has this ID. Read it and pass its version to rewrite it, or make a new ID', { id, current: held.version });
         }
         if (replaces !== held.version) throw changed(`observation ${id}`, held.version);
@@ -1142,6 +1193,17 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
     },
   };
 
+  // Every operation that writes holds the cortex's lock, so its version check, its write and its
+  // change line are one step to every other process writing this folder.
+  for (const name of WRITES) {
+    const work = cortex[name];
+    cortex[name] = (...args) => withCortexLock(dir, () => work(...args));
+  }
+
   const all = allObservations;
   return cortex;
 }
+
+const WRITES = ['save', 'restore', 'revert', 'recordSession', 'connectVault', 'syncVault', 'setAccount', 'writeProfile',
+  'proposeProfile', 'acceptProfile', 'declineProfile', 'observe', 'removeObservation', 'proposeSkill', 'approveSkill',
+  'proposeTool', 'writeSkill', 'removeSkill', 'declineSkill', 'writeTool', 'migrate'];

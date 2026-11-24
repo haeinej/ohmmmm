@@ -99,7 +99,9 @@ What needs trust is not an edit an agent makes. An identity fact is proposed wit
 | End of a turn | `Stop` | Asks to distill once per change of working memory |
 | Session end | `SessionEnd` | Records nothing |
 
-The hooks keep their checkpoints (start, ask, distill) in `.cortex/hooks.jsonl`, this machine's bookkeeping, not history. Nothing is captured on the agent's behalf. When it finishes a task, or gives it up, the agent writes a `session` line with `cortex_session`, like a commit message: what was done, the IDs of the changes it made, and dead ends, each with what was tried, why it was dropped, and a command that would show whether it still holds. A later session can mark a dead end resolved. Open dead ends are listed by `cortex_start`, and the session-start hook shows those near the folder it starts in. This is how [ANVC](https://github.com/yodering/anvc) keeps what was tried.
+The hooks keep their checkpoints (start, ask, distill) in `.cortex/hooks.jsonl`, this machine's bookkeeping, not history.
+
+Every write holds `.cortex/write.lock` from the moment it reads the version it checks until its line is in the journal, so the bridge and the cortex MCP server, two processes on one folder, never write over each other and never give two lines one seq. A lock left by a process that has gone, or held longer than 30 seconds, is taken. Files are written under a temporary name no other write shares, then moved into place. Nothing is captured on the agent's behalf. When it finishes a task, or gives it up, the agent writes a `session` line with `cortex_session`, like a commit message: what was done, the IDs of the changes it made, and dead ends, each with what was tried, why it was dropped, and a command that would show whether it still holds. A later session can mark a dead end resolved. Open dead ends are listed by `cortex_start`, and the session-start hook shows those near the folder it starts in. This is how [ANVC](https://github.com/yodering/anvc) keeps what was tried.
 
 ### 6. One way to write memory: three levels
 
