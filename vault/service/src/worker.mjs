@@ -10,9 +10,11 @@ import { admitMember, createIdentity } from './identity.mjs';
 import { fromOurPages, links, ohmUser } from './ohm.mjs';
 import { blockStore } from './blocks.mjs';
 import { channelStore } from './channels.mjs';
+import { contentStore } from './content.mjs';
 import { mediaStore } from './media.mjs';
 import { privateStore } from './private.mjs';
 import { postStore, Refused } from './store.mjs';
+import { makeViewerToken, LASTS, siteStore, viewerOf } from './viewers.mjs';
 
 const HEADERS = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 const json = (body, status = 200) => Response.json(body, { status, headers: HEADERS });
@@ -55,7 +57,17 @@ export function createService({ whoIs, get = fetch } = {}) {
       let did = null;
       let user = null;
       let link = null;
-      if (asked.asks === 'token') {
+      let audience = null;
+      if (asked.asks === 'viewer') {
+        // Content for a site: `did` names whose. Anyone may ask; a viewer token says who is looking,
+        // and only the friend list decides whether that adds Friends. Someone not let in to the
+        // service has nothing here, the same answer as someone with nothing published.
+        did = url.searchParams.get('did');
+        try { admitMember(did, env.MEMBERS); } catch { throw new Refused(404, 'NotFound', 'There is nothing here'); }
+        const bearer = /^Bearer (.+)$/.exec(request.headers.get('Authorization') ?? '')?.[1];
+        const viewer = bearer ? await viewerOf(env.VIEWER_TOKEN_SECRET, bearer, did) : null;
+        audience = await contentStore(env.DB, { get, pdsFor: owner => identify.pdsFor?.(owner) ?? null }).audience(did, viewer);
+      } else if (asked.asks === 'token') {
         did = await identify(request, name);
       } else if (asked.asks === 'ohm') {
         user = await session();
@@ -77,7 +89,7 @@ export function createService({ whoIs, get = fetch } = {}) {
       // another tab. This is a precondition, never a way to choose an account.
       // Check before the capability can read data or apply a stale draft.
       const expected = request.headers.get('X-Ohm-Did');
-      if (expected !== null && asked.asks !== 'nobody') {
+      if (expected !== null && !['nobody', 'viewer'].includes(asked.asks)) {
         if (did !== expected) throw new Refused(409, 'AccountChanged', 'The signed-in account changed; reopen the vault before continuing');
       }
 
@@ -86,7 +98,15 @@ export function createService({ whoIs, get = fetch } = {}) {
       if (user && did && !['com.ohmmmm.account.get', 'com.ohmmmm.account.connect', 'com.ohmmmm.account.disconnect'].includes(name)) admitMember(did, env.MEMBERS);
 
       const answer = await asked.run({
-        name, request, url, env, get, identify, linked, link, did, user,
+        name, request, url, env, get, identify, linked, link, did, user, audience,
+        content: contentStore(env.DB, { get, pdsFor: did => identify.pdsFor?.(did) ?? null }),
+        sites: siteStore(env.DB),
+        // Who is signed in to ohm, for content.view: asked only there, and never required.
+        viewers: {
+          signedIn: () => ohmUser(request, env, get),
+          didOf: id => linked.didOf(id),
+          make: async (viewer, owner) => ({ token: await makeViewerToken(env.VIEWER_TOKEN_SECRET, { viewer, owner }), expires: String(LASTS) }),
+        },
         posts: postStore(env.DB),
         blocks: blockStore(env.DB),
         channels: channelStore(env.DB),

@@ -81,6 +81,14 @@ The mirror, the feed Worker rendering pages, and identical rebuilds. They keep w
 
 Who builds which, and the prompts to start them: [docs/handoff/content-layer-split.md](../../docs/handoff/content-layer-split.md).
 
+## Content reads: decided (24 November 2026)
+
+- Requests are `com.ohmmmm.content.*`: `listChannels`, `getChannel`, `listBlocks`, `getBlock` and `getMedia`, by the member's DID. There is one set, and the caller decides the layer: with no token the answer is public; with a viewer token from a friend it is public and Friends; a viewer who isn't a friend gets exactly the public answer; private is never returned.
+- **Public is what is on the PDS**, read from there. A post marked public but not yet published is not shown.
+- A channel is listed when it holds something the viewer may see.
+- Friends reads use a **short-lived viewer token**. ohm posts it back to the site through `content.view`, only to one of the member's listed sites (`content.addSite`, which only the member, signed in to ohm, can call).
+- Who sees what is decided in one place (`audienceOf`/`sees` in `service/src/content.mjs`), so a later audience of named people for one block is a rule there, not a new set of requests.
+
 ## Open: the owner's calls
 
 - ~~Where an agent's new block starts~~: **private**, always (decided 24 November 2026). `addToVault`, `vault_capture` and a new block through `vault_write` all write `visibility: private`.

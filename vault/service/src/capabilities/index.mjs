@@ -8,8 +8,10 @@
 //   token   a token from a PDS, issued for this one request
 //   member  a member, proved either by such a token or by their ohm session
 //   ohm     an ohm session only
+//   viewer  anyone, about the member named by `did`; a viewer token says who they are, for Friends
 import account from './account.mjs';
 import channels from './channels.mjs';
+import content from './content.mjs';
 import cortex from './cortex.mjs';
 import exporting from './export.mjs';
 import friends from './friends.mjs';
@@ -22,7 +24,7 @@ import publish from './publish.mjs';
 import search from './search.mjs';
 import structure from './structure.mjs';
 
-export const CAPABILITIES = [posts, friends, privateLayer, channels, cortex, media, structure, search, mirror, publish, exporting, account, identity];
+export const CAPABILITIES = [posts, friends, privateLayer, channels, cortex, media, structure, search, mirror, publish, exporting, content, account, identity];
 
 // Every request by its name, with the capability it belongs to.
 export const REQUESTS = Object.fromEntries(CAPABILITIES.flatMap(capability =>

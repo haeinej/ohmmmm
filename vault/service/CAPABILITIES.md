@@ -21,6 +21,7 @@ This page is the whole list. It is written from the same tables the service and 
 | **Mirror** | Bring what the member has already published on their PDS into the vault. It only reads the PDS, and it never changes a post the member has since changed in the vault. | `importPublished` | [mirror.mjs](src/capabilities/mirror.mjs) |
 | **Publish** | Work out what would have to change in the member's own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only standard.site documents holding an ohm post are touched, with the member's publication made the first time; a record the vault knows nothing about is never removed. | `getPublishPlan`, `getAttachment` | [publish.mjs](src/capabilities/publish.mjs) |
 | **Export** | The whole vault written out as files a person can keep: each post as Markdown, where it sits in a folder. The same files open in Obsidian, and read back as the same posts. | `exportFiles` | [export.mjs](src/capabilities/export.mjs) |
+| **Content** | Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. | `listChannels`, `getChannel`, `listBlocks`, `getBlock`, `getMedia`, `view`, `listSites`, `addSite`, `removeSite` | [content.mjs](src/capabilities/content.mjs) |
 | **Account** | For a member signed in to ohm: who they are, and which AT Protocol account their vault is. One ohm account works in one AT Protocol account, and the other way round. These ride on the ohm session only; a token from a PDS does not reach them. | `get`, `connect`, `disconnect` | [account.mjs](src/capabilities/account.mjs) |
 | **Identity** | The first steps of signing in: finding an account from its handle, and saying who a token from a PDS names. Neither touches a vault. | `findAccount`, `whoAmI` | [identity.mjs](src/capabilities/identity.mjs) |
 
@@ -38,6 +39,7 @@ Who may ask is one of four things, and each request says which:
 | Whoever holds a token from a PDS | A token the PDS issued for this one request and no other, signed with the key the account's own DID document names |
 | The member | Such a token from their own PDS, as the command line and an agent's tools send; or their ohm session, as the editor sends, which is worth exactly the one account it was connected to |
 | The member, signed in to ohm | Their ohm session only. A request that changes something must also come from ohm's own pages |
+| Anyone, about the member `did` names | Nothing is needed for what the member published. A viewer token (`Authorization: Bearer`, from `content.view`) says who is looking; if the member put them on their friend list, the answer also holds the friends layer. Never the private layer |
 
 A member's posts and blocks are served to that member. Their friends-only posts and blocks are also served to the DIDs on their friend list, and to nobody else. Who is asking is settled before any store is looked at. Private blocks are never kept by the service in readable form.
 
@@ -659,6 +661,109 @@ Every post as a file: its path in a folder, and its text.
 | Takes | Nothing |
 | Gives | `files` (path, text) |
 
+## Content
+
+Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it.
+
+### `com.ohmmmm.content.listChannels`
+
+The member's channels that hold something the asker may see, or a channel inside one that does, each with its title, description, and an order naming only what the asker may see.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone, about the member `did` names |
+| Takes | `did`: the member's DID |
+| Gives | `owner`, `channels` (path, title, description, order, count) |
+
+### `com.ohmmmm.content.getChannel`
+
+One channel, as `listChannels` gives it. A channel with nothing the asker may see answers NotFound, as if it were not there.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone, about the member `did` names |
+| Takes | `did`: the member's DID<br>`path`: the channel's path |
+| Gives | `owner`, `channel` (path, title, description, order, count) |
+
+### `com.ohmmmm.content.listBlocks`
+
+What the asker may see, 200 entries at a time, without their bodies. With `channel`, only what is filed in it, in the channel's order first.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone, about the member `did` names |
+| Takes | `did`: the member's DID<br>`channel`: optional: a channel's path<br>`cursor`: optional: the `cursor` of the page before |
+| Gives | `owner`, `blocks` (id, layer, kind, slug, channel, channels, title, tags, created, updated, media, and `address` for a published post), and `cursor` when there is another page |
+
+### `com.ohmmmm.content.getBlock`
+
+One entry with its Markdown body. Something the asker may not see answers NotFound, the same as something that is not there.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone, about the member `did` names |
+| Takes | `did`: the member's DID<br>`id`: the entry's ID |
+| Gives | `owner`, `block`: as in `listBlocks`, with `body` |
+
+### `com.ohmmmm.content.getMedia`
+
+The file behind a media entry the asker may see, or a smaller copy of a picture with `width`. It answers with the file itself, not JSON.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone, about the member `did` names |
+| Takes | `did`: the member's DID<br>`name`: the entry's `media.name`<br>`width`: optional: 160, 480, 960 or 1600 |
+| Gives | The file, with its type |
+
+### `com.ohmmmm.content.view`
+
+Where a site sends a viewer to be recognised. If they are signed in to ohm with an AT Protocol account connected, it posts a viewer token for this one member back to the return address, which must be one of the member's sites. Otherwise it posts back `error`. The token lasts ten minutes and proves only who the viewer is; Friends is checked against the friend list on every read.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | Anyone |
+| Takes | `owner`: the member's DID<br>`return`: the address on one of the member's sites to post back to |
+| Gives | A page that posts `viewer` (the token) and `expires`, or `error`, to the return address |
+
+### `com.ohmmmm.content.listSites`
+
+The member's own sites: the only addresses a viewer token is posted back to.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | Nothing |
+| Gives | `sites` (origin, added) |
+
+### `com.ohmmmm.content.addSite`
+
+Adds one of the member's sites, by its https origin, so viewers can be sent back to it with a viewer token. Only the member, signed in to ohm, can add one; an agent cannot.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `origin`: the site's https address |
+| Gives | `origin`, and `unchanged` when it was there already |
+
+### `com.ohmmmm.content.removeSite`
+
+Stops sending viewer tokens to one of the member's sites. Tokens it already holds run out within ten minutes.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `origin`: the site's https address |
+| Gives | `origin`, `removed`, or `unchanged` when it was not there |
+
 ## Account
 
 For a member signed in to ohm: who they are, and which AT Protocol account their vault is. One ohm account works in one AT Protocol account, and the other way round. These ride on the ohm session only; a token from a PDS does not reach them.
@@ -760,6 +865,9 @@ A refusal is JSON with an `error`, which is one of the names below, and a `messa
 | `NoRepository` | 400 | The account's DID document does not say where its repository is kept |
 | `RepositoryUnreachable` | 502 | The account's PDS would not answer |
 | `MediaUnavailable` | 503 | The media cache is not set up on this service |
+| `ViewerTokenInvalid` | 401 | The viewer token is not one this service made, is for another member, or has run out |
+| `ViewersUnavailable` | 503 | Viewer tokens, and so Friends reads for sites, are not set up on this service |
+| `NotTheirSite` | 400 | The return address is not on one of the member's sites |
 | `InternalError` | 500 | Something went wrong in the service itself |
 
 ## The tools an agent has
@@ -814,27 +922,36 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | `rewrapPrivate` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `finishPrivateRotation` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `deletePrivateBlock` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
-| `listChannels` | Channels | undefined |
-| `getChannel` | Channels | undefined |
-| `putChannel` | Channels | undefined |
-| `deleteChannel` | Channels | undefined |
-| `moveChannel` | Channels | undefined |
-| `listFiles` | Cortex | undefined |
-| `getFile` | Cortex | undefined |
-| `putFile` | Cortex | undefined |
-| `putFiles` | Cortex | undefined |
-| `deleteFile` | Cortex | undefined |
-| `listVersions` | Cortex | undefined |
-| `getVersion` | Cortex | undefined |
-| `listJournal` | Cortex | undefined |
-| `listBelow` | Cortex | undefined |
-| `rewrap` | Cortex | undefined |
-| `hasMedia` | Media | undefined |
-| `putMedia` | Media | undefined |
-| `getMedia` | Media | undefined |
-| `getRendition` | Media | undefined |
-| `getAgenda` | Structure | undefined |
+| `listChannels` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
+| `getChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
+| `putChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
+| `deleteChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
+| `moveChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
+| `listFiles` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `getFile` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `putFile` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `putFiles` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `deleteFile` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `listVersions` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `getVersion` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `listJournal` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `listBelow` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `rewrap` | Cortex | The cortex is sealed. An agent reads and writes it on the person's device, through the cortex's own tools |
+| `hasMedia` | Media | The cockpit sends and shows media. An agent works with the media blocks in the local vault |
+| `putMedia` | Media | The cockpit sends and shows media. An agent works with the media blocks in the local vault |
+| `getMedia` | Media | The cockpit sends and shows media. An agent works with the media blocks in the local vault |
+| `getRendition` | Media | The cockpit sends and shows media. An agent works with the media blocks in the local vault |
+| `getAgenda` | Structure | The cockpit shows it. An agent counts the same things in the local vault with vault_lint |
 | `exportFiles` | Export | The command line and the editor write the vault out. An agent reads posts one at a time |
+| `listChannels` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `getChannel` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `listBlocks` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `getBlock` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `getMedia` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `view` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `listSites` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `addSite` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `removeSite` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
 | `get` | Account | It rides on an ohm session, which an agent does not have |
 | `connect` | Account | It rides on an ohm session, which an agent does not have |
 | `disconnect` | Account | It rides on an ohm session, which an agent does not have |
