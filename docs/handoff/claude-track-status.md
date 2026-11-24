@@ -35,7 +35,6 @@ Every PR passed the root `npm test` when last pushed; #45 passed CI at `a6a599d`
 - Confirm the extra request names in #41: `content.view`, `addSite`, `listSites`, `removeSite`.
 - `design-home` on #34 still says "capture into the Inbox": who updates it, Devin's D3 or Claude?
 - Agents' PDS tokens look the same to the service as the command line's, so "agents only ask" is enforced in the tools and the cockpit, not in `putPost`/`putBlock`. The Agents panel's approvals, pause and disconnect have the same limit. Closing it needs a key per agent that the member can take back.
-- ohm-ui's `ApprovalCard` isn't installed in the app. The Agents panel's cards are built from `Button`. Should it be installed from ohm-ui and used instead?
 
 ## Mail: through the member's own agent, not in ohm (decided 24 November)
 
@@ -59,7 +58,7 @@ The owner asked for agents' actions to be confirmed on screen, with control over
 
 - **What the member sees.** **Agents** in the rack shows a dot while anything waits. The panel lists each agent that used ohm's tools:
   - its state, its last tool and its recent calls;
-  - a card for each waiting action. A card is closed to a title, one line and when it was asked; clicking it opens the whole action with **Approve** and Decline. One card is open at a time;
+  - a card for each waiting action. A card is closed to a title, one line and when it was asked; clicking it opens ohm-ui's `ApprovalCard` (`@ohm/elements-approval-card`) with the whole action, **Approve** and Decline, then a receipt. It is red for actions that remove something for good. One card is open at a time;
   - **Pause**, **Resume**, **Disconnect** (behind a dialog; it also declines what the agent waited for) and **Allow again**.
 - **How the tools use it** (`vault/mcp/tools.mjs`):
   - Every call first runs `agentCheckIn`, which is refused when the agent is paused or disconnected.

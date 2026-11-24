@@ -15,10 +15,14 @@ An agent's MCP tools (`vault/mcp/tools.mjs`) used to finish an action on a secon
 | # | Step | Screen (ohm-ui) | Primary action (forest) | Tool | Annotations | Approval |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | See agents | side panel (`SidePanelFrame`), a section per agent, `Empty` when none | none | none | none | none |
-| 2 | Answer an action | a card per action, closed to its title, one line and when; clicking opens it in place to the whole action with `Button` **Approve** (forest) and Decline (ghost) | **Approve** | `agents.answer` | `consequentialHint` | the person's click; an agent in the page goes through a `Dialog` |
+| 2 | Answer an action | a row per action, closed to its title, one line and when; clicking opens it in place as ohm-ui's `ApprovalCard` (`@ohm/elements-approval-card`): the whole action, **Approve** and Decline, then its receipt | **Approve** | `agents.answer` | `consequentialHint` | `ApprovalCard`; an agent in the page goes through a `Dialog` |
 | 3 | Control an agent | ghost icon `Button`s: pause, disconnect; **Resume** / **Allow again** | none | none | none | disconnect asks in a `Dialog` |
 
-Only one card is open at a time, so the panel shows one **Approve**, on the action being read. ohm-ui's `ApprovalCard` isn't installed in this app yet. The card is built from `Button`, with the card radius (`rounded-2xl`) on a muted surface.
+Only one card is open at a time, so the panel shows one **Approve**, on the action being read. The card is ohm-ui's `ApprovalCard`:
+
+- An action that removes something for good (`vault_delete`, `vault_friends_delete`, `vault_friends_remove`) uses its `destructive` variant, so its icon and Approve are red.
+- After an answer, it shows its receipt ("Approved. <agent> can go ahead." or "Declined. Nothing was done.") for a moment, before the list reads again.
+- `src/theme.css` gives it the card radius and keeps a message's line breaks, by slot rules; the installed copy is unchanged.
 
 ## Tools
 

@@ -11,7 +11,7 @@ An agent used to show you what it was about to do in its own chat and go ahead w
 **Agents** in the rack (a dot means something is waiting) lists each agent that has used ohm's tools:
 
 - **its state:** connected, paused or disconnected, with the last tool it used and when;
-- **a card for each action it waits on,** closed to what it is and when. Click it to open the whole action, for example **Send an email** (to, subject and body), **Ask someone to be your friend**, **Publish**, **Change a post** or **Remove a post for good**. Each card has **Approve** and **Decline**;
+- **a card for each action it waits on,** closed to what it is and when. Click it to open the whole action (red when it removes something for good), for example **Send an email** (to, subject and body), **Ask someone to be your friend**, **Publish**, **Change a post** or **Remove a post for good**. Each card has **Approve** and **Decline**;
 - **Recent:** its last calls.
 
 When you approve, the agent's next call carries out exactly what the card showed, once. If anything changed, it asks again. When you decline, it's told, and nothing happens.

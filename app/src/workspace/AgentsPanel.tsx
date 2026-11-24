@@ -6,7 +6,9 @@
 // An agent in the browser reaches the same handlers through agents.answer, which stops at the same
 // dialog, so the person still decides.
 import { useEffect, useState } from "react"
-import { BotIcon, ChevronDownIcon, ChevronRightIcon, PauseIcon, PlayIcon, UnplugIcon } from "lucide-react"
+import { BotIcon, ChevronDownIcon, ChevronRightIcon, DownloadIcon, EyeOffIcon, GlobeIcon, MailIcon, PauseIcon, PencilIcon, PlayIcon, Trash2Icon, UnplugIcon, UserMinusIcon, UserPlusIcon } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { ApprovalCard } from "@/components/approval-card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
@@ -60,6 +62,8 @@ export function AgentsPanel() {
   const [disconnecting, setDisconnecting] = useState<AgentInfo | null>(null)
   // One card is open at a time: it shows the whole action and its Approve.
   const [openId, setOpenId] = useState<string | null>(null)
+  // An answered card shows its receipt for a moment before the list reads again.
+  const [answered, setAnswered] = useState<Record<string, "done" | "denied">>({})
   const [agentAnswer, setAgentAnswer] = useState<{ approval: AgentApproval; approve: boolean; resolve: (ok: boolean) => void } | null>(null)
   // A home without the vault service has no agents: the panel is empty, not an error every few seconds.
   const reload = () => {
@@ -75,11 +79,13 @@ export function AgentsPanel() {
   const answer = async (approval: AgentApproval, approve: boolean) => {
     try {
       await answerAgent(approval.id, approve)
+      setAnswered(held => ({ ...held, [approval.id]: approve ? "done" : "denied" }))
       notify({ message: approve ? `Approved: ${describe(approval).title}. ${nameOf(approval.agent)} can go ahead.` : `Declined: ${describe(approval).title}.`, tone: "info" })
+      setTimeout(reload, 1500)
     } catch (problem) {
       notify({ message: (problem as Error).message, tone: "error" })
+      reload()
     }
-    reload()
   }
   const change = async (agent: AgentInfo, state: AgentAccess) => {
     try { await setAgentState(agent.agent, state) } catch (problem) { notify({ message: (problem as Error).message, tone: "error" }) }
@@ -134,7 +140,7 @@ export function AgentsPanel() {
                 {agent.state !== "disconnected" && <Button size="icon-sm" variant="ghost" aria-label={`Disconnect ${nameOf(agent.agent)}`} title="Disconnect" onClick={() => setDisconnecting(agent)}><Icon icon={UnplugIcon} size="sm" /></Button>}
               </div>
               {data.approvals.filter(approval => approval.agent === agent.agent).map(approval => (
-                <ApprovalCard key={approval.id} approval={approval} open={openId === approval.id} onToggle={() => setOpenId(openId === approval.id ? null : approval.id)} onAnswer={approve => void answer(approval, approve)} />
+                <ActionCard key={approval.id} approval={approval} answered={answered[approval.id]} open={openId === approval.id} onToggle={() => setOpenId(openId === approval.id ? null : approval.id)} onAnswer={approve => void answer(approval, approve)} />
               ))}
               {!!agent.recent.length && (
                 <details className="px-1.5 text-small text-muted-foreground">
@@ -146,7 +152,7 @@ export function AgentsPanel() {
               )}
             </section>
           ))}
-          {loose.map(approval => <ApprovalCard key={approval.id} approval={approval} open={openId === approval.id} onToggle={() => setOpenId(openId === approval.id ? null : approval.id)} onAnswer={approve => void answer(approval, approve)} />)}
+          {loose.map(approval => <ActionCard key={approval.id} approval={approval} answered={answered[approval.id]} open={openId === approval.id} onToggle={() => setOpenId(openId === approval.id ? null : approval.id)} onAnswer={approve => void answer(approval, approve)} />)}
         </div>
       )}
 
@@ -184,40 +190,60 @@ export const summaryOf = (approval: AgentApproval) => {
   return lines.map(([, value]) => value).filter(Boolean).slice(0, 2).join(" · ") || body?.split("\n")[0] || ""
 }
 
+const ICONS: Record<string, LucideIcon> = {
+  vault_mail_ask: MailIcon, vault_friends_ask: UserPlusIcon, vault_save: PencilIcon, vault_set_visibility: EyeOffIcon,
+  vault_publish: GlobeIcon, vault_mirror: DownloadIcon, vault_delete: Trash2Icon, vault_friends_save: PencilIcon,
+  vault_friends_delete: Trash2Icon, vault_friends_remove: UserMinusIcon,
+}
+/** Actions that remove something for good are shown in red. */
+const DESTRUCTIVE = new Set(["vault_delete", "vault_friends_delete", "vault_friends_remove"])
+
 /**
- * One action an agent waits on, as a card. Closed, it says what and when; opened, everything the
- * action would do, with Approve and Decline.
+ * One action an agent waits on. Closed, a row saying what and when; opened, ohm-ui's ApprovalCard
+ * with everything the action would do, Approve and Decline, and then its receipt.
  */
-function ApprovalCard({ approval, open, onToggle, onAnswer }: { approval: AgentApproval; open: boolean; onToggle: () => void; onAnswer: (approve: boolean) => void }) {
+function ActionCard({ approval, answered, open, onToggle, onAnswer }: {
+  approval: AgentApproval; answered?: "done" | "denied"; open: boolean; onToggle: () => void; onAnswer: (approve: boolean) => void
+}) {
   const { title, lines, body, warning } = describe(approval)
   const summary = summaryOf(approval)
+  const when = ago(Date.parse(approval.asked))
+  const Glyph = ICONS[approval.tool] ?? BotIcon
+  if (open || answered) {
+    return (
+      <div className="flex flex-col gap-1">
+        {!answered && (
+          <button type="button" onClick={onToggle} aria-expanded className="flex items-center gap-1 self-start rounded-md px-1.5 text-small text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40">
+            <Icon icon={ChevronDownIcon} size="sm" /> Close
+          </button>
+        )}
+        <ApprovalCard
+          className="max-w-none"
+          state={answered ?? "request"}
+          title={title}
+          subtitle={`${nameOf(approval.agent)} · ${when}`}
+          description={warning}
+          details={[...lines.filter(([, value]) => value).map(([label, value]) => ({ label, value })), ...(body ? [{ label: approval.tool === "vault_mail_ask" ? "Message" : "Note", value: body }] : [])]}
+          variant={DESTRUCTIVE.has(approval.tool) ? "destructive" : "default"}
+          icon={<Icon icon={Glyph} size="sm" />}
+          allowOnceLabel="Approve"
+          denyLabel="Decline"
+          statusLabel={answered === "done" ? `Approved. ${nameOf(approval.agent)} can go ahead.` : answered === "denied" ? "Declined. Nothing was done." : undefined}
+          onAllowOnce={() => onAnswer(true)}
+          onDeny={() => onAnswer(false)}
+        />
+      </div>
+    )
+  }
   return (
-    <article aria-label={title} className={cn("flex flex-col rounded-2xl bg-muted/60 transition-colors", open ? "bg-muted" : "hover:bg-muted")}>
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-2 rounded-2xl p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-        <Icon icon={open ? ChevronDownIcon : ChevronRightIcon} size="sm" />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-body font-medium">{title}</span>
-          {!open && summary && <span className="truncate text-small text-muted-foreground">{summary}</span>}
-        </span>
-        <span className="shrink-0 text-small text-muted-foreground">{ago(Date.parse(approval.asked))}</span>
-      </button>
-      {open && (
-        <div className="flex flex-col gap-2 px-3 pb-3">
-          {!!lines.length && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-small">
-              {lines.filter(([, value]) => value).map(([key, value]) => (
-                <div key={key} className="contents"><dt className="text-muted-foreground">{key}</dt><dd className="min-w-0 break-words">{value}</dd></div>
-              ))}
-            </dl>
-          )}
-          {body && <p className="max-h-60 overflow-auto rounded-lg bg-background p-2 text-small whitespace-pre-wrap">{body}</p>}
-          {warning && <p className="text-small text-muted-foreground">{warning}</p>}
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => onAnswer(false)}>Decline</Button>
-            <Button size="sm" onClick={() => onAnswer(true)}>Approve</Button>
-          </div>
-        </div>
-      )}
-    </article>
+    <button type="button" onClick={onToggle} aria-expanded={false} aria-label={title}
+      className="flex w-full items-center gap-2 rounded-2xl bg-muted/60 p-3 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40">
+      <Icon icon={ChevronRightIcon} size="sm" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-body font-medium">{title}</span>
+        {summary && <span className="truncate text-small text-muted-foreground">{summary}</span>}
+      </span>
+      <span className="shrink-0 text-small text-muted-foreground">{when}</span>
+    </button>
   )
 }
