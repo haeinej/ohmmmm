@@ -10,6 +10,7 @@ import { createService } from '../service/src/worker.mjs';
 import { blockStore } from '../service/src/blocks.mjs';
 import { newPostId } from '../vault/file.mjs';
 import { testDatabase } from './d1.mjs';
+import { CONTENT, DOCUMENT, fromDocument, notFound, PUBLICATION, PUBLICATION_KEY, toDocument } from './standard.mjs';
 
 // The tools, against the vault service itself: the real service, on a database in memory, asked
 // the way the tools ask it. Only who is asking is stood in for.
@@ -25,15 +26,21 @@ async function toolsOf({ beforeApply = () => {} } = {}) {
     if (address.pathname === '/xrpc/com.atproto.repo.listRecords' && address.searchParams.get('collection') === 'com.example.post') {
       return Response.json({ records: published.map(([key, value]) => ({ uri: `at://${did}/com.example.post/${key}`, value })) });
     }
-    // The person's repository, as far as the shared post type goes: what publishing writes to.
-    if (address.pathname === '/xrpc/com.atproto.repo.listRecords' && address.searchParams.get('collection') === 'com.ohmmmm.post') {
-      return Response.json({ records: [...repository].map(([key, value]) => ({ uri: `at://${did}/com.ohmmmm.post/${key}`, value })) });
+    // The person's repository, as far as posts go: what publishing writes to. Posts are kept as
+    // standard.site documents; `repository` holds the posts inside them.
+    if (address.pathname === '/xrpc/com.atproto.repo.listRecords' && address.searchParams.get('collection') === DOCUMENT) {
+      return Response.json({ records: [...repository].map(([key, value]) => ({ uri: `at://${did}/${DOCUMENT}/${key}`, value: toDocument(value, { did, site: 'https://pds.example.test' }) })) });
+    }
+    // The member's publication, made the first time anything is published.
+    if (address.pathname === '/xrpc/com.atproto.repo.getRecord' && address.searchParams.get('collection') === PUBLICATION) {
+      return publication.record ? Response.json({ uri: `at://${did}/${PUBLICATION}/${PUBLICATION_KEY}`, cid: 'cid-publication', value: publication.record }) : notFound();
     }
     // A picture on some other website, which a post places by its address.
     if (address.origin === 'https://photos.example.test') return new Response(new Uint8Array([137, 80, 78, 71, 1, 2, 3]), { headers: { 'Content-Type': 'image/png' } });
     return Response.json({ records: [] });
   };
   const repository = new Map();
+  const publication = { record: null, written: 0 };
   const uploads = [];
   const service = createService({ whoIs: Object.assign(async request => request.headers.get('Authorization').slice(7), { pdsFor: async () => 'https://pds.example.test' }), get });
   const asked = [];
@@ -80,8 +87,16 @@ async function toolsOf({ beforeApply = () => {} } = {}) {
     },
     async apply(writes) {
       for (const write of writes) {
-        assert.equal(write.collection, 'com.ohmmmm.post', 'publishing writes only the shared post type');
-        if (write.$type.endsWith('#delete')) repository.delete(write.rkey); else repository.set(write.rkey, write.value);
+        if (write.collection === PUBLICATION) {
+          assert.deepEqual([write.$type, write.rkey, write.value.$type], ['com.atproto.repo.applyWrites#create', PUBLICATION_KEY, PUBLICATION]);
+          publication.record = write.value; publication.written++;
+          continue;
+        }
+        assert.equal(write.collection, DOCUMENT, 'publishing writes only posts, as documents, and the publication');
+        if (write.$type.endsWith('#delete')) { repository.delete(write.rkey); continue; }
+        // A post is written as a document whose content is the post.
+        assert.deepEqual([write.value.$type, write.value.content.$type, write.value.site], [DOCUMENT, CONTENT, `at://${did}/${PUBLICATION}/${PUBLICATION_KEY}`]);
+        repository.set(write.rkey, fromDocument(write.value, { did }));
       }
     },
   };
@@ -90,7 +105,7 @@ async function toolsOf({ beforeApply = () => {} } = {}) {
     await vault.put({ id, slug, label: '', sublabel: '', body: 'Seeded post.', visibility: 'friends', ...fields });
     return vault.get(id);
   };
-  return { tools: createTools({ vault }), vault, asked, published, repository, uploads, seed, ask, blocks: blockStore(env.DB) };
+  return { tools: createTools({ vault }), vault, asked, published, repository, publication, uploads, seed, ask, blocks: blockStore(env.DB) };
 }
 
 test('service tools hide legacy private posts and keep search counts and publish previews free of private content', async () => {
@@ -188,7 +203,7 @@ test('an agent brings in what the person has published: it looks first, and brin
   const { tools, published } = await toolsOf();
   const looked = await tools.call('vault_mirror');
   assert.equal(looked.done, false);
-  assert.deepEqual([looked.willHappen.types, looked.willHappen.records, looked.willHappen.posts], [['com.example.post', 'com.ohmmmm.post'], 1, 1]);
+  assert.deepEqual([looked.willHappen.types, looked.willHappen.records, looked.willHappen.posts], [['com.example.post', DOCUMENT], 1, 1]);
   assert.match(looked.willHappen.note, /Nothing is published/);
   // Looking brought nothing in.
   assert.equal((await tools.call('vault_tree')).posts, 0);
@@ -263,7 +278,7 @@ test('invalid protocol params and unexpected handlers do not poison the ordered 
 });
 
 test('an agent publishes: it shows what would change first, and the repository changes only on the second call', async () => {
-  const { tools, repository, uploads, seed } = await toolsOf();
+  const { tools, repository, publication, uploads, seed } = await toolsOf();
   const confirmed = async (name, args) => tools.call(name, { ...args, confirm: (await tools.call(name, args)).confirm });
   const { post: made } = await seed('the-hill', { title: 'The hill', label: 'Photographs', date: '2026-02-01', body: 'Up early.\n\n![The hill at dawn](https://photos.example.test/hill.png)' });
   await seed('mine', { body: 'Only for me.', visibility: 'private' });
@@ -276,7 +291,9 @@ test('an agent publishes: it shows what would change first, and the repository c
   // Marking it for everyone published nothing.
   assert.equal(repository.size, 1);
   const status = await tools.call('vault_status');
-  assert.deepEqual([status.changes, status.create.map(each => each.slug), status.notInVault], [1, ['the-hill'], [{ key: 'from-elsewhere', title: 'From elsewhere' }]]);
+  // One post to create, and the member's publication, which the first publish makes.
+  assert.deepEqual([status.changes, status.create.map(each => each.slug), status.notInVault], [2, ['the-hill'], [{ key: 'from-elsewhere', title: 'From elsewhere' }]]);
+  assert.deepEqual(status.publication, { create: true, url: 'https://pds.example.test', name: 'pds.example.test' });
   assert.equal(status.writes, undefined);
 
   const shown = await tools.call('vault_publish');
@@ -292,6 +309,8 @@ test('an agent publishes: it shows what would change first, and the repository c
   assert.match(record.body, /!\[The hill at dawn\]\(media:hill\)/);
   assert.deepEqual(record.media, [{ $type: 'com.ohmmmm.post#image', id: 'hill', file: { $type: 'blob', ref: { $link: 'bafkreitest1' }, mimeType: 'image/png', size: 7 }, sourceUrl: 'https://photos.example.test/hill.png', alt: 'The hill at dawn' }]);
   assert.deepEqual(uploads, [{ size: 7, mime: 'image/png' }]);
+  // The first publish made the member's publication, once.
+  assert.deepEqual([publication.written, publication.record.url], [1, 'https://pds.example.test']);
   // What something else published is still there, and the private post never left the vault.
   assert.deepEqual([...repository.keys()].sort(), [made.id, 'from-elsewhere'].sort());
   assert.deepEqual([(await tools.call('vault_status')).changes, (await tools.call('vault_status')).unchanged], [0, 1]);
@@ -317,6 +336,7 @@ test('an agent publishes: it shows what would change first, and the repository c
   assert.deepEqual(down.willHappen.remove, [{ key: made.id, why: 'The published record will be taken down.' }]);
   assert.deepEqual((await tools.call('vault_publish', { confirm: down.confirm })).published, { created: 0, replaced: 0, removed: 1, files: 0 });
   assert.deepEqual([...repository.keys()], ['from-elsewhere']);
+  assert.equal(publication.written, 1);
 });
 
 test('friends tools preview changes, enforce versions and use the reader’s own DID', async () => {

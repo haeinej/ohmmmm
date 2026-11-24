@@ -4,9 +4,16 @@ import { POST } from '../feed/pds.mjs';
 import worker, { servePost } from '../feed/worker.mjs';
 import { recordProblems } from '../vault/core.mjs';
 import { postRecord } from '../vault/file.mjs';
+import { served } from './standard.mjs';
 
 const did = 'did:web:pds.example.test';
 const config = { ATPROTO_DID: did, ATPROTO_PDS_ORIGIN: 'https://pds.example.test' };
+// A record as the fake PDS lists or gives it: posts are kept as documents, so one asked for as a
+// document comes back as a document, at its document address.
+const row = (url, key, value) => {
+  const collection = url.searchParams.get('collection');
+  return { uri: `at://${did}/${collection}/${key}`, value: served(collection, value, { did, site: 'https://example.test' }) };
+};
 
 test('a post kept under its ID is found by its slug, and its address follows the slug when it changes', async () => {
   const id = '3lf2abcdefg22';
@@ -17,9 +24,9 @@ test('a post kept under its ID is found by its slug, and its address follows the
   // The PDS holds the record under its ID; a stale site snapshot is not needed to resolve it.
   const records = new Map([[id, record]]);
   const get = async url => {
-    if (url.pathname.endsWith('listRecords')) return Response.json({ records: [...records].map(([key, value]) => ({ uri: `at://${did}/${POST}/${key}`, value })) });
+    if (url.pathname.endsWith('listRecords')) return Response.json({ records: [...records].map(([key, value]) => row(url, key, value)) });
     const held = records.get(url.searchParams.get('rkey'));
-    return held ? Response.json({ uri: `at://${did}/${POST}/${url.searchParams.get('rkey')}`, value: held }) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
+    return held ? Response.json(row(url, url.searchParams.get('rkey'), held)) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
   };
   const listed = href => ({ get: async () => ({ graph: { [`at://${did}/${POST}/${id}`]: { href }, 'at://did:web:other.test/x/y': { href: '/posts/trap-of-independency' } } }) });
   const ask = (path, notes) => servePost(new Request(`https://example.test${path}`), { ...config, NOTES: notes }, decodeURIComponent(path.split('/').at(-1)), get);
@@ -48,9 +55,9 @@ test('a post kept under its ID is found by its slug, and its address follows the
 test('a post published before posts had IDs is kept under its slug and works as it did', async () => {
   const record = { $type: POST, body: 'Words.', publishedAt: '2026-01-01T00:00:00.000Z', canonicalUrl: 'https://example.test/posts/writings/hello', title: 'Hello', label: 'Writings' };
   const get = async url => url.pathname.endsWith('listRecords')
-    ? Response.json({ records: [{ uri: `at://${did}/${POST}/hello`, value: record }] })
+    ? Response.json({ records: [row(url, 'hello', record)] })
     : url.searchParams.get('rkey') === 'hello'
-      ? Response.json({ uri: `at://${did}/${POST}/hello`, value: record }) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
+      ? Response.json(row(url, 'hello', record)) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
   const ask = path => servePost(new Request(`https://example.test${path}`), { ...config, NOTES: { get: async () => null } }, path.split('/').at(-1), get);
   assert.equal((await ask('/posts/writings/hello')).status, 200);
   assert.equal(new URL((await ask('/posts/hello')).headers.get('Location')).pathname, '/posts/writings/hello');
@@ -62,14 +69,14 @@ test('slug routes fail closed on duplicate matches or an incomplete inventory ev
   const record = { $type: POST, slug: 'hello', body: 'Words.', publishedAt: '2026-01-01T00:00:00.000Z', canonicalUrl: 'https://example.test/posts/writings/hello', label: 'Writings' };
   const request = new Request('https://example.test/posts/writings/hello');
   for (const inventory of [
-    { records: ['3aaaaaaaaaaaa', '3bbbbbbbbbbbb'].map(key => ({ uri: `at://${did}/${POST}/${key}`, value: record })) },
-    { records: [], cursor: 'same' },
+    url => ({ records: ['3aaaaaaaaaaaa', '3bbbbbbbbbbbb'].map(key => row(url, key, record)) }),
+    () => ({ records: [], cursor: 'same' }),
     null,
   ]) {
     let page = 0;
     const response = await servePost(request, config, 'hello', async url => url.pathname.endsWith('getRecord')
-      ? Response.json({ uri: `at://${did}/${POST}/hello`, value: { ...record, slug: 'different' } })
-      : Response.json(inventory ?? { records: [], cursor: String(++page) }));
+      ? Response.json(row(url, 'hello', { ...record, slug: 'different' }))
+      : Response.json(inventory?.(url) ?? { records: [], cursor: String(++page) }));
     assert.equal(response.status, 502);
   }
 });
@@ -82,9 +89,9 @@ test('qualified canonical slugs win key collisions while bare keys and unambiguo
   ]);
   t.mock.method(globalThis, 'fetch', async address => {
     const url = new URL(address);
-    if (url.pathname.endsWith('listRecords')) return Response.json({ records: [...records].map(([key, value]) => ({ uri: `at://${did}/${POST}/${key}`, value })) });
+    if (url.pathname.endsWith('listRecords')) return Response.json({ records: [...records].map(([key, value]) => row(url, key, value)) });
     const key = url.searchParams.get('rkey'), value = records.get(key);
-    return value ? Response.json({ uri: `at://${did}/${POST}/${key}`, value }) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
+    return value ? Response.json(row(url, key, value)) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
   });
   const ask = (path, method = 'GET') => worker.fetch(new Request(`https://example.test${path}`, { method }), config);
   const canonical = await ask('/posts/writing/hello');
@@ -107,10 +114,10 @@ test('qualified canonical slugs win key collisions while bare keys and unambiguo
 test('qualified legacy slug paths also refuse duplicate effective slugs while their bare keys remain aliases', async () => {
   const legacy = { $type: POST, body: 'Legacy target body.', label: 'Writing', publishedAt: '2026-01-01T00:00:00.000Z', canonicalUrl: 'https://example.test/posts/writing/hello' };
   const get = async url => url.pathname.endsWith('getRecord')
-    ? Response.json({ uri: `at://${did}/${POST}/hello`, value: legacy })
+    ? Response.json(row(url, 'hello', legacy))
     : Response.json({ records: [
-      { uri: `at://${did}/${POST}/hello`, value: legacy },
-      { uri: `at://${did}/${POST}/3aaaaaaaaaaaa`, value: { ...legacy, slug: 'hello' } },
+      row(url, 'hello', legacy),
+      row(url, '3aaaaaaaaaaaa', { ...legacy, slug: 'hello' }),
     ] });
   const ask = path => servePost(new Request(`https://example.test${path}`), config, 'hello', get);
   assert.equal((await ask('/posts/writing/hello')).status, 502);

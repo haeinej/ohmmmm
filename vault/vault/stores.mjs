@@ -2,6 +2,7 @@
 // and private notes are in the person's own key-value store, which only they can read.
 import { blobCid, recordVersion, VaultProblem } from './core.mjs';
 import { listRecords } from '../feed/repository.mjs';
+import { CONTENT, DOCUMENT, fromDocument, PUBLICATION, PUBLICATION_KEY, publicationRecord, toDocument } from '../feed/standard.mjs';
 
 const refuse = message => { throw new VaultProblem(message); };
 
@@ -89,7 +90,26 @@ export function memoryKv(held = new Map()) {
 
 // Public notes: records in the person's repository on their PDS.
 //   token: the account's access token, or a function that returns one. Reading needs none.
-export function pdsStore({ did, origin, collection, token, get = fetch }) {
+//   site: the website, which the documents' publication names. Posts are written as standard.site
+//   documents and read back as posts (feed/standard.mjs).
+export function pdsStore({ did, origin, collection, site, token, get = fetch }) {
+  const posts = collection === CONTENT;
+  const wireCollection = posts ? DOCUMENT : collection;
+  const outgoing = record => (posts ? toDocument(record, { did, site }) : record);
+  let published = false;
+  const publication = async () => {
+    if (published) return;
+    const held = await call('com.atproto.repo.getRecord', { query: { repo: did, collection: PUBLICATION, rkey: PUBLICATION_KEY } });
+    if (!held.response.ok) {
+      if (held.data.error !== 'RecordNotFound' && held.response.status !== 404) failed('Reading the publication', held);
+      if (!site) refuse('Say where the website is (SITE_ORIGIN), so its publication can be made');
+      const made = await call('com.atproto.repo.createRecord', {
+        body: { repo: did, collection: PUBLICATION, rkey: PUBLICATION_KEY, record: publicationRecord({ site }) }, auth: true,
+      });
+      if (!made.response.ok) failed('Making the publication', made);
+    }
+    published = true;
+  };
   const bearer = async () => {
     const value = typeof token === 'function' ? await token() : token;
     return value ?? refuse('Writing to the PDS needs the account signed in');
@@ -111,9 +131,11 @@ export function pdsStore({ did, origin, collection, token, get = fetch }) {
     refuse(`${what} failed (HTTP ${response.status}${data?.message ? `: ${data.message}` : ''})`);
   return {
     async get(key) {
-      const result = await call('com.atproto.repo.getRecord', { query: { repo: did, collection, rkey: key } });
+      const result = await call('com.atproto.repo.getRecord', { query: { repo: did, collection: wireCollection, rkey: key } });
       if (result.response.ok && result.data.value && typeof result.data.cid === 'string') {
-        return { record: result.data.value, version: result.data.cid };
+        const record = posts ? fromDocument(result.data.value, { did }) : result.data.value;
+        if (!record) refuse(`"${key}" is a document another application wrote, not a post`);
+        return { record, version: result.data.cid };
       }
       if (result.data.error === 'RecordNotFound' || result.response.status === 404) return null;
       return failed(`Reading "${key}"`, result);
@@ -123,17 +145,19 @@ export function pdsStore({ did, origin, collection, token, get = fetch }) {
       return records.map(({ uri, cid, value }) => ({ key: uri.split('/').at(-1), record: value, version: cid }));
     },
     // Creating fails when the key is taken, and replacing fails unless the version is still the
-    // one that was read. The PDS makes both checks itself.
+    // one that was read. The PDS makes both checks itself. The first post published also makes the
+    // member's publication, which every document names.
     async put(key, record, { version } = {}) {
+      if (posts) await publication();
       const result = version === undefined
-        ? await call('com.atproto.repo.createRecord', { body: { repo: did, collection, rkey: key, record }, auth: true })
-        : await call('com.atproto.repo.putRecord', { body: { repo: did, collection, rkey: key, record, swapRecord: version }, auth: true });
-      if (!result.response.ok || result.data.uri !== `at://${did}/${collection}/${key}`) failed(`Saving "${key}"`, result);
+        ? await call('com.atproto.repo.createRecord', { body: { repo: did, collection: wireCollection, rkey: key, record: outgoing(record) }, auth: true })
+        : await call('com.atproto.repo.putRecord', { body: { repo: did, collection: wireCollection, rkey: key, record: outgoing(record), swapRecord: version }, auth: true });
+      if (!result.response.ok || result.data.uri !== `at://${did}/${wireCollection}/${key}`) failed(`Saving "${key}"`, result);
       return { version: result.data.cid };
     },
     async remove(key, { version } = {}) {
       const result = await call('com.atproto.repo.deleteRecord', {
-        body: { repo: did, collection, rkey: key, ...(version ? { swapRecord: version } : {}) }, auth: true,
+        body: { repo: did, collection: wireCollection, rkey: key, ...(version ? { swapRecord: version } : {}) }, auth: true,
       });
       if (!result.response.ok) failed(`Removing "${key}"`, result);
     },

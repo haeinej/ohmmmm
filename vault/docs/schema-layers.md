@@ -5,10 +5,12 @@ A post and a profile each have two layers. One is the same on every site. The ot
 | | The fixed schema | Your optional layer |
 | --- | --- | --- |
 | What it holds | A post's title, subtitle, body, dates, address, slug, form, label, sublabel, connections, link, source, attachments. A profile's name, description, pronouns, links, pictures | Anything only your site needs |
-| Who defines it | This project | You, in a schema under your domain |
-| Who understands it | Any software that reads AT Protocol posts of this kind | Your own website |
+| Who defines it | standard.site for the document, this project for the post inside it | You, in a schema under your domain |
+| Who understands it | Any software that reads standard.site documents, and, for the content, any that reads ohm posts | Your own website |
 | Where it appears | Your site, the shared pages, and other applications | Your own site only |
-| Where it sits in the record | The record's own fields | Under the record's `site` field |
+| Where it sits in the record | The document's own fields (title, dates, path, plain text, tags), and the post's fields in its `content` | Under the content's `site` field |
+
+A post is published as a `site.standard.document` ([standard.site](https://standard.site)), the long-form record Leaflet, pckt, Offprint and other AT Protocol applications read. Its `content` is the post as ohm keeps it, typed `com.ohmmmm.post`. A reader that knows only standard.site still shows the title, the date and the words; one that knows ohm's content shows the post whole.
 
 ## Why the fixed schema stays fixed
 

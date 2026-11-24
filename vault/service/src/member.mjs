@@ -1,5 +1,6 @@
 // Where a member's things are: the PDS their own DID document names, and their website.
 import { isRecordKey, webUrl } from '../../feed/pds.mjs';
+import { DOCUMENT, fromDocument } from '../../feed/standard.mjs';
 import { findAccount } from './identity.mjs';
 import { Refused } from './store.mjs';
 
@@ -15,8 +16,11 @@ export async function whereabouts({ get, identify, did }, { site } = {}) {
 }
 
 // Every record of one type in a member's repository, by its key. A repository's records are
-// public, so reading them needs no credential.
+// public, so reading them needs no credential. Posts are kept as standard.site documents: asked
+// for documents, this gives each as the post inside it, passing over documents another
+// application wrote. Any other type, `com.ohmmmm.post` from before included, is given as it is.
 export async function published(get, pds, did, collection) {
+  const posts = collection === DOCUMENT;
   const records = new Map();
   const prefix = `at://${did}/${collection}/`;
   let cursor;
@@ -34,7 +38,8 @@ export async function published(get, pds, did, collection) {
       if (!record || typeof record.uri !== 'string' || !record.uri.startsWith(prefix) || !isRecordKey(record.uri.slice(prefix.length)) || !record.value || typeof record.value !== 'object' || Array.isArray(record.value)) incomplete();
       const key = record.uri.slice(prefix.length);
       if (records.has(key)) incomplete();
-      records.set(key, record.value);
+      const value = posts ? fromDocument(record.value, { did }) : record.value;
+      if (value) records.set(key, value);
     }
     if (data.cursor === undefined || data.cursor === null || data.cursor === '') return records;
     if (typeof data.cursor !== 'string' || cursors.has(data.cursor) || page === 49) incomplete();
