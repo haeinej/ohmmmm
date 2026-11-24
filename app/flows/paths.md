@@ -135,7 +135,9 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | G3 | Identity | Settings → Identity | Your DID (copy), handle, server | Know and share your root identity | *UI only* |
 | G4 | **Agents** | Settings → Agents → Offer tools to browser agents; one switch per tool | Tools are offered to an agent, or withdrawn, at once | Control what an agent can do here | Governs every tool |
 | G5 | Vault | Settings → Vault | New blocks start private (always); your channels | Review how your vault is organised | *UI only* |
-| G6 | Cortex | Settings → Cortex | Your profile, how many observations, skills and tools | Review what your agents know about you | *UI only* |
+| G6 | **Cortex** | Settings → Cortex | What agents proposed, waiting for you (profile lines, skills, tools asked for), then how many observations, skills and tools on | Review what your agents know about you, and answer what they proposed | *UI only* |
+| G6a | Accept a profile line | Settings → Cortex → Accept (or Decline) | The line is under its heading in your profile, as your change; declined, it is never proposed again | Decide what agents may take as true about you | *UI only* |
+| G6b | Approve a skill | Settings → Cortex → Approve (or Decline) | The skill is in force, as your change naming the agent; declined, it is moved aside, kept | Decide how agents do things for you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
 | G8 | Sign out | Settings → Sign out | A notice (not in the wireframe) | Leave | *Not yet* |
 
@@ -172,8 +174,21 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
+| `cortex.observe` | Asks to keep an observation about the open block | J5 | consequential: waits for your Approve | An observation, written as the agent's, once you approved |
 
 Nothing an agent can do here is public. Making a block visible to others, deleting, and publishing are not tools yet. When they become tools, they will be marked consequential and ask the person first, as the UI does now.
+
+## J. Your cortex ([flows/cortex.md](cortex.md))
+
+Everything in the cortex is yours to change. On the home on this computer each change is written through the cortex's own operations, its version before kept, and journaled as yours.
+
+| # | Path | Entry → steps | End state | For | Agent |
+| --- | --- | --- | --- | --- | --- |
+| J1 | Edit a part | Open the profile, an observation, a skill or a tool → type | Saved as you type, as your change | Say it in your own words | *UI only* |
+| J2 | Pin an observation | An observation → Pin (or Unpin) | Every agent session is handed it | Keep what matters in front of your agents | *UI only* |
+| J3 | Forget an observation, remove a skill | Its toolbar (or the tree's ⋯) → Forget / Remove → confirm | Gone from the cortex, kept in its history | Take back what an agent should not use | *UI only* |
+| J4 | Switch a tool | A tool → its switch | On: agents may use it; off: they don't | Decide what agents may act with | *UI only* |
+| J5 | **Write observation** | A block's toolbar → eye → write → Write observation | An observation about that block, yours, in its connections card | Tell your agents what you know about a block | `cortex.observe` (asks you first) |
 
 ## End states, in short
 

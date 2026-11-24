@@ -102,6 +102,7 @@ test("the person edits the profile, a skill and a tool, and each is written thro
   // In the app's history too, as the person's.
   const profile = demoJournal().linesFor("cortex-profile").at(-1)!
   assert.deepEqual(profile.actor, { kind: "human", name: "you" })
+  assert.equal(demoJournal().linesFor("tool-vault-search").at(-1)!.summary, "Switched it on")
 })
 
 test("the person writes, pins and forgets an observation about a block", async t => {
@@ -162,9 +163,10 @@ test("cortex history lines read their versions from the texts the bridge sent", 
   const { past, sessions } = cortexPast({
     changes: [{ seq: 1, id: "a", at: "2026-11-20T10:00:00.000Z", actor: { kind: "agent", name: "codex" }, node: "observation/x", op: "create", before: null, after: "c1" },
       { seq: 2, id: "b", at: "2026-11-20T11:00:00.000Z", actor: { kind: "human", name: "member" }, node: "observation/x", op: "update", before: "c1", after: "c2" },
-      { seq: 3, id: "c", at: "2026-11-20T12:00:00.000Z", actor: { kind: "human", name: "member" }, node: "agents/unknown", op: "update", before: null, after: "c3" }],
+      { seq: 3, id: "d", at: "2026-11-20T11:30:00.000Z", actor: { kind: "human", name: "account" }, node: "profile", op: "update", before: "p1", after: "p2" },
+      { seq: 4, id: "c", at: "2026-11-20T12:00:00.000Z", actor: { kind: "human", name: "member" }, node: "agents/unknown", op: "update", before: null, after: "c3" }],
     sessions: [],
-    texts: { c1: "---\nby: \"codex\"\n---\nFirst.\n", c2: "---\nby: \"codex\"\n---\nSecond line.\n" },
+    texts: { p1: "## Notes\n", p2: "---\naccount: \"mira.example\"\n---\n## Notes\n", c1: "---\nby: \"codex\"\n---\nFirst.\n", c2: "---\nby: \"codex\"\n---\nSecond line.\n" },
   })
   assert.deepEqual(past.map(each => [each.node, each.op, each.actor.name, each.after.body, each.owner]), [
     ["observation-x", "create", "codex", "First.", "cortex"], ["observation-x", undefined, "you", "Second line.", "cortex"],

@@ -163,6 +163,7 @@ Every change by anyone is a journal line with who, when and why, and can be reve
 - **Connections card:** observations about a block, with the text on hover.
 - **History:** the cortex timeline reads the same journal, now without settlements.
 - **WebMCP:** the history tools stay. Editing an observation is a new step with its own tool, per the app's rules.
+- **Built (2026-11-24):** paired with a home through `ohmmmm serve`, the app reads and changes the real cortex through the bridge's cortex routes ([home/cortex-routes.mjs](../../home/cortex-routes.mjs), [docs/serve.md](../../docs/serve.md)), which use only this folder's operations, opened as the person. The person edits every part, pins and forgets observations, switches tools, removes skills, and accepts or declines profile lines and skills. The one WebMCP tool is `cortex.observe`: an agent in the page asks, the person approves, and the observation is written as the agent's ([app/flows/cortex.md](../../app/flows/cortex.md)). History reads this journal into one timeline with the vault's.
 
 ### ohm-onboarding (the account app)
 

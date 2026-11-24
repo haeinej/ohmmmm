@@ -6,7 +6,7 @@ Three parts and a thin layer over them. Read [README.md](README.md) first, then 
 - **One contract:** cortex reads a vault only through [contract/vault-reader.mjs](contract/vault-reader.mjs). Change it there, and in both the vault's reader (`vault/vault/cortex.mjs`) and cortex's checks (`cortex/src/vault.mjs`) in the same change; `test/home.test.mjs` holds them together.
 - **One set of words:** [docs/words.md](docs/words.md). Use a word that already names a thing; if the two parts disagree, settle it there.
 - The vault is canonical; the cortex never copies what a block says, and never writes to the vault.
-- **The bridge answers only this machine.** `ohmmmm serve` ([home/serve.mjs](home/serve.mjs), [docs/serve.md](docs/serve.md)) binds 127.0.0.1, checks the Host header, and needs the home's token on every request but a preflight. Do not add a way to bind elsewhere or to skip the token.
+- **The bridge answers only this machine.** `ohmmmm serve` ([home/serve.mjs](home/serve.mjs), [docs/serve.md](docs/serve.md)) binds 127.0.0.1, checks the Host header, and needs the home's token on every request but a preflight. Do not add a way to bind elsewhere or to skip the token. Its cortex routes ([home/cortex-routes.mjs](home/cortex-routes.mjs)) use only the cortex's own folder operations, so every change is kept and journaled there; `home/` may import from both parts, `cortex/` never from `vault/`.
 - Keys for the private layer live in the account app (ohm-onboarding `packages/keys`), not here. The vault service stores private blocks only as ciphertext.
 - Run `npm test` at the root before handing work back.
 - Install the app with `npm ci --prefix app`. Root tests run its typecheck and build. Keep its package and lockfile under `app/`.

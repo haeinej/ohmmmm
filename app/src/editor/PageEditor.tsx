@@ -48,6 +48,7 @@ import { LinkPreview } from "./LinkPreview"
 import { ConnectionsButton } from "./ConnectionsCard"
 import { HistoryButton } from "@/history/History"
 import { CortexActions, ObserveButton } from "./CortexActions"
+import { observationTitle } from "@/data/local-cortex"
 import "./editor.css"
 
 /**
@@ -489,7 +490,8 @@ export function PageEditor({ doc }: { doc: Doc }) {
               {doc.icon}
             </button>
           )}
-          <div className="group/title relative">
+          {/* An observation has no title of its own: its first line is its title, so it is shown once, in the text. */}
+          {!(doc.kind === "observation" && observationTitle(doc.body) === doc.title) && <div className="group/title relative">
             {privateBlock && (
               <Popover open={iconOpen} onOpenChange={setIconOpen}>
                 <PopoverTrigger render={
@@ -520,7 +522,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                 }
               }}
               className="block w-full resize-none overflow-hidden bg-transparent text-h2 font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60" />
-          </div>
+          </div>}
 
           <div ref={setCanvas} className="relative mt-6">
             {editable && (

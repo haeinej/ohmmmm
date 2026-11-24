@@ -25,7 +25,7 @@ A light, Obsidian-like workspace, the first flow ([flows/workspace.md](flows/wor
 
 Renaming a sample channel keeps its record and updates its path throughout the tree and graph.
 
-Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
+Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and your cortex, and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
 
 To try saving and searching, create a block titled “Alder lantern”, add a line of text, and open Search. Search for “Alder lantern” to find the same block you just edited. This workspace uses the sample adapter, so those edits last for the current session. The service adapter is available for integrating signed-in vault access in the app. Private service files require an unlocked device and reach the service as ciphertext.
 
@@ -40,7 +40,7 @@ npm --prefix app run dev   # http://localhost:5190
 
 Choose **New block** to start a private draft. Type a title in the editor and press Enter to start writing. The title saves as you type, and you can also change it with **Rename** on any of the block's rows. From a channel's menu, **New block here** uses that channel as the block's home. A block can appear in several channels, each with its own order. A post is a published block.
 
-Choose **Home**, then **History**, to see sample changes by date or author. A block's clock opens its own vault versions. Cortex files have their own history. The connections card shows the observations an agent made about a block, and a sample observation keeps the block versions it was written against. The cortex side holds Mira's profile, observations, a skill and a tool, as in [cortex/docs/model.md](../cortex/docs/model.md).
+Choose **Home**, then **History**, to see sample changes by date or author. A block's clock opens its own vault versions. Cortex files have their own history. The connections card shows the observations an agent made about a block, and a sample observation keeps the block versions it was written against. The cortex side holds Mira's profile, observations, a skill and a tool, as in [cortex/docs/model.md](../cortex/docs/model.md). Every part of the cortex opens in the editor and is yours to change: edit its text, pin or forget an observation, switch a tool on or off, remove a skill. Settings › Cortex holds what agents proposed, to accept or decline. On a block, **Write observation** keeps a note about it in the cortex ([flows/cortex.md](flows/cortex.md)). Paired with your home, all of this is your real cortex, written through its own folder operations.
 
 ## Where things are
 

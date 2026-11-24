@@ -12,7 +12,7 @@ export type Actor = { kind: "human" | "agent"; name: string }
 export const YOU: Actor = { kind: "human", name: "you" }
 
 /** What a block's version holds: everything a change can touch. */
-export type Snapshot = { title: string; body: string; kind: Kind; homeChannel?: string; channels?: string[]; connect?: Connection[] }
+export type Snapshot = { title: string; body: string; kind: Kind; homeChannel?: string; channels?: string[]; connect?: Connection[]; pin?: boolean; on?: boolean }
 export type ChangeOp = "create" | "edit" | "move" | "channels" | "connect" | "restore" | "revert" | "remove"
 export type DeadEnd = { tried: string; why: string; recheck?: string }
 
@@ -33,6 +33,8 @@ export type PastSession = { at: string; actor: Actor; done: string; changes: str
 export const snap = (d: Doc): Snapshot => ({
   title: d.title, body: d.body, kind: d.kind, homeChannel: d.homeChannel,
   channels: d.channels ? [...d.channels] : undefined, connect: d.connect?.map(c => ({ ...c })),
+  // A cortex part's switches: an observation pinned, a tool on.
+  ...(d.pin ? { pin: true } : {}), ...(d.kind === "tool" ? { on: !!d.on } : {}),
 })
 /** A short content hash: the same content is the same version everywhere. */
 export function versionOf(s: Snapshot) {
@@ -47,6 +49,8 @@ export function applySnapshot(doc: Doc, s: Snapshot) {
   doc.homeChannel = s.homeChannel
   doc.channels = s.channels ? [...s.channels] : undefined
   doc.connect = s.connect?.map(c => ({ ...c }))
+  if (s.pin) doc.pin = true; else delete doc.pin
+  if (s.on !== undefined) doc.on = s.on
 }
 
 /** A word-level difference, for showing what a change did to the text. */
@@ -124,6 +128,8 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     if (fields.includes("homeChannel")) parts.push(`Moved to ${after.homeChannel?.replaceAll("/", " › ")}`)
     if (fields.includes("channels")) parts.push("Changed its channels")
     if (fields.includes("connect")) parts.push("Changed its connections")
+    if (fields.includes("pin")) parts.push(after.pin ? "Pinned it" : "Unpinned it")
+    if (fields.includes("on")) parts.push(after.on ? "Switched it on" : "Switched it off")
     return { fields, summary: parts.join(" · ") || "No change" }
   }
   function opOf(before: Snapshot | undefined, after: Snapshot): ChangeOp {
@@ -132,6 +138,7 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     if (touched("title") || touched("body")) return "edit"
     if (touched("homeChannel")) return "move"
     if (touched("channels")) return "channels"
+    if (touched("pin") || touched("on")) return "edit"
     return "connect"
   }
 

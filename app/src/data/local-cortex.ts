@@ -77,7 +77,8 @@ export function cortexPast(journal: CortexJournal): { past: PastChange[]; sessio
     const kind = node.split("/")[0] as Doc["kind"]
     const body = bodyOf(text)
     const title = node === "profile" ? "Profile" : kind === "observation" ? observationTitle(body) : node.split("/")[1]
-    return { title, body, kind }
+    const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? ""
+    return { title, body, kind, ...(/^pin:\s*true\s*$/m.test(head) ? { pin: true } : {}), ...(kind === "tool" ? { on: /^on:\s*true\s*$/m.test(head) } : {}) }
   }
   const past: PastChange[] = []
   for (const line of journal.changes) {
@@ -86,6 +87,8 @@ export function cortexPast(journal: CortexJournal): { past: PastChange[]; sessio
     const before = line.before ? snapOf(line.node, journal.texts[line.before]) : undefined
     const after = line.after ? snapOf(line.node, journal.texts[line.after]) : before
     if (!after) continue
+    // A change to what the app does not show, such as the profile's account, is not a line here.
+    if (before && line.op !== "remove" && JSON.stringify(before) === JSON.stringify(after)) continue
     const op = line.op === "remove" ? "remove" : line.op === "restore" ? "restore" : line.op === "create" ? "create" : undefined
     past.push({ at: line.at, node, actor: actorOf(line.actor), owner: "cortex", ref: line.id, ...(op ? { op } : {}), ...(before ? { before } : {}), after, ...(line.reason ? { reason: line.reason } : {}) })
   }
