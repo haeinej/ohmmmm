@@ -12,7 +12,7 @@ This repository holds the vault, the cortex, and the app that brings them togeth
 
 | Folder | What it is |
 | --- | --- |
-| [`vault/`](vault/README.md) | The vault: blocks, channels, entities and sources as Markdown files; the `ohm` command; the vault service (Cloudflare Worker and D1); publishing to your PDS as `com.ohmmmm.post`; the Claude Code plugin, with its skills and the [curator](vault/agents/curator.md) agent |
+| [`vault/`](vault/README.md) | The vault: blocks, channels, entities and sources as Markdown files; the `ohm` command; the vault service (Cloudflare Worker and D1); publishing to your PDS as standard.site documents (`site.standard.document`, with `com.ohmmmm.post` content); the Claude Code plugin, with its skills and the [curator](vault/agents/curator.md) agent |
 | [`cortex/`](cortex/README.md) | The cortex: a folder an agent keeps about the person it works for; the `cortex` command, its MCP server and hooks |
 | [`app/`](app/README.md) | The workspace app for exploring and editing a synthetic example home |
 | [`home/`](home/home.mjs) | Naming, finding and making a home, `ohmmmm.<handle>` |
@@ -27,7 +27,7 @@ Each block's `visibility` decides where it is kept and who can read it ([vault/p
 
 | Layer | Who reads it | Kept |
 | --- | --- | --- |
-| **Public** | Anyone | A `com.ohmmmm.post` on your PDS |
+| **Public** | Anyone | A `site.standard.document` on your PDS, with the post inside as `com.ohmmmm.post` content |
 | **Friends** | You, the friends you chose, and the vault service | The vault service, readable, checked by DID |
 | **Private** (the default) | Your devices only | The vault service, as ciphertext it cannot open |
 

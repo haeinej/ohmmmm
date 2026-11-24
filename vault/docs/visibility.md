@@ -23,6 +23,10 @@ An agent never makes a new block for friends: a new block starts private, and sh
 
 Every move is written down: which block (by its ID only, never its title or text), from where to where, who asked, who approved, why, and how it stands (done, hidden and waiting to be sealed, waiting for Publish, or with an old copy still to clean up). The journal never shows what a private block says.
 
+A move and its line in the journal are kept together. If the connection drops halfway, neither is kept, and trying again makes the move once: you never get a move without its line, two lines for one move, or two copies of the same request.
+
+Making a block private copies it into the private layer and then removes the friends-only copy. If the removal fails, both copies stay, and the friends-only one stays in your tree with the move marked as having an old copy to clean up. Make it private again and ohm removes the old copy; it does not make a second private one.
+
 ## What you need
 
 - For an agent to move things to private: a write grant on the channel (`ohm vault grant <agent> write <channel>`), and the agent's tools started in your home (`--home`), so they can read your grants.
