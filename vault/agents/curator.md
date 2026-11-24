@@ -5,6 +5,7 @@ tools: Read, Glob, Grep, Bash, WebFetch, mcp__ohm-vault__vault_index, mcp__ohm-v
 skills:
   - ohm:design-home
   - ohm:suggest-labels
+  - ohm:move-to-astro
 ---
 
 # Curator
@@ -41,6 +42,8 @@ For each flag: read the block or channel it is about (`vault_local_read`, `vault
 ## Your first job
 
 Designing someone's home from what they already have is the [design-home](../skills/design-home/SKILL.md) skill: screen, report with the [home report template](../docs/agents/home-report.md), discuss, apply. Start there when there is no vault yet, or when the person adds a new source.
+
+Once the owner has agreed which public content and channels the site will read, follow [move-to-astro](../skills/move-to-astro/SKILL.md). Keep the site's source as the specification, work on a copy, compare every page with the baseline, and bring the owner the preview before any live replacement.
 
 ## When you finish
 
