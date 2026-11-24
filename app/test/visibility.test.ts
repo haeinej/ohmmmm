@@ -115,12 +115,16 @@ test("a block that is not a post becomes one when it goes public, at the address
 })
 
 test("someone asking to be a friend waits for the member, who approves them for every channel or only some", async () => {
-  const { approveFriend, declineFriend, waitingFriends } = await import("../src/workspace/store")
+  const { approveFriend, declineFriend, loadFriendRequests, waitingFriends } = await import("../src/workspace/store")
   const fixture = createFixtureSource()
   const bo = fixture.askFriend({ did: "did:web:pds.bo.example.test", name: "Bo", email: "bo@example.test" })
   const cy = fixture.askFriend({ did: "did:web:pds.cy.example.test", name: "Cy" })
   await setSource(fixture)
   try {
+    // Friends are off screen in the first release (src/features.ts), so the home does not read their
+    // requests when it opens; the handler the bell uses reads them.
+    assert.deepEqual(waitingFriends(), [])
+    await loadFriendRequests()
     assert.deepEqual(waitingFriends().map(each => each.name), ["Bo", "Cy"])
     await assert.rejects(approveFriend(bo.id, []), { name: "DataError" })
     await approveFriend(bo.id, ["writing"])

@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import { useEffect } from "react"
+import { features } from "@/features"
 import { BotIcon, FolderGitIcon, UsersIcon } from "lucide-react"
 import { NotificationCenter } from "./NotificationCenter"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -56,7 +57,7 @@ export function Rack() {
       <RackButton label="New block" shortcut="⌘N" onClick={() => void report(createDraft())}><RackIcon icon={icons.write} /></RackButton>
       <div className="h-4" />
       <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
-      <RackButton label="Connections" active={side === "connections"} onClick={() => toggleSide("connections")}><RackIcon icon={UsersIcon} /></RackButton>
+      {features.connections && <RackButton label="Connections" active={side === "connections"} onClick={() => toggleSide("connections")}><RackIcon icon={UsersIcon} /></RackButton>}
       <RackButton label={waiting ? `Agents: ${waiting} waiting for you` : "Agents"} active={side === "agents"} dot={waiting > 0} onClick={() => toggleSide("agents")}><RackIcon icon={BotIcon} /></RackButton>
       <div className="flex-1" />
       <NotificationCenter />

@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn"
 import { ago, clearAll, markRead, record, remove, useNotifications, type NotificationKind } from "./notifications"
 import { approveFriend, approveMoveRequest, declineFriend, declineMoveRequest, loadFriendRequests, loadMoveRequests, open as openDoc, previewMove, report, useWorkspace, waitingFriends, waitingRequests } from "./store"
 import { ChannelPicker, chosen, pickedNothing, type Picked } from "./ChannelPicker"
+import { features } from "@/features"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { notify } from "@/components/ui/notice"
 import { byId, titleOf } from "@/data/workspace-data"
@@ -33,10 +34,10 @@ export function NotificationCenter() {
   const [tab, setTab] = useState<NotificationKind>("agent")
   const [answering, setAnswering] = useState<MoveRequest | null>(null)
   const waiting = waitingRequests()
-  const asking = waitingFriends()
+  const asking = features.connections ? waitingFriends() : []
   const [letIn, setLetIn] = useState<{ request: FriendRequest } & Picked | null>(null)
   // Requests are read again whenever the panel opens.
-  useEffect(() => { if (open) { report(loadMoveRequests()); report(loadFriendRequests()) } }, [open])
+  useEffect(() => { if (open) { report(loadMoveRequests()); if (features.connections) report(loadFriendRequests()) } }, [open])
   const nameOf = (request: MoveRequest) => { const doc = byId(request.block); return doc ? titleOf(doc) : "a block locked on this device" }
   const warningOf = (request: MoveRequest) => { try { return previewMove(request.block, request.to).warning } catch (err) { return (err as Error).message } }
 

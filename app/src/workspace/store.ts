@@ -20,6 +20,7 @@ import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
 import type { CortexWaiting } from "@/data/workspace-model"
+import { features } from "@/features"
 import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
 import { keep, makeSizes, measure } from "@/media/cache"
 
@@ -473,7 +474,8 @@ export const readShared = (owner: string, id: string): Promise<BlockFile> => liv
 async function movesOnOpen() {
   moveRequests = []
   friendRequests = []
-  try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
+  // Friends are not shown in the first release (features.ts); their requests are read only when they are.
+  if (features.connections) try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
   try {
     await loadMoveRequests()
     await sealHidden()
