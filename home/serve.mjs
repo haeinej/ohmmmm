@@ -18,18 +18,25 @@
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
 // refused, against DNS rebinding), only with one of the home's keys (`Authorization: Bearer`), and in a
 // browser only to the app's origins and pages on this machine. A preflight, which carries no key,
-// learns nothing but which headers it may send. There are two kinds of key:
+// learns nothing but which headers it may send. The keys:
 //
-//   the agent key   <home>/.ohmmmm/agent-key, kept as it is so the person can give it to agents. It
-//                   reaches /vault/mcp, /cortex/mcp and / only.
+//   agents' keys    one for each agent, made with `ohmmmm agents add <name>` and shown once. It reaches
+//                   /vault/mcp, /cortex/mcp and / only, and every session it opens is that agent,
+//                   whatever the agent calls itself, so grants and the journal name it truly. Only
+//                   its SHA-256 is kept (<home>/.ohmmmm/agent-keys.json).
 //   app keys        one for each browser paired with the home. It reaches everything. Only its
 //                   SHA-256 is kept (<home>/.ohmmmm/app-keys.json): the key itself is in the pairing
-//                   link and in the paired browser, never in the home, so a program that reads the
-//                   home's files does not find it there.
+//                   link and in the paired browser, never in the home.
+//   the shared agent key  <home>/.ohmmmm/agent-key, from before each agent had its own: reaches what an
+//                   agent's key does, its sessions name themselves, and none may take a name an
+//                   agent's own key holds. It is never made anew.
 //
-// MCP sessions are agents: each is named by its client, and the vault's grants decide what it may
-// change. /media and /vault/file are the person, through the app (app/src/data/local-source.ts): their
-// writes are journaled `by: me`, `via: editor`, and every version is kept, so any of it can be restored.
+// A program that reads the home's files finds no key there but the shared one, if it is still kept.
+// An MCP session answers only the key that opened it.
+//
+// MCP sessions are agents: each is named by its key (or, for the shared key and the app, by its
+// client), and the vault's grants decide what it may change. /media and /vault/file are the person,
+// through the app (app/src/data/local-source.ts): their writes are journaled `by: me`, `via: editor`, and every version is kept, so any of it can be restored.
 //
 // Publishing signs in to the person's PDS with ATPROTO_APP_PASSWORD from this process's environment,
 // for the account the home's site configuration names (<home>/ohm.jsonc, or --config). The password
@@ -61,11 +68,13 @@ import { findHome } from './home.mjs';
 
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
-export const AGENT_KEY = '.ohmmmm/agent-key';
+export const AGENT_KEYS = '.ohmmmm/agent-keys.json';
 export const APP_KEYS = '.ohmmmm/app-keys.json';
-// The one key the bridge had before agents had their own. It becomes the agent key.
+// The shared agent key, from before each agent had its own; it is never made anew.
+export const AGENT_KEY = '.ohmmmm/agent-key';
+// The one key the bridge had before agents had keys at all. It becomes the shared agent key.
 export const OLD_TOKEN = '.ohmmmm/serve-token';
-// What an agent key reaches; every other route is the person's, through the app.
+// What an agent's key reaches; every other route is the person's, through the app.
 export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/'];
 export const SITE_CONFIG = 'ohm.jsonc';
 export const MAX_IMAGE = 20 * 1024 * 1024;
@@ -76,9 +85,12 @@ const CID = /^b[a-z2-7]{20,}$/;
 // ---- The keys ----
 
 const KEY_PART = /^[A-Za-z0-9_-]{20,200}$/;
+// An agent's name, as the vault's journal and grants write it.
+const AGENT_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 const newKey = kind => `ohm_${kind}_${randomBytes(32).toString('base64url')}`;
 const sha256 = value => createHash('sha256').update(value).digest();
 const readText = path => readFile(path, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+const keyProblem = (path, list) => new Error(`${path} is not JSON. Remove it and make the keys again (${list}).`);
 
 // Written whole to a new file only the person can read, then moved over the old one.
 async function writePrivate(home, path, text) {
@@ -92,33 +104,18 @@ async function writePrivate(home, path, text) {
     await rm(fresh, { force: true });
   }
 }
-
-/**
- * The home's agent key: the one kept, or a new one when there is none or `replace` asks. A home whose
- * bridge had one key for everyone (.ohmmmm/serve-token) keeps that key for its agents, and the file
- * goes, so it no longer opens the person's routes. Answers `{ key, made, fromOldToken }`.
- */
-export async function agentKey(home, { replace = false } = {}) {
-  const held = replace ? undefined : (await readText(join(home, AGENT_KEY)))?.trim();
-  if (held && KEY_PART.test(held)) return { key: held, made: false, fromOldToken: false };
-  const old = replace ? undefined : (await readText(join(home, OLD_TOKEN)))?.trim();
-  const key = old && KEY_PART.test(old) ? old : newKey('agent');
-  await writePrivate(home, AGENT_KEY, `${key}\n`);
-  await rm(join(home, OLD_TOKEN), { force: true });
-  return { key, made: true, fromOldToken: key === old };
-}
-
-/** The paired browsers' keys, as kept: `{ keys: [{ hash, made, app? }] }`, each `hash` the key's SHA-256 in hex. */
-export async function appKeys(home) {
-  const text = await readText(join(home, APP_KEYS));
+// A list of keys kept as their SHA-256, in hex: [{ hash, made, … }].
+async function readHashes(home, path, field, list) {
+  const text = await readText(join(home, path));
   if (text === undefined) return [];
-  try {
-    const keys = JSON.parse(text)?.keys;
-    return Array.isArray(keys) ? keys.filter(each => /^[0-9a-f]{64}$/.test(each?.hash ?? '')) : [];
-  } catch {
-    throw new Error(`${join(home, APP_KEYS)} is not JSON. Remove it and pair the app again with: ohmmmm pair`);
-  }
+  let value;
+  try { value = JSON.parse(text)?.[field]; } catch { throw keyProblem(join(home, path), list); }
+  return Array.isArray(value) ? value.filter(each => /^[0-9a-f]{64}$/.test(each?.hash ?? '')) : [];
 }
+const writeHashes = (home, path, field, entries) => writePrivate(home, path, `${JSON.stringify({ [field]: entries }, null, 2)}\n`);
+
+/** The paired browsers' keys, as kept: `[{ hash, made, app? }]`, each `hash` the key's SHA-256 in hex. */
+export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohmmmm pair');
 
 /**
  * A key for one more browser: kept only as its SHA-256, and answered once, for the pairing link.
@@ -127,24 +124,77 @@ export async function appKeys(home) {
 export async function pairApp(home, { replace = false, app } = {}) {
   const key = newKey('app');
   const kept = replace ? [] : await appKeys(home);
-  const keys = [...kept, { hash: sha256(key).toString('hex'), made: new Date().toISOString(), ...(app ? { app } : {}) }];
-  await writePrivate(home, APP_KEYS, `${JSON.stringify({ keys }, null, 2)}\n`);
+  await writeHashes(home, APP_KEYS, 'keys', [...kept, { hash: sha256(key).toString('hex'), made: new Date().toISOString(), ...(app ? { app } : {}) }]);
   return key;
 }
 
-/** What each key the bridge accepts opens: `who(key)` is 'app', 'agent' or null, compared in constant time. */
+/** The agents with keys of their own, as kept: `[{ name, hash, made }]`. */
+export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agents', 'ohmmmm agents add <name>')).filter(each => AGENT_NAME.test(each.name ?? ''));
+
+/**
+ * A key of its own for the agent named, answered once: the person gives it to that agent, and the
+ * home keeps only its SHA-256. Every session it opens is that agent, whatever the agent calls itself,
+ * so the vault's grants and journal name it truly. An agent that has a key keeps it unless `replace`
+ * asks for a new one, which shuts the old one out.
+ */
+export async function addAgent(home, name, { replace = false } = {}) {
+  if (!AGENT_NAME.test(name ?? '')) throw new VaultProblem('An agent\'s name is 1 to 64 letters, digits, dots, hyphens or underscores, such as claude-code.');
+  const kept = await agentKeys(home);
+  if (!replace && kept.some(each => each.name === name)) throw new VaultProblem(`${name} has a key already. To give it a new one, which shuts the old one out: ohmmmm agents add ${name} --new-key`);
+  const near = kept.find(each => each.name !== name && each.name.toLowerCase() === name.toLowerCase());
+  if (near) throw new VaultProblem(`${name} would be too easily taken for ${near.name}, which has a key. Use ${near.name}, or another name.`);
+  const key = newKey('agent');
+  await writeHashes(home, AGENT_KEYS, 'agents', [...kept.filter(each => each.name !== name), { name, hash: sha256(key).toString('hex'), made: new Date().toISOString() }]);
+  return key;
+}
+
+/** Takes the named agent's key away. Answers whether it had one. */
+export async function removeAgent(home, name) {
+  const kept = await agentKeys(home);
+  if (!kept.some(each => each.name === name)) return false;
+  await writeHashes(home, AGENT_KEYS, 'agents', kept.filter(each => each.name !== name));
+  return true;
+}
+
+/**
+ * The shared agent key, from before each agent had its own: the key a home's bridge once had for
+ * everything (.ohmmmm/serve-token) becomes it, and that file goes. It is never made anew. Its sessions
+ * name themselves, and cannot take the name of an agent that has its own key. Answers
+ * `{ key, fromOldToken }`, or null when there is none.
+ */
+export async function sharedAgentKey(home) {
+  const held = (await readText(join(home, AGENT_KEY)))?.trim();
+  if (held && KEY_PART.test(held)) return { key: held, fromOldToken: false };
+  const old = (await readText(join(home, OLD_TOKEN)))?.trim();
+  if (!old || !KEY_PART.test(old)) return null;
+  await writePrivate(home, AGENT_KEY, `${old}\n`);
+  await rm(join(home, OLD_TOKEN), { force: true });
+  return { key: old, fromOldToken: true };
+}
+export const removeSharedAgentKey = home => Promise.all([AGENT_KEY, OLD_TOKEN].map(path => rm(join(home, path), { force: true })));
+
+/**
+ * Who each key the bridge accepts is: `who(key)` answers `{ kind: 'app' }`, `{ kind: 'agent', name }`
+ * for an agent's own key, `{ kind: 'agent', shared: true }` for the shared one, or null. The key's
+ * SHA-256 is compared with every key's, in constant time. `reserved` lists the names agents' own keys hold.
+ */
 export async function homeKeys(home) {
-  const agent = (await readText(join(home, AGENT_KEY)))?.trim();
-  const agentHash = agent && KEY_PART.test(agent) ? sha256(agent) : null;
-  const apps = (await appKeys(home)).map(each => Buffer.from(each.hash, 'hex'));
-  return key => {
+  const shared = (await readText(join(home, AGENT_KEY)))?.trim();
+  const keys = [
+    ...(await appKeys(home)).map(each => ({ hash: Buffer.from(each.hash, 'hex'), who: { kind: 'app' } })),
+    ...(await agentKeys(home)).map(each => ({ hash: Buffer.from(each.hash, 'hex'), who: { kind: 'agent', name: each.name } })),
+    ...(shared && KEY_PART.test(shared) ? [{ hash: sha256(shared), who: { kind: 'agent', shared: true } }] : []),
+  ];
+  // Held names, by their lower case: a self-named session may not take one in any case.
+  const reserved = new Map(keys.filter(each => each.who.name).map(each => [each.who.name.toLowerCase(), each.who.name]));
+  const who = key => {
     const presented = sha256(String(key));
     let found = null;
     // Every key is compared, so the time taken says nothing about which one was near.
-    for (const hash of apps) if (timingSafeEqual(presented, hash)) found = 'app';
-    if (agentHash && timingSafeEqual(presented, agentHash) && !found) found = 'agent';
+    for (const each of keys) if (timingSafeEqual(presented, each.hash) && !found) found = each.who;
     return found;
   };
+  return Object.assign(who, { reserved });
 }
 
 /** The link that pairs the app with this bridge. The key rides in the fragment, which a browser never sends to a server. */
@@ -155,13 +205,47 @@ export const pairingLink = (app, url, key) => `${app}/#bridge=${encodeURICompone
 // An agent's name, as the vault's journal and grants write it.
 const agentOf = given => (typeof given === 'string' ? given.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) : '') || 'agent';
 
-// Each MCP session on /vault/mcp: the local tools, for the agent its initialize names.
-const vaultSessions = (vault, DatabaseSync, fixed) => () => {
-  let agent = agentOf(fixed);
+/**
+ * What a session is named. An agent's own key names it; otherwise (the shared agent key, or the app)
+ * its initialize does, or `fixed` (--agent). A name one of the agents' own keys holds is refused to
+ * the shared key: `refused` is then the message to answer with.
+ */
+function sessionName(caller, message, fixed) {
+  if (caller?.name) return { name: caller.name };
+  const name = agentOf(fixed ?? message?.params?.clientInfo?.name);
+  const held = caller?.shared && caller.reserved?.get(name.toLowerCase());
+  if (held) return { name, refused: `${held} has a key of its own. Connect with that key; the shared agent key cannot use its name.` };
+  return { name };
+}
+const refusal = (message, text) => ({ jsonrpc: '2.0', id: message?.id ?? null, error: { code: -32001, message: text } });
+
+// Each MCP session on /vault/mcp: the local tools, for the agent the session is.
+const vaultSessions = (vault, DatabaseSync, fixed, callerOf) => req => {
+  const caller = callerOf(req);
+  let agent = agentOf(caller?.name ?? fixed);
   const handle = mcpServer({ tools: () => createLocalTools({ vault, by: `agent:${agent}`, DatabaseSync }), list: LOCAL_TOOLS, instructions: LOCAL_INSTRUCTIONS });
   return message => {
-    if (message?.method === 'initialize' && !fixed) agent = agentOf(message.params?.clientInfo?.name);
+    if (message?.method === 'initialize') {
+      const named = sessionName(caller, message, fixed);
+      if (named.refused) return refusal(message, named.refused);
+      agent = named.name;
+    }
     return handle(message);
+  };
+};
+
+// Each MCP session on /cortex/mcp, as `cortex serve` makes them, for the agent the session is.
+const cortexSessionsFor = (dir, fixed, callerOf) => req => {
+  const caller = callerOf(req);
+  let inner;
+  return message => {
+    if (!inner) {
+      const named = sessionName(caller, message?.method === 'initialize' ? message : undefined, fixed);
+      if (named.refused) return refusal(message, named.refused);
+      // An agent's own key, or --agent, names every message; otherwise the cortex takes the client's name.
+      inner = cortexSessions(dir, { agent: caller?.name ?? fixed })();
+    }
+    return inner(message);
   };
 };
 
@@ -580,17 +664,23 @@ const isLoopbackOrigin = origin => {
 
 /**
  * The request handler: `layout` is the home (home.mjs), `origins` the app's origins (pages on this
- * machine are allowed too). `agent`, when given, names every MCP session. The home's keys are read
+ * machine are allowed too). `agent`, when given, names every MCP session an agent's own key does not
+ * (the shared agent key's, and the app's). The home's keys are read
  * on each request (`keys`, homeKeys by default), so a browser paired with `ohmmmm pair` is let in
  * without a restart, and a key replaced stops working at once.
  * `config` is the site configuration Publish uses; `env` holds ATPROTO_APP_PASSWORD, read when needed.
  */
 export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home) }) {
   const allowed = origin => origins.includes(origin) || isLoopbackOrigin(origin);
-  const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent), origins, endpoint: '/vault/mcp' });
+  // Who signed each request: its key's kind, the agent it names, and the key's own hash, which binds
+  // an MCP session to the key that opened it.
+  const callers = new WeakMap();
+  const callerOf = req => callers.get(req);
+  const owner = req => callers.get(req)?.owner;
+  const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent, callerOf), origins, endpoint: '/vault/mcp', owner });
   let cortex;
   const cortexReady = async () => (cortex ??= (await stat(join(layout.cortex, 'agents', 'AGENTS.md')).catch(() => null))
-    ? httpTransport({ open: cortexSessions(layout.cortex, { agent }), origins, endpoint: '/cortex/mcp' }) : undefined);
+    ? httpTransport({ open: cortexSessionsFor(layout.cortex, agent, callerOf), origins, endpoint: '/cortex/mcp', owner }) : undefined);
 
   const send = (res, status, body, headers = {}) => {
     if (body === undefined) return res.writeHead(status, headers).end();
@@ -672,10 +762,12 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         });
       }
       const signed = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-      const who = signed ? (await keys())(signed) : null;
+      const known = signed ? await keys() : null;
+      const who = known?.(signed) ?? null;
       if (!who) return send(res, 401, undefined, { 'WWW-Authenticate': 'Bearer' });
+      callers.set(req, { ...who, reserved: known.reserved, owner: createHash('sha256').update(signed).digest('hex') });
       const url = new URL(req.url, 'http://home');
-      if (who === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This is the agent key. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
+      if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
       if (url.pathname === '/vault/mcp') return await vault(req, res);
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
@@ -810,6 +902,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
+          // Who the key that asked is: the app, an agent by the name its key holds, or the shared agent key.
+          you: who.kind === 'app' ? { app: true } : who.name ? { agent: who.name } : { agent: null, shared: true },
           endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish', cortexParts: '/cortex/parts', cortexJournal: '/cortex/journal' },
           publishing: { config: Boolean(await siteSettings(config).catch(() => null)), password: Boolean(env.ATPROTO_APP_PASSWORD) },
         });
@@ -835,6 +929,9 @@ export function listenHome(handler, { port = PORT } = {}) {
 // ---- The commands ----
 //   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--pair] [--new-keys]
 //   ohmmmm pair  [--port 8766] [--app <origin>]…      one more browser, while the bridge runs
+//   ohmmmm agents [list] | add <name> [--new-key] [--port 8766] | remove <name> | remove --shared
+
+const COMMANDS = ['serve', 'pair', 'agents'];
 
 // Makes a key for one more browser and says how to pair it: one link for each app origin.
 async function printPairing(layout, apps, url, { replace = false } = {}) {
@@ -843,14 +940,23 @@ async function printPairing(layout, apps, url, { replace = false } = {}) {
   console.log('The link holds the key for that browser. It is shown only now; your home keeps no copy of it.');
 }
 
+// Who has a key to give agents' tools, in a line or two.
+async function printAgents(layout, port) {
+  const own = await agentKeys(layout.home);
+  const shared = await readText(join(layout.home, AGENT_KEY));
+  const url = `http://127.0.0.1:${port}`;
+  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohmmmm agents add <name>`);
+  if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohmmmm agents remove --shared`);
+}
+
 const options = {
   port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' },
-  pair: { type: 'boolean' }, 'new-keys': { type: 'boolean' }, 'new-token': { type: 'boolean' },
+  pair: { type: 'boolean' }, 'new-keys': { type: 'boolean' }, 'new-token': { type: 'boolean' }, 'new-key': { type: 'boolean' }, shared: { type: 'boolean' },
 };
 
 async function command(args) {
-  const [name, ...rest] = args[0] === 'serve' || args[0] === 'pair' ? args : ['serve', ...args];
-  const { values } = parseArgs({ args: rest, options });
+  const [name, ...rest] = COMMANDS.includes(args[0]) ? args : ['serve', ...args];
+  const { values, positionals } = parseArgs({ args: rest, options, allowPositionals: name === 'agents' });
   const layout = findHome();
   if (!layout) throw new Error(`Run ohmmmm ${name} inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.`);
   const port = values.port === undefined ? PORT : Number(values.port);
@@ -866,20 +972,55 @@ async function command(args) {
     return;
   }
 
+  if (name === 'agents') {
+    const [action = 'list', agent] = positionals;
+    if (action === 'list') {
+      const own = await agentKeys(layout.home);
+      for (const each of own) console.log(`${each.name}\tkey made ${each.made}`);
+      if (!own.length) console.log('No agent has a key of its own yet. Give one: ohmmmm agents add <name>');
+      if (await readText(join(layout.home, AGENT_KEY)) !== undefined) console.log('(the shared agent key)\tagents using it name themselves; remove it with: ohmmmm agents remove --shared');
+      return;
+    }
+    if (action === 'add') {
+      const key = await addAgent(layout.home, agent, { replace: Boolean(values['new-key']) });
+      const url = `http://127.0.0.1:${port}`;
+      console.log(`${agent}'s key, shown only now (your home keeps only its fingerprint):\n\n  ${key}\n`);
+      console.log(`Give it to ${agent} with the bridge's MCP endpoints, ${url}/vault/mcp and ${url}/cortex/mcp, as the header Authorization: Bearer <key>. Every session it opens is ${agent}: your grants for ${agent} apply (ohm vault grant ${agent} …), and the journal says it was ${agent}.`);
+      if (values['new-key']) console.log(`The key ${agent} had before no longer works.`);
+      return;
+    }
+    if (action === 'remove') {
+      if (values.shared) {
+        await removeSharedAgentKey(layout.home);
+        console.log('The shared agent key is gone. Agents still using it are shut out; each needs its own: ohmmmm agents add <name>');
+        return;
+      }
+      if (!agent) throw new Error('Say which agent: ohmmmm agents remove <name>, or --shared for the shared agent key');
+      console.log(await removeAgent(layout.home, agent) ? `${agent}'s key no longer works.` : `${agent} has no key of its own.`);
+      return;
+    }
+    throw new Error('ohmmmm agents [list] | add <name> [--new-key] | remove <name> | remove --shared');
+  }
+
   const sqlite = await import('node:sqlite');
   const renew = Boolean(values['new-keys'] || values['new-token']);
-  const agentHeld = await agentKey(layout.home, { replace: renew });
+  if (renew) {
+    await removeSharedAgentKey(layout.home);
+    await writeHashes(layout.home, AGENT_KEYS, 'agents', []);
+  }
+  const shared = renew ? null : await sharedAgentKey(layout.home);
   const paired = renew ? 0 : (await appKeys(layout.home)).length;
   const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
   const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
     .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
-  const url = `http://127.0.0.1:${server.address().port}`;
+  const at = server.address().port;
+  const url = `http://127.0.0.1:${at}`;
   console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
-  if (agentHeld.fromOldToken) console.log('Agents now have a key of their own: the key this home used for everything is now only theirs, and reaches only the vault\'s and the cortex\'s tools. Pair the app again with the link below.');
-  if (renew) console.log('New keys: every browser paired before, and every agent given the old agent key, is shut out.');
+  if (shared?.fromOldToken) console.log('The key this home used for everything now opens only agents\' tools: it is the shared agent key. Pair the app again with the link below.');
+  if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohmmmm agents add <name>');
   if (renew || values.pair || paired === 0) await printPairing(layout, apps, url, { replace: renew });
-  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${server.address().port === PORT ? '' : ` --port ${server.address().port}`}`);
-  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, with Authorization: Bearer <the agent key in ${join(layout.home, AGENT_KEY)}>. It reaches only those.`);
+  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${at === PORT ? '' : ` --port ${at}`}`);
+  await printAgents(layout, at);
   const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
   if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
   else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
@@ -888,7 +1029,7 @@ async function command(args) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sqlite = await import('node:sqlite').catch(() => null);
-  if (!sqlite && process.argv[2] !== 'pair') {
+  if (!sqlite && !['pair', 'agents'].includes(process.argv[2])) {
     if (process.execArgv.includes('--experimental-sqlite')) {
       console.error('This Node has no SQLite. Use Node 22.13 or newer.');
       process.exit(1);

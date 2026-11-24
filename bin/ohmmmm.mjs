@@ -9,6 +9,7 @@
 //                            the vault's and the cortex's tools over MCP, and images by CID
 //                            (home/serve.mjs, docs/serve.md)
 //   pair [--port 8766]       a link that pairs one more browser with the bridge
+//   agents [list] | add <name> | remove <name>   each agent's own key for the bridge
 //   cortex <command> …       the cortex's command (cortex/bin/cortex.mjs)
 //   anything else            the vault's command, `ohm` (vault/bin/ohm.mjs): `vault index`, `publish`…
 //
@@ -45,7 +46,7 @@ export function route(args) {
   const [command, ...rest] = args;
   if (command === 'init' || command === 'where') return { home: command, rest };
   if (command === 'cortex') return { program: CORTEX_COMMAND, args: rest };
-  if (command === 'serve' || command === 'pair') return { program: SERVE_COMMAND, args: [command, ...rest], flags: ['--no-warnings=ExperimentalWarning'] };
+  if (['serve', 'pair', 'agents'].includes(command)) return { program: SERVE_COMMAND, args: [command, ...rest], flags: ['--no-warnings=ExperimentalWarning'] };
   return { program: VAULT_COMMAND, args };
 }
 
@@ -64,7 +65,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const layout = findHome(rest[0] ?? process.cwd());
       if (!layout) { console.error('Not in a home. Make one with: init <handle>'); process.exitCode = 1; } else console.log(JSON.stringify(layout, null, 2));
     } else {
-      console.log('init <handle> [parent] | where [folder] | serve | pair | cortex <command> | any vault command');
+      console.log('init <handle> [parent] | where [folder] | serve | pair | agents | cortex <command> | any vault command');
       process.exitCode = 1;
     }
   } catch (problem) {

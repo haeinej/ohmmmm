@@ -151,7 +151,7 @@ export const UNPAIRED = "This browser's key no longer opens your home, so this i
 /** Reads the home through the bridge, and gives the workspace its working copy. */
 export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, onChange = () => {} }: LocalOptions = {}) {
   const answer = await bridgeFetch("/vault/files", {}, bridge)
-  // A key the bridge does not take (replaced, or the agent key) opens nothing of the person's.
+  // A key the bridge does not take (replaced, or an agent's) opens nothing of the person's.
   if (answer.status === 401 || answer.status === 403) throw new DOMException(UNPAIRED, "NotAllowedError")
   if (!answer.ok) throw new DOMException(`Your home did not answer (HTTP ${answer.status}).`, "NetworkError")
   const listed = await answer.json() as { home: string; files: { path: string; text: string; version: string }[] }
