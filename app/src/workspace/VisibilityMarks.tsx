@@ -1,7 +1,8 @@
 // The visibility pills show each block's layer. Widening access asks for approval, and an agent's move
 // (the visibility.move tool) always does, wider or narrower. On the home on this computer a move rewrites
-// the block's file (docs/serve.md); public goes through Publish. The tree's rows are ohm-ui's, so the
-// pills sit over them, measured from the rows.
+// the block's file (docs/serve.md); Everyone opens Publish (PublishDialog), and taking a public block back
+// first takes its post down. Publishing is the person's: no tool does it. The tree's rows are ohm-ui's,
+// so the pills sit over them, measured from the rows.
 import { useEffect, useLayoutEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import { CheckIcon, GlobeIcon, LockIcon, UsersIcon } from "lucide-react"
@@ -14,6 +15,7 @@ import { blockVersion, getSource, isBlock, byId, docIdOf, titleOf, type Doc, typ
 import { visibilityMove } from "@/data/source"
 import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
+import { PublishDialog, TakeDownDialog } from "./PublishDialog"
 import { setVisibility, useWorkspace } from "./store"
 import { withAgent } from "./tools"
 
@@ -27,7 +29,7 @@ type Mark = { id: string; top: number; height: number }
 /** A move waiting for the person: theirs, or an agent's, which carries its reason and the tool's answer. */
 type Asking = { doc: Doc; to: Visibility; agent?: { why?: string; answer: (approved: boolean) => void } }
 
-export const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish (ohm publish), which is not in the app yet."
+export const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish, which only the person does: they choose Everyone on the block and approve its plan."
 /** Whether the workspace is the home on this computer, whose moves rewrite its files. */
 const onThisComputer = () => "home" in getSource()
 
@@ -50,6 +52,8 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
   const [marks, setMarks] = useState<Mark[]>([])
   const [asking, setAsking] = useState<Asking | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState<Doc | null>(null)
+  const [takingDown, setTakingDown] = useState<{ doc: Doc; to: "private" | "friends" } | null>(null)
   const local = onThisComputer()
 
   // The control's tools, while it is on screen (app/AGENTS.md rule 4). A move by an agent always asks.
@@ -111,8 +115,10 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
   }, [container, showVisibility, rev])
 
   const change = (doc: Doc, to: Visibility) => {
+    // Everyone again, on a public block: its post is updated to the block as it is now.
+    if (local && to === "public") return setPublishing(doc)
     if (to === doc.visibility) return
-    if (local && (to === "public" || doc.visibility === "public")) return notify({ message: PUBLISH, tone: "info" })
+    if (local && doc.visibility === "public") return setTakingDown({ doc, to: to === "friends" ? "friends" : "private" })
     if (openness[to] > openness[doc.visibility]) return setAsking({ doc, to })
     setVisibility(doc.id, to)
     notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" })
@@ -149,8 +155,8 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
                 {(["private", "friends", "public"] as Visibility[]).map(o => (
-                  <DropdownMenuItem key={o} disabled={local && (o === "public" || v === "public") && o !== v} onClick={() => { setOpenId(null); change(doc, o) }} className="flex items-center gap-2">
-                    <Icon icon={VISIBILITY[o].icon} size="sm" /><span className="flex-1">{local && o === "public" && v !== "public" ? "Everyone · through Publish" : VISIBILITY[o].label}</span>
+                  <DropdownMenuItem key={o} onClick={() => { setOpenId(null); change(doc, o) }} className="flex items-center gap-2">
+                    <Icon icon={VISIBILITY[o].icon} size="sm" /><span className="flex-1">{!local ? VISIBILITY[o].label : o === "public" ? (v === "public" ? "Everyone · Update…" : "Everyone · Publish…") : v === "public" ? `${VISIBILITY[o].label} · Take down…` : VISIBILITY[o].label}</span>
                     <Icon icon={CheckIcon} size="sm" className={cn(o !== v && "invisible")} />
                   </DropdownMenuItem>
                 ))}
@@ -162,6 +168,9 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
         </div>
       )
     })}
+
+    {publishing ? <PublishDialog doc={publishing} onClose={() => setPublishing(null)} /> : null}
+    {takingDown ? <TakeDownDialog doc={takingDown.doc} to={takingDown.to} onClose={() => setTakingDown(null)} /> : null}
 
     <Dialog open={!!asking} onOpenChange={o => !o && answer(false)}>
       <DialogContent className="sm:max-w-sm">

@@ -15,9 +15,9 @@ export async function rpc(origin, endpoint, { query, body, token, mime = 'applic
   return { response, data: await response.json().catch(() => ({})) };
 }
 
-// Sign in to the configured account with an app password and return its access token.
-export async function signIn(origin, did) {
-  const password = process.env.ATPROTO_APP_PASSWORD;
+// Sign in to the configured account with an app password and return its access token. The password
+// is ATPROTO_APP_PASSWORD unless the caller holds it (`ohmmmm serve`, from its own environment).
+export async function signIn(origin, did, password = process.env.ATPROTO_APP_PASSWORD) {
   if (!password) throw new Error('Set ATPROTO_APP_PASSWORD for the account in your feed config');
   const session = await rpc(origin, 'com.atproto.server.createSession', { body: { identifier: did, password } });
   const token = session.data.accessJwt;

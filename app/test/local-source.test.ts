@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { blobCid } from "../../vault/vault/core.mjs"
-import { withVisibility } from "../../vault/vault/visibility.mjs"
+import { publishedLayer, withVisibility } from "../../vault/vault/visibility.mjs"
 import { readProperties, splitFile } from "../../vault/vault/file.mjs"
 import { createLocalSource, fileId, mergeFile } from "../src/data/local-source"
 import { byId, bySlug, channelRecords, demoJournal } from "../src/data/workspace-data"
@@ -37,6 +37,31 @@ function fakeHome(initial: Record<string, string>, journal: { events: unknown[];
       const text = withVisibility(path, disk.get(path)!, to)
       disk.set(path, text)
       return json(200, { path, text, version: await version(text), layer: to })
+    }
+    // Publishing, as home/serve.mjs answers it: a plan whose confirm names its label, and the file marked after.
+    if (url.pathname === "/vault/publish/plan") {
+      const { path, label = "Notes", sublabel = "" } = JSON.parse(String(init.body)) as { path: string; label?: string; sublabel?: string }
+      const text = disk.get(path)!
+      const slug = path.split("/").at(-1)!.replace(/\.md$/, "")
+      return json(200, {
+        path, version: await version(text), layer: /visibility: public/.test(text) ? "public" : "private", update: false, slug, label, sublabel, labelSaved: false,
+        address: `https://example.test/posts/${label.toLowerCase()}/${slug}`, attachments: [], notes: [], problems: [], needs: [], ready: true, confirm: `confirm-${label}`,
+      })
+    }
+    if (url.pathname === "/vault/publish") {
+      const { path, label, confirm } = JSON.parse(String(init.body)) as { path: string; label: string; confirm: string }
+      if (headers["If-Match"]?.replace(/"/g, "") !== await version(disk.get(path)!)) return json(412, { error: "The file changed since it was read" })
+      if (confirm !== `confirm-${label}`) return json(409, { error: "It changed since you saw the plan. Look at it again before publishing." })
+      const text = publishedLayer(path, disk.get(path)!, "public")
+      disk.set(path, text)
+      return json(200, { path, address: `https://example.test/posts/${label.toLowerCase()}/walk`, update: false, files: [{ path, text, version: await version(text) }] })
+    }
+    if (url.pathname === "/vault/unpublish") {
+      const { path, to } = JSON.parse(String(init.body)) as { path: string; to: string }
+      if (headers["If-Match"]?.replace(/"/g, "") !== await version(disk.get(path)!)) return json(412, { error: "The file changed since it was read" })
+      const text = publishedLayer(path, disk.get(path)!, to)
+      disk.set(path, text)
+      return json(200, { path, text, version: await version(text), layer: to, removed: true, address: "https://example.test/posts/notes/walk" })
     }
     if (url.pathname === "/vault/requests") return json(200, { requests: requests.filter(each => each.status === "waiting") })
     const deciding = /^\/vault\/requests\/(.+)$/.exec(url.pathname)
@@ -291,4 +316,33 @@ test("who sees a block moves in its file once the person approves; public is Pub
   assert.equal(bySlug("no-id")!.visibility, "friends")
   assert.equal(props(disk.get("notes/no-id.md")!).visibility, "friends")
   assert.deepEqual(await source.requests(), [])
+})
+
+test("publishing goes through the plan the person saw, and the file is marked by the bridge's answer", async t => {
+  const { disk, calls, source, problems } = await withHome(t)
+  const ref = { id: TID, layer: "private" as const, store: "block" as const }
+  const draft = await source.planPublish(ref)
+  assert.deepEqual([draft.ready, draft.label, draft.address], [true, "Notes", "https://example.test/posts/notes/walk"])
+  const walks = await source.planPublish(ref, { label: "Walks" })
+  assert.equal(walks.address, "https://example.test/posts/walks/walk")
+
+  // Changed after the plan: the plan is stale, and nothing is published.
+  open(TID, "edit")
+  autosave(TID, { body: "Yanaka at night." })
+  await assert.rejects(source.publishBlock(ref, walks), /changed since you saw the plan/)
+  assert.ok(!calls.includes("POST /vault/publish"))
+
+  const fresh = await source.planPublish(ref, { label: "Walks" })
+  const done = await source.publishBlock(ref, fresh)
+  assert.equal(done.address, "https://example.test/posts/walks/walk")
+  assert.equal(byId(TID)!.visibility, "public", "the workspace reads the file the bridge marked")
+  assert.equal(props(disk.get("notes/walk.md")!).visibility, "public")
+  // The working copy and the disk agree, so what comes next is sent over the right version.
+  assert.equal(source.readBlock({ ...ref, layer: "public" }).text, disk.get("notes/walk.md"))
+  assert.deepEqual(problems, [])
+
+  const down = await source.unpublishBlock({ ...ref, layer: "public" }, "friends")
+  assert.deepEqual(down, { removed: true, address: "https://example.test/posts/notes/walk" })
+  assert.equal(byId(TID)!.visibility, "friends")
+  assert.equal(props(disk.get("notes/walk.md")!).visibility, "friends")
 })

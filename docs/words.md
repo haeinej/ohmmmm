@@ -18,6 +18,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 - **Connection:** a link the content shows: a channel contains a block, a block links to, embeds or mentions something, a block is from a source. Cortex calls the same thing **evidence** when it reads it; the vault draws it, a model never does.
 - **Node:** any file the vault reads as a thing: a block, a channel, an entity or a source (node keys such as `block:<id>`).
 - **Visibility:** `public`, `friends` or `private`, on each block; it chooses the **layer**, and so the store.
+- **Publish:** making a block a post, only by the person after they see its **plan** (address, label, images). From the home folder the bridge does it with the person's **app password**, which stays on their computer. **Take down** removes the post first, then moves the block. The **label** and **sublabel** place a post on the site (`/posts/<label>/<sublabel>/<slug>`); a channel keeps its own as `site` ([docs/serve.md](serve.md)).
 - **Friends layer**, **private layer:** blocks readable by the vault service and shared with chosen DIDs; blocks the service stores only as ciphertext.
 - **Journal** (`.vault/journal.jsonl`), **index** (`.vault/index.sqlite`), **roots** (`.vault/config.json`).
 - **Version** and **rev:** a kept state of a block. `version` names its exact ciphertext (for compare-and-swap); `rev` names the kept version and never changes, so history points at it.

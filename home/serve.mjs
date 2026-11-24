@@ -10,6 +10,8 @@
 //   /vault/rename   POST a rename or move of a block or channel, as the person, rewriting what used the old name
 //   /vault/visibility  POST a block's move between Only you and Friends, as the person
 //   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
+//   /vault/publish     POST /plan shows what publishing a block would write; POST publishes it, as the person
+//   /vault/unpublish   POST takes a published block's post down, then moves the block back, as the person
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -20,6 +22,10 @@
 // MCP sessions are agents: each is named by its client, and the vault's grants decide what it may
 // change. /media and /vault/file are the person, through the app (app/src/data/local-source.ts): their
 // writes are journaled `by: me`, `via: editor`, and every version is kept, so any of it can be restored.
+//
+// Publishing signs in to the person's PDS with ATPROTO_APP_PASSWORD from this process's environment,
+// for the account the home's site configuration names (<home>/ohm.jsonc, or --config). The password
+// never leaves this process: no answer carries it, and the app never sees it. No agent tool publishes.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
@@ -30,18 +36,24 @@ import { fileURLToPath } from 'node:url';
 import { cortexSessions, httpTransport } from '../cortex/src/http.mjs';
 import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
+import { pdsConfig, webUrl } from '../vault/feed/pds.mjs';
+import { signIn } from '../vault/scripts/rpc.mjs';
 import { blobCid, FILE_TYPES, isSlug, VaultProblem } from '../vault/vault/core.mjs';
-import { isPostId, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
+import { isPostId, setProperty, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
 import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
-import { isChannelPath, newNodeId, readNode, SOURCES } from '../vault/vault/node.mjs';
+import { CHANNEL_FILE, isChannelPath, newNodeId, nodeFile, readNode, SOURCES } from '../vault/vault/node.mjs';
+import { blockPost, publishedAddresses } from '../vault/vault/publish-block.mjs';
+import { memoryKv, ownStores, pdsStore } from '../vault/vault/stores.mjs';
+import { createVault } from '../vault/vault/vault.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
-import { decideRequest, layerOf, readRequests, withVisibility } from '../vault/vault/visibility.mjs';
+import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
 export const TOKEN = '.ohmmmm/serve-token';
+export const SITE_CONFIG = 'ohm.jsonc';
 export const MAX_IMAGE = 20 * 1024 * 1024;
 export const IMAGE_TYPES = { 'image/avif': 'avif', 'image/gif': 'gif', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]', '::1'];
@@ -314,6 +326,184 @@ export async function moveAsPerson({ vault, path, to, replaces, asked, why }) {
   return { path, text, version: hash, layer: to, was };
 }
 
+// ---- Publishing: a block to the person's PDS ----
+
+const fail = (message, status) => Object.assign(new Error(message), { status });
+
+/**
+ * The site configuration Publish uses, as `ohm configure` writes it: the account (ATPROTO_DID), its
+ * PDS (ATPROTO_PDS_ORIGIN) and the website (SITE_ORIGIN). Null when the file is not there.
+ */
+export async function siteSettings(file) {
+  const text = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  if (text === undefined) return null;
+  let vars;
+  try { vars = JSON.parse(text)?.vars ?? {}; } catch { throw new VaultProblem(`${file} is not JSON. Make it again with ohm configure.`); }
+  let account;
+  try { account = pdsConfig(vars); } catch (problem) { throw new VaultProblem(`${file}: ${problem.message}`); }
+  const site = webUrl(vars.SITE_ORIGIN);
+  if (!site) throw new VaultProblem(`${file}: set SITE_ORIGIN to your website's address.`);
+  return { did: account.did, origin: account.origin, collection: account.collection, site };
+}
+
+// What publishing still needs on this computer, in words for the person.
+function needsOf({ settings, config, password }) {
+  const needs = [];
+  if (!settings) needs.push({ what: 'site', say: `Publishing needs your site's configuration in your home. Make it with: ohm configure --site https://… --handle … > ${config}` });
+  if (!password) needs.push({ what: 'password', say: 'Start ohmmmm serve with ATPROTO_APP_PASSWORD set to an app password for your account. It stays on this computer.' });
+  return needs;
+}
+
+// The vault's own stores for one publish: public is the person's PDS; the others are not touched.
+const publicVault = ({ did, origin, collection, site }, { get, token } = {}) => createVault({
+  collection,
+  stores: { public: pdsStore({ did, origin, collection, site, get, token }), ...ownStores(memoryKv()) },
+});
+
+// The block, the vault around it, and what is published of it now.
+async function readForPublish({ vault, path, settings, get, key }) {
+  if (!editablePath(path)) throw fail('Give the block as its file\'s path in the vault', 400);
+  const { files, paths } = await readVaultFolder(vault, { open: at => inVault(vault, at) });
+  const held = files.find(file => file.path === path);
+  if (!held) throw fail('There is no such file any more', 412);
+  const node = readNode(path, held.text)?.node;
+  if (node?.type !== 'block') throw new VaultProblem('Only a block can be published.');
+  const recordKey = node.id ?? key;
+  let published = null;
+  if (settings && node.id) published = await publicVault(settings, { get }).find(node.id);
+  if (published && published.visibility !== 'public') published = null;
+  const addresses = publishedAddresses((await readEvents(vault)).events);
+  return { files, paths, text: held.text, version: await versionOf(held.text), node, key: recordKey, published, addresses };
+}
+
+// Signs in once, when a write first needs it, with the app password from this process's environment.
+const signedIn = ({ origin, did }, password) => {
+  let session;
+  return async () => (session ??= await signIn(origin, did, password).catch(problem => { throw new VaultProblem(problem.message); }));
+};
+
+const readBytes = vault => async path => new Uint8Array(await readFile(await inVault(vault, path)));
+
+/**
+ * What publishing a block would do, for the dialog the person approves: its address, its label (the
+ * channel's by default; `label` and `sublabel` try others), its images, what changes on the way, what
+ * stops it, and what this computer still needs (`needs`). Writes nothing.
+ */
+export async function planPublish({ vault, path, label, sublabel, config, password = process.env.ATPROTO_APP_PASSWORD, get = fetch }) {
+  const settings = await siteSettings(config);
+  const read = await readForPublish({ vault, path, settings, get });
+  const post = await blockPost({
+    files: read.files, paths: read.paths, path, read: readBytes(vault), label, sublabel,
+    held: read.published?.record, addresses: read.addresses, ...(settings ?? {}),
+  });
+  const needs = needsOf({ settings, config, password });
+  return {
+    path, version: read.version, layer: layerOf(path, read.text), update: Boolean(read.published),
+    ...(post.title ? { title: post.title } : {}), slug: post.slug, label: post.label, sublabel: post.sublabel, labelSaved: post.labelSaved,
+    ...(post.address ? { address: post.address, form: post.form } : {}),
+    ...(read.published ? { publishedAt: read.published.record.publishedAt } : {}),
+    attachments: post.attachments.map(({ id, path: at, mime, size }) => ({ id, path: at, mime, size })),
+    notes: post.notes, problems: post.problems, needs,
+    ready: Boolean(post.confirm) && !needs.length, ...(post.confirm ? { confirm: post.confirm } : {}),
+  };
+}
+
+// Writes a file the publish changed, keeping both versions; answers the journal event for it.
+async function writePublished(vault, path, before, text, extra) {
+  const file = await inVault(vault, path);
+  const kept = before === undefined ? undefined : await keep(vault, before);
+  const hash = await keep(vault, text);
+  await mkdir(dirname(file), { recursive: true });
+  const temp = join(dirname(file), `.publish-${randomUUID()}`);
+  try {
+    await writeFile(temp, text, { flag: 'wx' });
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
+  return { event: { op: before === undefined ? 'added' : 'changed', root: 'vault', path, by: 'me', via: 'publish', ...extra, ...(kept ? { before: kept } : {}), hash }, file: { path, text, version: hash } };
+}
+
+/**
+ * Publishes a block as the person, over the version read (`replaces`) and only as the plan they saw
+ * (`confirm`, from planPublish). The post goes to their PDS first, under the block's ID (one is given
+ * and written into the file when it has none); then the file is marked public, and the label is saved
+ * on the block's channel when it is new. Journaled `changed` (`via: publish`, `layer`, `was`) and
+ * `published` (`key`, `address`). An update keeps the post's address, label and date.
+ */
+export async function publishAsPerson({ vault, path, replaces, label, sublabel, confirm, config, password = process.env.ATPROTO_APP_PASSWORD, get = fetch, token }) {
+  const settings = await siteSettings(config);
+  const needs = needsOf({ settings, config, password });
+  if (needs.length) throw new VaultProblem(needs.map(need => need.say).join(' '));
+  const read = await readForPublish({ vault, path, settings, get, key: newNodeId() });
+  if (read.version !== replaces) throw Object.assign(fail('The file changed since it was read', 412), { version: read.version });
+  const post = await blockPost({
+    files: read.files, paths: read.paths, path, read: readBytes(vault), label, sublabel, key: read.key,
+    held: read.published?.record, addresses: read.addresses, ...settings,
+  });
+  if (post.problems.length) throw new VaultProblem(post.problems.join('\n'));
+  if (post.confirm !== confirm) throw new VaultProblem('It changed since you saw the plan. Look at it again before publishing.');
+  const written = await publicVault(settings, { get, token: token ?? signedIn(settings, password) }).save({
+    key: read.key, record: post.record, visibility: 'public', files: post.files,
+    ...(read.published ? { version: read.published.version } : {}),
+  });
+
+  // The file: its ID when it had none, and marked public.
+  const was = layerOf(path, read.text);
+  const at = new Date().toISOString();
+  const events = [];
+  const changed = [];
+  let text = read.node.id ? read.text : setProperty(read.text, 'id', read.key);
+  text = publishedLayer(path, text, 'public');
+  if (text !== read.text) {
+    const done = await writePublished(vault, path, read.text, text, { layer: 'public', was });
+    events.push({ at, ...done.event });
+    changed.push(done.file);
+  }
+  // The label, kept on the channel for next time.
+  const home = read.node.home;
+  if (home && !read.published && !post.labelSaved && post.label) {
+    const channel = `${home}/${CHANNEL_FILE}`;
+    const before = read.files.find(file => file.path === channel)?.text;
+    const site = { label: post.label, ...(post.sublabel ? { sublabel: post.sublabel } : {}) };
+    const after = before === undefined
+      ? nodeFile({ type: 'channel', path: home, order: [], description: '', properties: {}, site, id: newNodeId() }).text
+      : setProperty(before, 'site', site);
+    if (after !== before) {
+      const done = await writePublished(vault, channel, before, after, {});
+      events.push({ at, ...done.event });
+      changed.push(done.file);
+    }
+  }
+  const last = changed.find(file => file.path === path)?.version ?? read.version;
+  events.push({ at, op: 'published', root: 'vault', path, by: 'me', via: 'publish', key: read.key, address: post.address, record: written.version, hash: last });
+  await appendEvents(vault, events);
+  return { path, key: read.key, address: post.address, update: Boolean(read.published), files: changed };
+}
+
+/**
+ * Takes a published block's post down from the person's PDS, then moves the block to `to` (private or
+ * friends), over the version read. Journaled `unpublished` and `changed` (`via: publish`). Copies
+ * others made of the post are not recalled. A block marked public with no post is only moved.
+ */
+export async function unpublishAsPerson({ vault, path, replaces, to, config, password = process.env.ATPROTO_APP_PASSWORD, get = fetch, token }) {
+  if (!['private', 'friends'].includes(to)) throw fail('Say where the block goes: private or friends', 400);
+  const settings = await siteSettings(config);
+  const needs = needsOf({ settings, config, password });
+  if (needs.length) throw new VaultProblem(needs.map(need => need.say).join(' '));
+  const read = await readForPublish({ vault, path, settings, get });
+  if (read.version !== replaces) throw Object.assign(fail('The file changed since it was read', 412), { version: read.version });
+  if (layerOf(path, read.text) !== 'public') throw new VaultProblem('This block is not public.');
+  if (read.published) await publicVault(settings, { get, token: token ?? signedIn(settings, password) }).remove(read.key, { version: read.published.version });
+  const at = new Date().toISOString();
+  const events = [];
+  if (read.published) events.push({ at, op: 'unpublished', root: 'vault', path, by: 'me', via: 'publish', key: read.key, address: read.published.record.canonicalUrl, hash: read.version });
+  const done = await writePublished(vault, path, read.text, publishedLayer(path, read.text, to), { layer: to, was: 'public' });
+  events.push({ at, ...done.event });
+  await appendEvents(vault, events);
+  return { ...done.file, layer: to, removed: Boolean(read.published), ...(read.published ? { address: read.published.record.canonicalUrl } : {}) };
+}
+
 // ---- The bridge ----
 
 const digest = value => createHash('sha256').update(value).digest();
@@ -327,8 +517,9 @@ const isLoopbackOrigin = origin => {
 /**
  * The request handler: `layout` is the home (home.mjs), `token` the home's token, `origins` the
  * app's origins (pages on this machine are allowed too). `agent`, when given, names every MCP session.
+ * `config` is the site configuration Publish uses; `env` holds ATPROTO_APP_PASSWORD, read when needed.
  */
-export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent }) {
+export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env }) {
   if (!token) throw new Error('The bridge needs the home\'s token.');
   const expected = digest(`Bearer ${token}`);
   const allowed = origin => origins.includes(origin) || isLoopbackOrigin(origin);
@@ -358,6 +549,21 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
     req.on('end', () => (size > limit ? fail(Object.assign(new Error('Too large'), { tooLarge: true })) : done(Buffer.concat(chunks))));
     req.on('error', fail);
   });
+
+  const json = async (req, limit) => {
+    try { return JSON.parse((await body(req, limit)).toString('utf8')); } catch { return undefined; }
+  };
+  const versionAsked = req => {
+    const match = req.headers['if-match'];
+    return match === undefined ? undefined : String(match).replace(/^W\//, '').replace(/^"|"$/g, '');
+  };
+  // A refusal with its status, or the PDS not answering; anything else is the handler's to answer.
+  const answered = (res, problem) => {
+    if (problem.status) return send(res, problem.status, { error: problem.message, ...(problem.version !== undefined ? { version: problem.version } : {}) });
+    if (problem.name === 'TimeoutError' || (problem.name === 'TypeError' && /fetch/i.test(problem.message))) return said(res, 502, 'Your PDS did not answer. Try again in a moment.');
+    throw problem;
+  };
+  const words = (value, most) => value === undefined || (typeof value === 'string' && value.length <= most && !value.includes('\n'));
 
   async function putMedia(req, res, cid, query) {
     const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
@@ -463,6 +669,35 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         });
         return send(res, 200, done);
       }
+      if (url.pathname === '/vault/publish/plan' && req.method === 'POST') {
+        const asked = await json(req, 16 * 1024);
+        if (!asked || typeof asked.path !== 'string' || !words(asked.label, 100) || !words(asked.sublabel, 100)) return said(res, 400, 'A plan is { path, label?, sublabel? }');
+        try {
+          return send(res, 200, await planPublish({ vault: layout.vault, path: asked.path, label: asked.label, sublabel: asked.sublabel, config, password: env.ATPROTO_APP_PASSWORD }));
+        } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/vault/publish' && req.method === 'POST') {
+        const replaces = versionAsked(req);
+        if (replaces === undefined) return said(res, 428, 'Say which version you read: If-Match: "<version>"');
+        const asked = await json(req, 16 * 1024);
+        if (!asked || typeof asked.path !== 'string' || typeof asked.confirm !== 'string' || !words(asked.label, 100) || !words(asked.sublabel, 100)) return said(res, 400, 'A publish is { path, confirm, label?, sublabel? }, confirm from the plan the person approved');
+        try {
+          return send(res, 200, await withCollectLock(layout.vault, DatabaseSync, () => publishAsPerson({
+            vault: layout.vault, path: asked.path, replaces, label: asked.label, sublabel: asked.sublabel, confirm: asked.confirm, config, password: env.ATPROTO_APP_PASSWORD,
+          })));
+        } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/vault/unpublish' && req.method === 'POST') {
+        const replaces = versionAsked(req);
+        if (replaces === undefined) return said(res, 428, 'Say which version you read: If-Match: "<version>"');
+        const asked = await json(req, 4 * 1024);
+        if (!asked || typeof asked.path !== 'string' || typeof asked.to !== 'string') return said(res, 400, 'A take-down is { path, to }, to being private or friends');
+        try {
+          return send(res, 200, await withCollectLock(layout.vault, DatabaseSync, () => unpublishAsPerson({
+            vault: layout.vault, path: asked.path, replaces, to: asked.to, config, password: env.ATPROTO_APP_PASSWORD,
+          })));
+        } catch (problem) { return answered(res, problem); }
+      }
       if (url.pathname === '/vault/files' && req.method === 'GET') {
         const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });
         return send(res, 200, { home: layout.handle, files: await Promise.all(files.map(async file => ({ ...file, version: await versionOf(file.text) }))) });
@@ -504,10 +739,11 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish' },
+          publishing: { config: Boolean(await siteSettings(config).catch(() => null)), password: Boolean(env.ATPROTO_APP_PASSWORD) },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /vault/publish, /vault/unpublish and /media/<cid>');
     } catch (problem) {
       // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
       if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');
@@ -526,7 +762,7 @@ export function listenHome(handler, { port = PORT } = {}) {
 }
 
 // ---- The command ----
-//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--new-token]
+//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--new-token]
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sqlite = await import('node:sqlite').catch(() => null);
@@ -541,7 +777,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const { values } = parseArgs({
       args: process.argv.slice(2).filter(arg => arg !== 'serve'),
-      options: { port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, 'new-token': { type: 'boolean' } },
+      options: { port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' }, 'new-token': { type: 'boolean' } },
     });
     const layout = findHome();
     if (!layout) throw new Error('Run ohmmmm serve inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.');
@@ -549,12 +785,17 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port is a port number');
     const apps = values.app?.length ? values.app.map(app => new URL(app).origin) : [APP];
     const token = await homeToken(layout.home, { replace: Boolean(values['new-token']) });
-    const server = await listenHome(homeBridge({ layout, token, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent }), { port })
+    const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
+    const server = await listenHome(homeBridge({ layout, token, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
       .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
     const url = `http://127.0.0.1:${server.address().port}`;
     console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
     for (const app of apps) console.log(`Open this once to connect the app: ${pairingLink(app, url, token)}`);
     console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, with Authorization: Bearer <the token in ${join(layout.home, TOKEN)}>.`);
+    const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
+    if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
+    else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
+    else if (settings) console.log(`Publishing to ${settings.site}, as ${settings.did}, when you approve it in the app.`);
   } catch (problem) {
     console.error(problem.message);
     process.exitCode = 1;

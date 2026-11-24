@@ -7,6 +7,7 @@ Three parts and a thin layer over them. Read [README.md](README.md) first, then 
 - **One set of words:** [docs/words.md](docs/words.md). Use a word that already names a thing; if the two parts disagree, settle it there.
 - The vault is canonical; the cortex never copies what a block says, and never writes to the vault.
 - **The bridge answers only this machine.** `ohmmmm serve` ([home/serve.mjs](home/serve.mjs), [docs/serve.md](docs/serve.md)) binds 127.0.0.1, checks the Host header, and needs the home's token on every request but a preflight. Do not add a way to bind elsewhere or to skip the token.
+- **Only the person publishes.** The bridge's publish routes write to the person's PDS with `ATPROTO_APP_PASSWORD` from its own environment, only with the `confirm` of a plan the app showed. Never return the password, never send it to the browser, and never give an agent (MCP or WebMCP) a tool that publishes or takes a post down.
 - Keys for the private layer live in the account app (ohm-onboarding `packages/keys`), not here. The vault service stores private blocks only as ciphertext.
 - Run `npm test` at the root before handing work back.
 - Install the app with `npm ci --prefix app`. Root tests run its typecheck and build. Keep its package and lockfile under `app/`.
