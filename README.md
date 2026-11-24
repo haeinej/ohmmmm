@@ -44,6 +44,7 @@ npx github:haeinej/ohmmmm vault index               # the vault finds ./vault by
 npx github:haeinej/ohmmmm cortex status             # the cortex finds ./cortex, and reads ./vault
 npx github:haeinej/ohmmmm serve                     # the bridge for the app and local agents: open the link it prints
 npx github:haeinej/ohmmmm pair                      # a link that pairs one more browser
+npx github:haeinej/ohmmmm browsers                  # the paired browsers; browsers forget <id> shuts one out
 npx github:haeinej/ohmmmm agents add claude-code    # a key of its own for an agent, shown once
 ```
 

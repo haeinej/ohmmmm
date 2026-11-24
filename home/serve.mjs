@@ -12,6 +12,8 @@
 //   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
 //   /vault/publish     POST /plan shows what publishing a block would write; POST publishes it, as the person
 //   /vault/unpublish   POST takes a published block's post down, then moves the block back, as the person
+//   /vault/keys        GET the paired browsers and the agents with keys; POST /self names this browser;
+//                      DELETE /<id> forgets one browser
 //   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
 //   /               what this bridge serves
 //
@@ -69,6 +71,7 @@ import { findHome } from './home.mjs';
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
 export const AGENT_KEYS = '.ohmmmm/agent-keys.json';
+export const KEYS_LOCK = '.ohmmmm/keys.lock';
 export const APP_KEYS = '.ohmmmm/app-keys.json';
 // The shared agent key, from before each agent had its own; it is never made anew.
 export const AGENT_KEY = '.ohmmmm/agent-key';
@@ -114,7 +117,30 @@ async function readHashes(home, path, field, list) {
 }
 const writeHashes = (home, path, field, entries) => writePrivate(home, path, `${JSON.stringify({ [field]: entries }, null, 2)}\n`);
 
-/** The paired browsers' keys, as kept: `[{ hash, made, app? }]`, each `hash` the key's SHA-256 in hex. */
+/**
+ * Runs `work` while holding the keys' lock (.ohmmmm/keys.lock), so the bridge and the commands, in
+ * other processes, never write the key files over each other's change. A lock left by a process that
+ * died is taken after 30 seconds.
+ */
+export async function withKeysLock(home, work) {
+  await mkdir(join(home, '.ohmmmm'), { recursive: true, mode: 0o700 });
+  const lock = join(home, KEYS_LOCK);
+  for (let waited = 0; ; waited += 25) {
+    try {
+      await writeFile(lock, `${process.pid}\n`, { flag: 'wx', mode: 0o600 });
+      break;
+    } catch (problem) {
+      if (problem.code !== 'EEXIST') throw problem;
+      const held = await stat(lock).catch(() => null);
+      if (held && Date.now() - held.mtimeMs > 30_000) { await rm(lock, { force: true }); continue; }
+      if (waited > 10_000) throw new Error(`The keys are locked (${lock}). If no ohmmmm command is running, remove that file.`);
+      await new Promise(done => setTimeout(done, 25));
+    }
+  }
+  try { return await work(); } finally { await rm(lock, { force: true }); }
+}
+
+/** The paired browsers' keys, as kept: `[{ hash, made, app?, name?, seen? }]`, each `hash` the key's SHA-256 in hex. */
 export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohmmmm pair');
 
 /**
@@ -123,9 +149,56 @@ export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohmmmm pair')
  */
 export async function pairApp(home, { replace = false, app } = {}) {
   const key = newKey('app');
-  const kept = replace ? [] : await appKeys(home);
-  await writeHashes(home, APP_KEYS, 'keys', [...kept, { hash: sha256(key).toString('hex'), made: new Date().toISOString(), ...(app ? { app } : {}) }]);
+  await withKeysLock(home, async () => {
+    const kept = replace ? [] : await appKeys(home);
+    await writeHashes(home, APP_KEYS, 'keys', [...kept, { hash: sha256(key).toString('hex'), made: new Date().toISOString(), ...(app ? { app } : {}) }]);
+  });
   return key;
+}
+
+// ---- Paired browsers: seen, named, and forgotten one at a time ----
+
+// A browser's ID, to tell it apart in lists: the start of its key's SHA-256, which says nothing of the key.
+export const browserId = hash => hash.slice(0, 12);
+const BROWSER_NAME = 80;
+
+/** The paired browsers, for the person: `[{ id, made, app?, name?, seen? }]`, oldest first. */
+export async function pairedBrowsers(home) {
+  return (await appKeys(home)).map(({ hash, made, app, name, seen }) => ({ id: browserId(hash), made, ...(app ? { app } : {}), ...(name ? { name } : {}), ...(seen ? { seen } : {}) }));
+}
+
+// One browser's entry changed, under the lock: `change(entry)` answers the entry to keep, or null to forget it.
+async function changeBrowser(home, match, change) {
+  return withKeysLock(home, async () => {
+    const kept = await appKeys(home);
+    const found = kept.filter(match);
+    if (found.length !== 1) return null;
+    const next = change(found[0]);
+    await writeHashes(home, APP_KEYS, 'keys', kept.flatMap(each => (each === found[0] ? (next ? [next] : []) : [each])));
+    return { before: found[0], after: next };
+  });
+}
+
+/** Forgets one paired browser by its ID: its key stops working at once. Answers whether there was one. */
+export async function forgetBrowser(home, id) {
+  if (!/^[0-9a-f]{12}$/.test(id ?? '')) return false;
+  return Boolean(await changeBrowser(home, each => browserId(each.hash) === id, () => null));
+}
+
+/** Names the browser whose key has this SHA-256 (hex), as it says it is, such as "Chrome on macOS". */
+export async function nameBrowser(home, hash, name) {
+  const words = String(name ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, BROWSER_NAME);
+  if (!words) throw new VaultProblem('Give the browser a name of one line.');
+  const done = await changeBrowser(home, each => each.hash === hash, each => ({ ...each, name: words }));
+  return done ? { id: browserId(hash), name: words } : null;
+}
+
+/** Notes when a browser was last used, at most once an hour, so a list can say which are still in use. */
+export async function browserSeen(home, hash, now = new Date()) {
+  await changeBrowser(home, each => each.hash === hash, each => {
+    if (each.seen && now - new Date(each.seen) < 3_600_000) return each;
+    return { ...each, seen: now.toISOString() };
+  });
 }
 
 /** The agents with keys of their own, as kept: `[{ name, hash, made }]`. */
@@ -144,16 +217,21 @@ export async function addAgent(home, name, { replace = false } = {}) {
   const near = kept.find(each => each.name !== name && each.name.toLowerCase() === name.toLowerCase());
   if (near) throw new VaultProblem(`${name} would be too easily taken for ${near.name}, which has a key. Use ${near.name}, or another name.`);
   const key = newKey('agent');
-  await writeHashes(home, AGENT_KEYS, 'agents', [...kept.filter(each => each.name !== name), { name, hash: sha256(key).toString('hex'), made: new Date().toISOString() }]);
+  await withKeysLock(home, async () => {
+    const now = await agentKeys(home);
+    await writeHashes(home, AGENT_KEYS, 'agents', [...now.filter(each => each.name !== name), { name, hash: sha256(key).toString('hex'), made: new Date().toISOString() }]);
+  });
   return key;
 }
 
 /** Takes the named agent's key away. Answers whether it had one. */
 export async function removeAgent(home, name) {
-  const kept = await agentKeys(home);
-  if (!kept.some(each => each.name === name)) return false;
-  await writeHashes(home, AGENT_KEYS, 'agents', kept.filter(each => each.name !== name));
-  return true;
+  return withKeysLock(home, async () => {
+    const kept = await agentKeys(home);
+    if (!kept.some(each => each.name === name)) return false;
+    await writeHashes(home, AGENT_KEYS, 'agents', kept.filter(each => each.name !== name));
+    return true;
+  });
 }
 
 /**
@@ -675,6 +753,7 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
   // Who signed each request: its key's kind, the agent it names, and the key's own hash, which binds
   // an MCP session to the key that opened it.
   const callers = new WeakMap();
+  const seenAt = new Map();
   const callerOf = req => callers.get(req);
   const owner = req => callers.get(req)?.owner;
   const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent, callerOf), origins, endpoint: '/vault/mcp', owner });
@@ -768,6 +847,31 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
       callers.set(req, { ...who, reserved: known.reserved, owner: createHash('sha256').update(signed).digest('hex') });
       const url = new URL(req.url, 'http://home');
       if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
+      const mine = callers.get(req).owner;
+      // When a browser was last used, noted at most once an hour, so the person can tell which are still in use.
+      if (who.kind === 'app' && Date.now() - (seenAt.get(mine) ?? 0) > 3_600_000) {
+        seenAt.set(mine, Date.now());
+        await browserSeen(layout.home, mine).catch(() => {});
+      }
+      if (url.pathname === '/vault/keys' && req.method === 'GET') {
+        const shared = await readText(join(layout.home, AGENT_KEY));
+        return send(res, 200, {
+          browsers: (await pairedBrowsers(layout.home)).map(each => (each.id === browserId(mine) ? { ...each, you: true } : each)),
+          agents: (await agentKeys(layout.home)).map(({ name, made }) => ({ name, made })),
+          shared: shared !== undefined,
+        });
+      }
+      if (url.pathname === '/vault/keys/self' && req.method === 'POST') {
+        const asked = await json(req, 4 * 1024);
+        if (typeof asked?.name !== 'string' || asked.name.length > 200) return said(res, 400, 'Name this browser with { name }, one line');
+        const named = await nameBrowser(layout.home, mine, asked.name);
+        return named ? send(res, 200, named) : said(res, 404, 'This browser is not paired any more');
+      }
+      const forgetting = /^\/vault\/keys\/([0-9a-f]{12})$/.exec(url.pathname);
+      if (forgetting && req.method === 'DELETE') {
+        if (!await forgetBrowser(layout.home, forgetting[1])) return said(res, 404, 'No paired browser has that ID');
+        return send(res, 200, { forgotten: forgetting[1], you: forgetting[1] === browserId(mine) });
+      }
       if (url.pathname === '/vault/mcp') return await vault(req, res);
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
@@ -904,11 +1008,11 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
           // Who the key that asked is: the app, an agent by the name its key holds, or the shared agent key.
           you: who.kind === 'app' ? { app: true } : who.name ? { agent: who.name } : { agent: null, shared: true },
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish', cortexParts: '/cortex/parts', cortexJournal: '/cortex/journal' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', publish: '/vault/publish', unpublish: '/vault/unpublish', keys: '/vault/keys', cortexParts: '/cortex/parts', cortexJournal: '/cortex/journal' },
           publishing: { config: Boolean(await siteSettings(config).catch(() => null)), password: Boolean(env.ATPROTO_APP_PASSWORD) },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /vault/publish, /vault/unpublish, /cortex/parts, /cortex/journal, /cortex/profile, /cortex/observation, /cortex/skill, /cortex/tool and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /vault/publish, /vault/unpublish, /vault/keys, /cortex/parts, /cortex/journal, /cortex/profile, /cortex/observation, /cortex/skill, /cortex/tool and /media/<cid>');
     } catch (problem) {
       // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
       if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');
@@ -930,8 +1034,10 @@ export function listenHome(handler, { port = PORT } = {}) {
 //   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--pair] [--new-keys]
 //   ohmmmm pair  [--port 8766] [--app <origin>]…      one more browser, while the bridge runs
 //   ohmmmm agents [list] | add <name> [--new-key] [--port 8766] | remove <name> | remove --shared
+//   ohmmmm browsers [list] | forget <id>                the paired browsers, and forgetting one
 
-const COMMANDS = ['serve', 'pair', 'agents'];
+const COMMANDS = ['serve', 'pair', 'agents', 'browsers'];
+const day = iso => (iso ? iso.slice(0, 10) : '');
 
 // Makes a key for one more browser and says how to pair it: one link for each app origin.
 async function printPairing(layout, apps, url, { replace = false } = {}) {
@@ -956,7 +1062,7 @@ const options = {
 
 async function command(args) {
   const [name, ...rest] = COMMANDS.includes(args[0]) ? args : ['serve', ...args];
-  const { values, positionals } = parseArgs({ args: rest, options, allowPositionals: name === 'agents' });
+  const { values, positionals } = parseArgs({ args: rest, options, allowPositionals: name === 'agents' || name === 'browsers' });
   const layout = findHome();
   if (!layout) throw new Error(`Run ohmmmm ${name} inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.`);
   const port = values.port === undefined ? PORT : Number(values.port);
@@ -970,6 +1076,22 @@ async function command(args) {
     const answering = await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
     if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohmmmm serve${port === PORT ? '' : ` --port ${port}`}`);
     return;
+  }
+
+  if (name === 'browsers') {
+    const [action = 'list', id] = positionals;
+    if (action === 'list') {
+      const browsers = await pairedBrowsers(layout.home);
+      for (const each of browsers) console.log([each.id, each.name ?? 'a browser not named yet', `paired ${day(each.made)}`, each.seen ? `last used ${day(each.seen)}` : 'not used since it was paired', each.app ?? ''].filter(Boolean).join('\t'));
+      if (!browsers.length) console.log('No browser is paired. Pair one with: ohmmmm pair');
+      return;
+    }
+    if (action === 'forget') {
+      if (!id) throw new Error('Say which browser, by the ID ohmmmm browsers shows: ohmmmm browsers forget <id>');
+      console.log(await forgetBrowser(layout.home, id) ? `Forgotten: that browser can no longer open your home. To use it again, pair it with: ohmmmm pair` : `No paired browser has the ID ${id}. See them with: ohmmmm browsers`);
+      return;
+    }
+    throw new Error('ohmmmm browsers [list] | forget <id>');
   }
 
   if (name === 'agents') {
@@ -1006,7 +1128,7 @@ async function command(args) {
   const renew = Boolean(values['new-keys'] || values['new-token']);
   if (renew) {
     await removeSharedAgentKey(layout.home);
-    await writeHashes(layout.home, AGENT_KEYS, 'agents', []);
+    await withKeysLock(layout.home, () => writeHashes(layout.home, AGENT_KEYS, 'agents', []));
   }
   const shared = renew ? null : await sharedAgentKey(layout.home);
   const paired = renew ? 0 : (await appKeys(layout.home)).length;
@@ -1019,7 +1141,7 @@ async function command(args) {
   if (shared?.fromOldToken) console.log('The key this home used for everything now opens only agents\' tools: it is the shared agent key. Pair the app again with the link below.');
   if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohmmmm agents add <name>');
   if (renew || values.pair || paired === 0) await printPairing(layout, apps, url, { replace: renew });
-  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${at === PORT ? '' : ` --port ${at}`}`);
+  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${at === PORT ? '' : ` --port ${at}`}. To see or forget them: ohmmmm browsers, or Settings › Vault in the app.`);
   await printAgents(layout, at);
   const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
   if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
@@ -1029,7 +1151,7 @@ async function command(args) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sqlite = await import('node:sqlite').catch(() => null);
-  if (!sqlite && !['pair', 'agents'].includes(process.argv[2])) {
+  if (!sqlite && !['pair', 'agents', 'browsers'].includes(process.argv[2])) {
     if (process.execArgv.includes('--experimental-sqlite')) {
       console.error('This Node has no SQLite. Use Node 22.13 or newer.');
       process.exit(1);
