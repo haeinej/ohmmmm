@@ -1,7 +1,7 @@
-import { isBlock, locationOf, type Doc, type Entity } from "../../src/data/workspace-model"
-import { SETTINGS_TABS } from "../../src/workspace/settings-tabs"
-import { searchInput } from "../../src/data/source"
-import type { SearchHit, SearchProvider, SearchScope } from "../../src/data/search"
+import { isBlock, locationOf, type Doc, type Entity } from "./workspace-model"
+import { SETTINGS_TABS } from "../workspace/settings-tabs"
+import { searchInput } from "./source"
+import type { SearchHit, SearchProvider, SearchScope } from "./search"
 
 const inScope = (doc: Doc, scope: SearchScope) =>
   scope === "all" || (scope === "vault" ? isBlock(doc) : scope === "cortex" ? !isBlock(doc) : false)
@@ -13,8 +13,10 @@ const excerpt = (body: string, q: string) => {
   return (start > 0 ? "…" : "") + text.slice(start, start + 90) + (text.length > start + 90 ? "…" : "")
 }
 
-/** In memory, over the synthetic data. */
-export const createFixtureSearch = (all: () => Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
+// Search in memory, over what a source holds: the home on this computer, and the tests' fixture.
+
+/** In memory, over the given documents and people. */
+export const createMemorySearch = (all: () => Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
   signal?.throwIfAborted()
   const { query, limit } = searchInput(input)
   const scope = input.scope ?? "all"

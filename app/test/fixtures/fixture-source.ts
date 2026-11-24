@@ -11,7 +11,7 @@ import {
   type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveResult, type MoveTarget, type MoveRequest, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
-import { createFixtureSearch } from "./fixture-search"
+import { createMemorySearch } from "../../src/data/memory-search"
 import * as fixtures from "./sample"
 
 const allLayers: readonly Layer[] = ["public", "friends", "private"]
@@ -113,7 +113,7 @@ export function createFixtureSource() {
     connections(layers?: readonly Layer[]): VaultEvidence {
       return evidence(vaultOf(layers))
     },
-    search: createFixtureSearch(() => [...blocks, ...[...cortexFiles.keys()].map(id => cortexDocOf(cortexFile(id))!)], entities),
+    search: createMemorySearch(() => [...blocks, ...[...cortexFiles.keys()].map(id => cortexDocOf(cortexFile(id))!)], entities),
     history(ref: BlockRef) {
       const versions = kept.get(ref.id)
       if (versions) return versions.map(({ rev, version, created }) => ({ rev, version, created })).reverse()

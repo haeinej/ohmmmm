@@ -44,7 +44,8 @@ export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: st
 /** A channel's `_channel.md` on the vault service, with the version compare-and-set names. */
 export type ChannelHead = { path: string; version: string; title?: string; kind?: string }
 export type ChannelFile = HomeFile & { version: string }
-export type ChannelMove = { from: string; to: string; channels: number; blocks: number }
+/** `everything`: the source moved the sealed blocks too (one folder on this computer), so none is refiled on the device. */
+export type ChannelMove = { from: string; to: string; channels: number; blocks: number; everything?: boolean }
 /** A cortex file, opened on this device: `id` is its opaque storage ID, `path` where the cortex files it. */
 export type CortexFile = HomeFile & { id: string; version: string }
 export type CortexChange = { id: string; file: HomeFile; replaces: string | null } | { id: string; remove: true; replaces: string }

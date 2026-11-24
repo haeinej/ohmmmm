@@ -1,7 +1,9 @@
 // The visibility pills show each block's layer. Every move shows its preview first (the shared rules,
 // vault/vault/visibility.mjs); one that shows a block to more people asks for approval, and public
 // is finished on the Publish page, which previews the one post. While the pills are on screen, an
-// agent has the same two steps as tools: visibility.preview and visibility.move.
+// agent has the same two steps as tools: visibility.preview and visibility.move. On the home on this
+// computer (ohmmmm serve) public is Publish's dialog instead (PublishDialog): the bridge writes the post
+// to the person's PDS, and taking a public block back first takes its post down.
 // The tree's rows are ohm-ui's, so the pills sit over them, measured from the rows.
 import { useEffect, useLayoutEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
@@ -11,10 +13,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import { isBlock, byId, docIdOf, titleOf, type Doc, type Visibility } from "@/data/workspace-data"
+import { getSource, isBlock, byId, docIdOf, titleOf, type Doc, type Visibility } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
 import { previewMove, setVisibility, useWorkspace } from "./store"
 import { registerStepTool } from "@/webmcp"
+import { PublishDialog, TakeDownDialog } from "./PublishDialog"
+
+/** Whether the workspace is the home on this computer, which publishes through its own dialog. */
+const onThisComputer = () => { const source = getSource(); return !!source && "home" in source }
 
 export const VISIBILITY: Record<Visibility, { label: string; icon: LucideIcon }> = {
   private: { label: "Only you", icon: LockIcon },
@@ -25,10 +31,13 @@ const openness: Record<Visibility, number> = { private: 0, friends: 1, public: 2
 type Mark = { id: string; top: number; height: number }
 
 export function VisibilityMarks({ container }: { container: HTMLElement | null }) {
-  const { rev, showVisibility } = useWorkspace()
+  const { rev, showVisibility, agentsAllowed, offered } = useWorkspace()
   const [marks, setMarks] = useState<Mark[]>([])
   const [asking, setAsking] = useState<{ doc: Doc; to: Visibility; warning: string; answer?: (ok: boolean) => void } | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState<Doc | null>(null)
+  const [takingDown, setTakingDown] = useState<{ doc: Doc; to: "private" | "friends" } | null>(null)
+  const local = onThisComputer()
 
   // Measure every block row, again whenever the tree changes shape.
   useLayoutEffect(() => {
@@ -60,7 +69,10 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
     return result
   })
   const change = (doc: Doc, to: Visibility) => {
+    // Everyone again, on a public block in the home on this computer: its post is updated to the block as it is now.
+    if (local && to === "public") return setPublishing(doc)
     if (to === doc.visibility) return
+    if (local && doc.visibility === "public") return setTakingDown({ doc, to: to === "friends" ? "friends" : "private" })
     let warning: string
     try { warning = previewMove(doc.id, to).warning } catch (err) { return notify({ message: (err as Error).message }) }
     // Showing it to more people, or anything that goes through Publish, asks first.
@@ -70,16 +82,16 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
 
   // An agent's way in: the same preview and the same move, which stops at the same dialog.
   useEffect(() => {
-    if (!showVisibility) return
+    if (!showVisibility || !agentsAllowed) return
     const steps = new AbortController()
     const schema = { type: "object", properties: { id: { type: "string" }, to: { type: "string", enum: ["private", "friends", "public"] } }, required: ["id", "to"] } as const
-    void registerStepTool<{ id: string; to: Visibility }, ReturnType<typeof previewMove>>({
+    if (offered["visibility.preview"]) void registerStepTool<{ id: string; to: Visibility }, ReturnType<typeof previewMove>>({
       name: "visibility.preview", title: "Who can see it",
       description: "What moving one block to another layer would do: the action, whether it shows the block to more people, the warning, and what it still needs. Changes nothing.",
       inputSchema: schema, annotations: { readOnlyHint: true },
       run: async ({ id, to }) => previewMove(id, to),
     }, steps.signal)
-    void registerStepTool<{ id: string; to: Visibility }, Awaited<ReturnType<typeof setVisibility>>>({
+    if (offered["visibility.move"]) void registerStepTool<{ id: string; to: Visibility }, Awaited<ReturnType<typeof setVisibility>>>({
       name: "visibility.move", title: "Change visibility",
       description: "Moves one block to another layer after the person approves the preview in a dialog. A move to or from public opens the Publish page for that post. Returns the block's id, its layer and the Publish page if any.",
       inputSchema: schema, annotations: { consequentialHint: true },
@@ -98,7 +110,7 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
       },
     }, steps.signal)
     return () => steps.abort()
-  }, [showVisibility]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showVisibility, agentsAllowed, offered]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!showVisibility) return null
   return <>
@@ -117,13 +129,13 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
         <div key={m.id} data-row-menu className="pointer-events-none absolute inset-x-0 z-[9]" style={{ top: m.top, height: m.height }}>
           {block ? (
             <DropdownMenu open={openId === m.id} onOpenChange={o => setOpenId(o ? m.id : null)}>
-              <DropdownMenuTrigger render={<button type="button" title={VISIBILITY[v].label} aria-label={`“${titleOf(doc)}” is for ${VISIBILITY[v].label}. Change`} className={cn(pill, "hover:bg-foreground/12")} />}>
+              <DropdownMenuTrigger render={<button type="button" title={local && v === "friends" ? "Friends · not shared yet" : VISIBILITY[v].label} aria-label={`“${titleOf(doc)}” is for ${VISIBILITY[v].label}${local && v === "friends" ? ", not shared yet" : ""}. Change`} className={cn(pill, "hover:bg-foreground/12")} />}>
                 <Icon icon={VISIBILITY[v].icon} size="xs" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
                 {(["private", "friends", "public"] as Visibility[]).map(o => (
                   <DropdownMenuItem key={o} onClick={() => { setOpenId(null); change(doc, o) }} className="flex items-center gap-2">
-                    <Icon icon={VISIBILITY[o].icon} size="sm" /><span className="flex-1">{VISIBILITY[o].label}</span>
+                    <Icon icon={VISIBILITY[o].icon} size="sm" /><span className="flex-1">{!local ? VISIBILITY[o].label : o === "public" ? (v === "public" ? "Everyone · Update…" : "Everyone · Publish…") : v === "public" ? `${VISIBILITY[o].label} · Take down…` : VISIBILITY[o].label}</span>
                     <Icon icon={CheckIcon} size="sm" className={cn(o !== v && "invisible")} />
                   </DropdownMenuItem>
                 ))}
@@ -135,6 +147,9 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
         </div>
       )
     })}
+
+    {publishing ? <PublishDialog doc={publishing} onClose={() => setPublishing(null)} /> : null}
+    {takingDown ? <TakeDownDialog doc={takingDown.doc} to={takingDown.to} onClose={() => setTakingDown(null)} /> : null}
 
     <Dialog open={!!asking} onOpenChange={o => { if (!o) { asking?.answer?.(false); setAsking(null) } }}>
       <DialogContent className="sm:max-w-sm">

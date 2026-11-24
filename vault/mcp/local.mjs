@@ -9,11 +9,13 @@ import { allowed, GRANTS, readGrants } from '../vault/grants.mjs';
 import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
-import { appendEvents, JOURNAL, readEvents } from '../vault/journal.mjs';
+import { appendEvents, HISTORY, JOURNAL, keepVersion, readEvents } from '../vault/journal.mjs';
+import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
+import { layerOf, LAYERS, readRequests, requestVisibility, THROUGH_PUBLISH } from '../vault/visibility-folder.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
 
 // Every version an agent replaced or wrote, by content address, so any agent change can be undone.
-export const HISTORY = '.vault/history';
+export { HISTORY };
 const CID = /^b[a-z2-7]{20,}$/;
 import { CANONICAL, CONFIG, readConfig } from '../vault/roots.mjs';
 import { createServer, serve } from './protocol.mjs';
@@ -55,8 +57,15 @@ export const LOCAL_TOOLS = [
   tool('vault_restore', 'Put a vault file back to a version kept in history (an address from vault_history), if the person granted you write on its folder. Pass the file\'s current content address as replaces when it exists.', {
     path: text, to: text, replaces: text,
   }, ['path', 'to']),
+  tool('vault_request_visibility', 'Ask the person to change who can see a block: to private (only them) or friends. You never change it yourself; the request waits until they approve or decline it in the app. Public goes through Publish. Say why in one line.', {
+    ref: text, to: { enum: LAYERS }, why: text,
+  }, ['ref', 'to']),
+  tool('vault_requests', 'Your requests to change who can see a block, newest first: waiting, approved or declined.', { limit: integer(1, 100) }, [], true),
+  tool('vault_rename', 'Rename or move a block or a channel, if the person granted you write where it is and where it goes. Every file that used the old name is rewritten to the new one where you may write it; any other keeps working through the old name, and is listed in left. For a channel, give it as ref and its new path as to. For a block, give it as ref and any of: its new slug as to, a title, or a new home channel.', {
+    ref: text, to: text, title: text, channel: text,
+  }, ['ref']),
 ];
-const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore'];
+const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename', 'vault_request_visibility'];
 
 const refuse = message => { throw new VaultProblem(message); };
 const present = value => typeof value === 'string' && value.trim() && !value.includes('\0');
@@ -159,7 +168,7 @@ async function replaceFile(path, before, after) {
 }
 
 // SQLite releases this lock even if a local MCP process exits during collection.
-async function withCollectLock(vault, DatabaseSync, collect) {
+export async function withCollectLock(vault, DatabaseSync, collect) {
   const path = await ordinaryFile(vault, ['.vault', 'collect.sqlite']);
   const lock = new DatabaseSync(path);
   try {
@@ -182,13 +191,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   const agent = by.startsWith('agent:') ? by.slice('agent:'.length) : by;
   const rescan = db => scan({ vault, db });
   // A version kept once, by its address. Two writes of the same text keep one file.
-  const keep = async text => {
-    const address = await addressOf(text);
-    await mkdir(join(vault, HISTORY), { recursive: true });
-    await writeFile(await ordinaryFile(vault, [...HISTORY.split('/'), address]), text, { flag: 'wx' })
-      .catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-    return address;
-  };
+  const keep = text => keepVersion(vault, text, { file: address => ordinaryFile(vault, [...HISTORY.split('/'), address]) });
   const recordChange = async (path, before, after, via = 'collect') => {
     if (before === after) return;
     const kept = via === 'collect' ? {} : {
@@ -237,6 +240,12 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
     if (!read) refuse('That path is not a block, channel or entity.');
     if (read.problems.length) refuse(`Fix the file first: ${read.problems.join(' ')}`);
     return read.node;
+  };
+  // Who can see a block is the person's to change: an agent asks with vault_request_visibility.
+  const sameLayer = (path, before, after) => {
+    const was = before === undefined ? 'private' : layerOf(path, before) ?? 'private';
+    const now = layerOf(path, after) ?? 'private';
+    if (was !== now) refuse(`This would make the block ${now} where it is ${was}. Who can see a block is the person's to change: ask with vault_request_visibility.`);
   };
   const calls = {
     vault_local_search: (db, { query, limit = 20 }) => {
@@ -290,15 +299,24 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content) > 600_000) refuse('Give the file\'s text, at most 600 KB.');
       await mayChange('write', path);
       const before = await current(parts);
-      await checkReplaces(before, replaces);
-      let after = content;
-      const node = readable(path, after);
-      if (before === undefined && node.type === 'block') {
-        // A new block from an agent says so and starts private: only the person shows a block to more people.
-        if (!node.post && !node.by) after = setProperty(after, 'by', by);
-        if ((node.post?.visibility ?? node.visibility) !== 'private') after = setProperty(after, 'visibility', 'private');
+      const node = readable(path, content);
+      // A new block from an agent says so and starts private: only the person shows a block to more people.
+      const asNew = () => {
+        let made = content;
+        if (node.type !== 'block') return made;
+        if (!node.post && !node.by) made = setProperty(made, 'by', by);
+        if ((node.post?.visibility ?? node.visibility) !== 'private') made = setProperty(made, 'visibility', 'private');
+        return made;
+      };
+      // The file says this already, as when the same write is tried again after its answer was lost.
+      if (before !== undefined && (before === content || before === asNew())) {
+        const hash = await addressOf(before);
+        return { path, made: false, unchanged: true, hash, before: hash };
       }
+      await checkReplaces(before, replaces);
+      const after = before === undefined ? asNew() : content;
       readable(path, after);
+      sameLayer(path, before, after);
       await mkdir(dirname(join(vault, path)), { recursive: true });
       await recordChange(path, before, after, 'write');
       await rescan(db);
@@ -347,10 +365,59 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       readable(path, kept);
       const before = await current(parts);
       await checkReplaces(before, replaces);
+      sameLayer(path, before, kept);
       await mkdir(dirname(join(vault, path)), { recursive: true });
       await recordChange(path, before, kept, 'restore');
       await rescan(db);
       return { path, restored: to, unchanged: before === kept };
+    },
+
+    async vault_request_visibility(db, { ref, to, why }) {
+      const found = lookedUp(db, ref);
+      if (found.root !== CANONICAL || found.node.type !== 'block') refuse('Ask about a block in the vault.');
+      if (!LAYERS.includes(to)) refuse(`to is one of: ${LAYERS.join(', ')}.`);
+      const path = found.node.path;
+      const text = await current(path.split('/'));
+      if (text === undefined) refuse('The block is not there any more. Run vault_index.');
+      const from = layerOf(path, text) ?? 'private';
+      if (from === to) return { path, visibility: to, unchanged: true };
+      if (to === 'public' || from === 'public') refuse(THROUGH_PUBLISH);
+      const request = await requestVisibility(vault, { by, path, from, to, why });
+      return { request: request.id, path, from, to, status: request.status, next: 'The person approves or declines it in the app. Check with vault_requests.' };
+    },
+
+    async vault_requests(db, { limit = 30 }) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) refuse('Give a limit from 1 to 100.');
+      return { requests: (await readRequests(vault)).filter(each => each.by === by).reverse().slice(0, limit) };
+    },
+
+    async vault_rename(db, { ref, to, title, channel }) {
+      for (const [name, value] of Object.entries({ to, title, channel })) {
+        if (value !== undefined && (!present(value) || value.length > 300 || value.includes('\n'))) refuse(`Give ${name} as one line of text.`);
+      }
+      const found = lookedUp(db, ref);
+      if (found.root !== CANONICAL) refuse('Rename what is in the vault. A read-only root is renamed where it lives.');
+      let change;
+      if (found.node.type === 'channel') {
+        if (to === undefined || title !== undefined || channel !== undefined) refuse('For a channel, give only its new path as to.');
+        change = { channel: found.node.path, to };
+      } else if (found.node.type === 'block') {
+        change = { block: found.node.path, ...(to === undefined ? {} : { slug: to }), ...(title === undefined ? {} : { title }), ...(channel === undefined ? {} : { channel }) };
+      } else refuse('Rename a block or a channel.');
+      const { files, paths } = await readVaultFolder(vault, { open: path => ordinaryFile(vault, path.split('/')) });
+      const plan = planRename(files, change, { paths });
+      // No symlink anywhere a file is moved or written.
+      if (plan.folder) await beneath(vault, plan.folder.from.split('/'));
+      for (const path of [...plan.moves.flatMap(move => [move.from, move.to]), ...plan.writes.map(write => write.path)]) {
+        if (path.split('/').some(part => part.startsWith('.'))) refuse('A rename does not touch hidden files.');
+        await ordinaryFile(vault, path.split('/'));
+      }
+      const held = await grants();
+      const may = path => Boolean(allowed(held, agent, 'write', path));
+      if (!may(plan.from) || !may(plan.to)) await mayChange('write', may(plan.from) ? plan.to : plan.from);
+      const done = await applyRename({ vault, plan, by, may, keep });
+      await rescan(db);
+      return done;
     },
 
     async vault_capture(db, { source, channel, title }) {
@@ -404,7 +471,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       await beneath(vault, CACHE.split('/'));
       const db = await openIndex(vault, { DatabaseSync });
       try {
-        if (!['vault_index', 'vault_capture', 'vault_history'].includes(name) && !summary(db).scanned) {
+        if (!['vault_index', 'vault_capture', 'vault_history', 'vault_requests'].includes(name) && !summary(db).scanned) {
           refuse('Run vault_index to scan this vault first.');
         }
         const invoke = () => calls[name](db, args);
@@ -416,12 +483,14 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   };
 }
 
+// What the local tools tell an agent, over standard input and output or over HTTP (ohmmmm serve).
+export const LOCAL_INSTRUCTIONS = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures, writes, links, removals, restores and renames need the person\'s grant on that folder, and what you make starts private. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
+
 export async function serveLocalVault({ vault, agent, DatabaseSync, input, output }) {
   if (!vault) refuse('Launch from a home or select its vault with --vault.');
   if (!/^[A-Za-z0-9._-]+$/.test(agent)) refuse('Name the agent with letters, digits, dots, underscores or hyphens.');
   if (!(await info(vault))?.isDirectory()) refuse('Select an existing vault folder.');
   const tools = createLocalTools({ vault: await realpath(vault), by: `agent:${agent}`, DatabaseSync });
-  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures, writes, links, removals and restores need the person\'s grant on that folder, and what you make starts private. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
   input.setEncoding('utf8');
-  await serve(createServer({ tools, list: LOCAL_TOOLS, instructions }), input, output);
+  await serve(createServer({ tools, list: LOCAL_TOOLS, instructions: LOCAL_INSTRUCTIONS }), input, output);
 }

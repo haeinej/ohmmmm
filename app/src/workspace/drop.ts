@@ -1,6 +1,7 @@
 // Dropping onto the main panel: a block from the tree opens it; a Markdown or text file opens as a new
 // private block. Images are the editor's own (they go into the block where they are dropped).
 import { notify } from "@/components/ui/notice"
+import type { Exported } from "@/media/export"
 import { open, openFile, report } from "./store"
 
 export const DOC_DRAG = "application/x-ohm-doc"
@@ -21,20 +22,37 @@ export async function openDropped(dt: DataTransfer): Promise<boolean> {
   return true
 }
 
-/** Saving by dragging out: the block as a .md file, wherever the browser lets it land. */
-export function dragOutAsMarkdown(dt: DataTransfer, id: string, name: string, markdown: string) {
-  const file = `${(name || "Untitled block").replace(/[\\/:*?"<>|]/g, "-")}.md`
+const base64 = (bytes: Uint8Array) => {
+  let text = ""
+  for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+  return btoa(text)
+}
+
+/** Where a dragged-out file comes from: its bytes, written into the drag so they need no tab to stay open. */
+export const downloadUrl = (file: Exported) => file.type === "text/markdown"
+  ? `text/markdown:${file.name}:data:text/markdown;charset=utf-8,${encodeURIComponent(new TextDecoder().decode(file.bytes))}`
+  : `${file.type}:${file.name}:data:${file.type};base64,${base64(file.bytes)}`
+
+/**
+ * Saving by dragging out, wherever the browser lets it land: the block as a .md file, or as a .zip
+ * with its images when it shows some (src/media/export.ts). The export has to be ready when the drag
+ * starts; without it, the drag still carries the block within the workspace and its text.
+ */
+export function dragOut(dt: DataTransfer, id: string, markdown: string, file: Exported | null) {
   dt.setData(DOC_DRAG, id)
   dt.setData("text/plain", markdown)
-  dt.setData("DownloadURL", `text/markdown:${file}:data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`)
+  if (file) dt.setData("DownloadURL", downloadUrl(file))
+  else notify({ message: "An image in this block is still loading. Drag it out again in a moment.", tone: "info" })
   dt.effectAllowed = "copyMove"
 }
 
-/** Saving by menu: downloads the block as a .md file. */
-export function saveAsMarkdown(name: string, markdown: string) {
+/** Saving by menu: downloads the block as a .md file, or a .zip with its images. */
+export function saveExport(file: Exported) {
   const a = document.createElement("a")
-  a.href = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }))
-  a.download = `${(name || "Untitled block").replace(/[\\/:*?"<>|]/g, "-")}.md`
+  a.href = URL.createObjectURL(new Blob([file.bytes.slice()], { type: file.type }))
+  a.download = file.name
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  if (file.missing.length) notify({ message: `Saved without ${file.missing.length === 1 ? "one image" : `${file.missing.length} images`} this device does not have`, tone: "info" })
+  else if (file.images) notify({ message: `Saved as ${file.name}, with ${file.images === 1 ? "its image" : `its ${file.images} images`}`, tone: "info" })
 }

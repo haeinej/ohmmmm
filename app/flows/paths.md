@@ -71,8 +71,11 @@ How to read each path:
 | C2 | **Show a block to more people** | Click a block's icon → Friends or Everyone → the preview's warning → **Change visibility** | Only you → Friends: moved into the friends layer at the service. → Everyone: a block that is not a post becomes one at its channel's address, is marked public, and the Publish page opens with that one post's preview; it is public only once it is published | Decide who a block is for | `visibility.move` (consequential: the same dialog) |
 | C3 | Make a block more private | Click its icon → Only you | Friends → Only you: sealed on this device at once (no confirmation). Everyone → Friends asks first and opens the Publish page, which takes the record down | Pull something back | `visibility.move` |
 | C3a | Preview a move | (the dialog in C2) | What the move does, its warning, and what it still needs, by the shared rules | Know before deciding | `visibility.preview` (read-only) |
+| C3b | **An agent on this computer asks** | It calls `vault_request_visibility`; the request waits in the bell with its reason | Approve: the block moves, journaled with who asked and why. Decline: nothing changes. The agent sees which (`vault_requests`) | Agents never change who sees a block themselves | *UI only* (the request is the agent's tool) · **asks first** |
 | C4 | **View as someone else** | Hover the eye → View as You / Friends / Public | The tree, graph and block show only what that audience can see; the cortex is locked; a bar says "Viewing as…" with Back to you. If the open block is one they can't see, the editor says so instead of showing it | Check what others actually see before you publish | *UI only* |
 | C5 | Back to yourself | Back to you, choose You, or hide visibility | Everything is visible again | Return to editing | *UI only* |
+| C6 | **Publish a block** (your home through `ohmmmm serve`) | Click its icon → Everyone · Publish… → the plan: address, label and sublabel (the channel's, editable), its images, links that become words, and what this computer still needs → **Publish** | Its post is on your PDS and the notice gives its address (Open); the file is marked public and the icon is the globe; a new label is kept on its channel. On a public block, Everyone · Update… rewrites the post, keeping its address and date. Cancel writes nothing | Put a block on your site, in your own words for where it goes | *UI only*: no agent publishes · **asks first** |
+| C7 | **Take a post down** (your home) | Click a public block's icon → Only you or Friends · Take down… → **Take down** (red) | The post is removed from your PDS first, then the block is kept for that audience; copies others made are not recalled | Pull something off your site | *UI only*: no agent takes down · **asks first** |
 
 ## D. The graph
 
@@ -103,7 +106,8 @@ How to read each path:
 | E9 | Move a block | Drag the block handle (⋮⋮) | The block moves | Reorder | *UI only* |
 | E10 | Block menu | Click the handle → Insert below, Duplicate, Copy as Markdown, Delete | As chosen | Quick block actions | *UI only* |
 | E11 | **Tables** | Hover a table: row handle (insert above or below, move up or down, delete), column handle (insert left or right, move, fit, distribute, delete), + bars (add row, column), drag column edges; table handle → Header row/column, Copy as Markdown, Delete table | The table changes | Shape data in a block | *UI only* |
-| E12 | **Images** | Drop or paste an image on the block, or Image → pick a file | The image is in the block where it landed | Illustrate | *UI only* |
+| E12 | **Images** | Drop or paste an image on the block, or Image → pick a file | The image is a private media block of its own in the block's channel, embedded where it landed (`![[slug]]`); the same image again shows its existing media block | Illustrate, and keep each image once, as on Are.na | `workspace.add-image` (embeds at the end) |
+| E12a | Open an image | Click its media block in the tree, or open it from the connections of a block that embeds it | The media block is open, showing its image; its connections list every block that embeds it | See where an image is used | `workspace.open` |
 | E13 | **Links** | Type `[[slug]]`, or `[[slug\|your words]]` | It reads as a green chunk with the linked block's title, or your words (raw while the caret is in it); it joins the graph's links | Connect blocks | `workspace.save-draft` (Markdown body) |
 | E13a | **Connect words** | Select words in one paragraph → Connect → find a block → Enter | The words become a link to it, `[[slug\|the words]]`; it is listed in the connections card, *in the text* | Tie a connection to the passage that justifies it | *UI only*: connections are yours |
 | E13b | **Connect the block** | Connections card → + Connect → find a block → Enter; then Why? (optional) | A connection on the whole block, with its line on why, listed in this card and as ↙ in the other block's card | Connect whole blocks, and say why | *UI only*: connections are yours |
@@ -111,7 +115,7 @@ How to read each path:
 | E13e | **Connect by pulling a line** | Hover a block's row → press its dot and pull: a line follows the pointer → let go over another block's row, a graph node, or the open block | The two blocks are connected as whole blocks; a notice names both. Escape, or letting go anywhere else, connects nothing. From a block others see, it is refused with a notice | The quickest way to connect two blocks | *UI only*: connections are yours |
 | E13c | Disconnect | Connections card → hover a whole-block connection → ✕ | It is gone from both blocks and the graph; a link in the text is removed by editing the text | Undo a connection | *UI only* |
 | E14 | Mention | Type `@handle` | A link; ⌘-click centres the graph on them; they join the graph | Connect people | `workspace.save-draft` |
-| E15 | **Save as Markdown** | Drag the path pill out of the window, or Path ⌄ → Save as Markdown | A `.md` file of the block | Take your writing anywhere | *UI only* |
+| E15 | **Save as Markdown** | Drag the path pill out of the window, or Path ⌄ → Save as Markdown | A `.md` file of the block, or a `.zip` of the `.md` and its images in `assets/` when it shows any; an image this device lacks keeps its `![[…]]` and the notice says so | Take your writing anywhere, images included | *UI only* |
 | E16 | **History** | Block toolbar → clock | The block's versions, as in H9 | Go back in time | `history.versions` |
 | E17 | Read a shared block | Open a block for friends or everyone | Read-only, with "changing it asks first" | Protect what others already see | *UI only* |
 
@@ -133,7 +137,8 @@ How to read each path:
 | G2 | Your profile | Settings → Your profile | Name, description and picture fields; Review changes notes that publishing your profile asks first | Shape how other apps show you | *UI only* · publishing **asks first** |
 | G3 | Identity | Settings → Identity | Your DID (copy), handle, server | Know and share your root identity | *UI only* |
 | G4 | **Agents** | Settings → Agents → Offer tools to browser agents; one switch per tool | Tools are offered to an agent, or withdrawn, at once | Control what an agent can do here | Governs every tool |
-| G5 | Vault | Settings → Vault | New blocks start private (always); your channels | Review how your vault is organised | *UI only* |
+| G5 | Vault | Settings → Vault | Where this is (your home through `ohmmmm serve`, or the sample); new blocks start private (always); your channels | Review how your vault is organised | *UI only* |
+| G5a | **Forget a paired browser** (your home) | Settings → Vault → Browsers paired with your home → Forget → **Forget** (red) | That browser can no longer open your home; the others stay paired. Forgetting this browser goes back to the sample, with a notice saying how to pair again | Shut out a browser you no longer use, or have lost | *UI only* · **asks first** |
 | G6 | Cortex | Settings → Cortex | Your profile, how many observations, skills and tools | Review what your agents know about you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
 | G8 | Sign out | Settings → Sign out | Ends the ohm session (`POST /api/auth/sign-out`); the workspace then shows sign-in | Leave | *UI only* |
@@ -174,7 +179,7 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `visibility.preview` | What moving one block would do, by the shared rules | C3a | read-only | Nothing changes |
 | `visibility.move` | Moves one block after the person approves the same dialog as C2 | C2, C3 | consequential | Moved and journalled, or, to or from public, marked and the Publish page opened; declining leaves it as it was (`NotAllowedError`) |
 
-Nothing an agent can do here is public without the person. `visibility.move` stops at the person's approval; publishing happens on the Publish page, signed in at the PDS. Deleting and publishing are not tools yet.
+Nothing an agent can do here is public without the person. `visibility.move` stops at the person's approval; publishing happens on the Publish page, signed in at the PDS. Deleting and publishing are not tools yet. On the home on this computer (`ohmmmm serve`), Everyone opens Publish's dialog instead, and the bridge writes the post to your PDS.
 
 ## End states, in short
 
@@ -184,6 +189,8 @@ Nothing an agent can do here is public without the person. `visibility.move` sto
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
 | Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer, after your yes for wider. Public is reached only through Publish, for that one post. Every move is journalled |
+| Publishing (your home on this computer) | Its post is on your PDS at the address the plan showed, the file says public, and nothing else of your vault left your computer |
+| Taking a post down (your home on this computer) | The record is gone from your PDS before the block moved; the block is kept |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |
@@ -196,7 +203,7 @@ Nothing an agent can do here is public without the person. `visibility.move` sto
 These show a notice saying what they will do. Each will become a path above once its service exists:
 - **Agent features:** ask an agent (from search and from selected text), and generate or visualise.
 - **Version history.**
-- **Publishing and taking down.** Its own flow, with an approval card.
+- **Publishing from the sample, and through the vault service.** On your home through `ohmmmm serve` it is built (C6, C7).
 - **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
 - **Unlocking on this device:** the private layer and the cortex open once the account app's keys are wired into the workspace (`privateSession`). The cortex also needs the keys package to seal under `ohm-vault/cortex/v1`.

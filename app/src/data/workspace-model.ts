@@ -38,7 +38,15 @@ export type Doc = {
   by?: string
   /** The versions of the blocks an observation is about, as they were when it was written. */
   evidence?: { node: string; version: string }[]
+  /** A media block's image: its bytes by CID, and what to say about it. Its file is the one its body embeds. */
+  media?: Media
 }
+
+/**
+ * The image a media block holds (vault/plans/media.md). `hash` is the bytes' CID, so any store that has
+ * them can show it; the block never holds a browser address.
+ */
+export type Media = { hash: string; mime: string; width?: number; height?: number; alt?: string }
 
 export const isBlock = (doc?: Doc | null): doc is Doc & { kind: BlockKind; homeChannel: string } =>
   doc != null && isBlockKind(doc.kind) && doc.homeChannel !== undefined

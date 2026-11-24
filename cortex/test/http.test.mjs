@@ -133,6 +133,24 @@ test('two sessions keep separate agent names', async t => {
   assert.equal((await call(posing.session, 'cortex_recall', { id: 'posing' })).value.observation.by, 'agent:member');
 });
 
+test('given an owner, a session answers only whoever opened it, and the session is opened knowing the request', async t => {
+  let opened;
+  const { post } = await served(t, { owner: req => req.headers['x-caller'] });
+  const init = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code' } } }, { headers: { 'X-Caller': 'mira' } });
+  const session = init.headers.get('mcp-session-id');
+  assert.ok(session);
+  const list = who => post({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { session, headers: { 'X-Caller': who } });
+  assert.equal((await list('someone-else')).status, 404);
+  assert.equal((await list('mira')).status, 200);
+  // open is handed the request that initializes the session.
+  const seen = [];
+  const handler = httpTransport({ open: req => { seen.push(req.headers['x-caller']); opened = true; return () => ({ jsonrpc: '2.0', id: 1, result: {} }); } });
+  const server = await listen(handler, { port: 0, host: '127.0.0.1' });
+  t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
+  await fetch(`http://127.0.0.1:${server.address().port}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Caller': 'mira' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
+  assert.deepEqual([opened, seen], [true, ['mira']]);
+});
+
 test('notifications are accepted with 202, GET offers no stream, and bad messages are refused', async t => {
   const { initialize, post, request, url, secret } = await served(t);
   const { session } = await initialize();

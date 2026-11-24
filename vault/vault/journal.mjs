@@ -7,21 +7,59 @@
 //
 //   op     added, changed, moved (from: the old path), removed, written (an agent wrote the file,
 //          reported by its hook), copied-from (origin: the file it has the same bytes as),
-//          downloaded-from (origin: the address macOS recorded when it was downloaded)
+//          downloaded-from (origin: the address macOS recorded when it was downloaded), renamed
+//          (from: the name it had; path: the block's file, or the channel's folder, now). Renames
+//          are what keep old names working (names.mjs). published, unpublished (a block's post
+//          written to, or taken down from, the person's PDS; `key` is its record key, `address`
+//          its address on their site). These two say nothing about the file itself, so a scan never
+//          reads them as a change to it
 //   by     me, agent:<name>, or unknown: the vault says who only when it was told
 //   via    add (ohm vault add or vault_capture), collect (vault_collect), hook (an agent's hook),
 //          scan (found by indexing), editor, sync, write (vault_write or vault_remove), link
-//          (vault_link), restore (vault_restore or ohm vault restore)
+//          (vault_link), restore (vault_restore or ohm vault restore), rename (vault_rename or
+//          ohm vault rename), visibility (the person moved a block between layers; `layer` is
+//          where it went, `was` where it was, `asked` the agent that asked, if one did, `why` its reason),
+//          publish (the person published a block, or took one down, from the app: publish-block.mjs)
 //   before the content address of the file as it was, kept in .vault/history/ (agent writes only)
 //   hash   the content address of the file as it is now
 import { execFile, spawn } from 'node:child_process';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { blobCid } from './core.mjs';
 
 export const JOURNAL = '.vault/journal.jsonl';
-export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from'];
-export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore'];
+// Kept versions of the vault's Markdown, each by its content address: what a journal event's `before`
+// and `hash` point at, so a change can be shown and undone. Written by the tools, the bridge, and the scan.
+export const HISTORY = '.vault/history';
+
+/**
+ * Keeps a version of a file in HISTORY under its content address, and answers the address. It is
+ * written whole, through a temporary file beside it and a rename, so a crash never leaves part of
+ * one under an address; one already there is read back, and written again unless it hashes to its
+ * address (cut off by a crash before versions were kept this way).
+ *   file(address): where it goes, after any checks the caller makes; defaults to joining
+ */
+export async function keepVersion(vault, text, { file = address => join(vault, HISTORY, address) } = {}) {
+  const address = await blobCid(Buffer.from(text, 'utf8'));
+  await mkdir(join(vault, HISTORY), { recursive: true });
+  const at = await file(address);
+  const held = await readFile(at).catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  if (held && await blobCid(held) === address) return address;
+  const temp = join(dirname(at), `.keep-${randomUUID()}`);
+  try {
+    await writeFile(temp, text, { flag: 'wx' });
+    await rename(temp, at);
+  } finally {
+    await rm(temp, { force: true });
+  }
+  return address;
+}
+export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed', 'published', 'unpublished'];
+export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename', 'visibility', 'publish'];
+// Events about a file's post, not the file: a scan reads past them.
+export const POST_OPS = ['published', 'unpublished'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;
 
 // Why an event cannot go in the journal. Empty when it can.
@@ -34,6 +72,8 @@ export function eventProblems(event) {
   if (typeof event.root !== 'string' || !event.root) problems.push('root names the root the file is in');
   if (typeof event.path !== 'string' || !event.path || event.path.startsWith('/') || event.path.split('/').includes('..')) problems.push('path is the file\'s path inside its root');
   if (event.op === 'moved' && typeof event.from !== 'string') problems.push('A move says where from');
+  if (event.op === 'renamed' && (typeof event.from !== 'string' || !event.from.trim())) problems.push('A rename says the name it had');
+  if (POST_OPS.includes(event.op) && (typeof event.key !== 'string' || !event.key)) problems.push('A post\'s event says its record key');
   if (['copied-from', 'downloaded-from'].includes(event.op) && typeof event.origin !== 'string') problems.push('It says the origin');
   if (!Number.isFinite(Date.parse(event.at))) problems.push('at is a time');
   for (const key of ['before', 'hash']) if (event[key] !== undefined && event[key] !== null && !/^b[a-z2-7]{20,}$/.test(event[key])) problems.push(`${key} is a content address`);
