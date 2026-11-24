@@ -328,6 +328,8 @@ CREATE TABLE IF NOT EXISTS agent_approvals (
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS agent_approvals_waiting ON agent_approvals (did, state);
+-- One open approval for each agent, tool and plan: the same plan asked twice at once gives one.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_approvals_one_open ON agent_approvals (did, agent, tool, plan) WHERE state IN ('waiting', 'approved');
 CREATE TABLE IF NOT EXISTS agent_activity (
   did TEXT NOT NULL,
   seq INTEGER NOT NULL,

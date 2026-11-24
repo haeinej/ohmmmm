@@ -941,7 +941,7 @@ ohm's agent tools call this before every tool call: the agent is seen, its call 
 
 ### `com.ohmmmm.vault.askApproval`
 
-An agent's tool asks the member to approve one exact plan. It waits in the cockpit's Agents panel, showing `shown`. The same plan asked again while it waits gives the same approval.
+An agent's tool asks the member to approve one exact plan. It waits in the cockpit's Agents panel, showing `shown`. The same plan asked again while it waits or is approved gives the same approval, even when asked at the same moment.
 
 | | |
 | --- | --- |
@@ -963,14 +963,14 @@ One approval and how it stands: waiting, approved, declined or used.
 
 ### `com.ohmmmm.vault.useApproval`
 
-An agent's tool uses an approval to carry out its plan: once, and only when the member approved exactly that plan. Otherwise it is refused with NotApproved, saying why.
+An agent's tool uses an approval to carry out its plan: once, and only when the member approved exactly that plan. The same agent, tool and plan sent again within 15 minutes, because the action failed or its answer was lost, answers the same with `unchanged`. Otherwise it is refused with NotApproved, saying why.
 
 | | |
 | --- | --- |
 | Reads or changes | Changes (`POST`) |
 | Who may ask | The member |
 | Takes | `id`: the approval's ID<br>`agent`: agent:<name><br>`tool`: the tool<br>`plan`: the plan, as JSON |
-| Gives | `id`, `used` |
+| Gives | `id`, `used`, and `unchanged` when it was a retry |
 
 ### `com.ohmmmm.vault.listApprovals`
 

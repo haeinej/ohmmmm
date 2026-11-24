@@ -14,7 +14,7 @@ export default {
     },
     'com.ohmmmm.vault.askApproval': {
       verb: 'POST', asks: 'member', changes: true,
-      about: 'An agent\'s tool asks the member to approve one exact plan. It waits in the cockpit\'s Agents panel, showing `shown`. The same plan asked again while it waits gives the same approval.',
+      about: 'An agent\'s tool asks the member to approve one exact plan. It waits in the cockpit\'s Agents panel, showing `shown`. The same plan asked again while it waits or is approved gives the same approval, even when asked at the same moment.',
       takes: { agent: 'agent:<name>', tool: 'the tool', plan: 'the exact plan, as JSON', shown: 'what the member is shown, as JSON' },
       gives: '`approval` (id, agent, tool, shown, state, asked), and `unchanged` when it was waiting already',
       run: async ({ body, agentsOf, did }) => agentsOf.ask(did, await body()),
@@ -28,9 +28,9 @@ export default {
     },
     'com.ohmmmm.vault.useApproval': {
       verb: 'POST', asks: 'member', changes: true,
-      about: 'An agent\'s tool uses an approval to carry out its plan: once, and only when the member approved exactly that plan. Otherwise it is refused with NotApproved, saying why.',
+      about: 'An agent\'s tool uses an approval to carry out its plan: once, and only when the member approved exactly that plan. The same agent, tool and plan sent again within 15 minutes, because the action failed or its answer was lost, answers the same with `unchanged`. Otherwise it is refused with NotApproved, saying why.',
       takes: { id: 'the approval\'s ID', agent: 'agent:<name>', tool: 'the tool', plan: 'the plan, as JSON' },
-      gives: '`id`, `used`',
+      gives: '`id`, `used`, and `unchanged` when it was a retry',
       run: async ({ body, agentsOf, did }) => agentsOf.use(did, await body()),
     },
     'com.ohmmmm.vault.listApprovals': {

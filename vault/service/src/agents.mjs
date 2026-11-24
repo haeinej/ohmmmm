@@ -19,6 +19,10 @@ const ANSWERS = ['waiting', 'approved', 'declined', 'used'];
 const LIMIT = 20_000;
 const KEPT = 200;
 const WAITING = 100;
+// How long a used approval still answers the same tool, agent and plan: a retry after the action
+// failed or its answer was lost. Each action is guarded by the versions it names, so doing it again
+// changes nothing that changed since.
+const RETRY = 15 * 60 * 1000;
 
 const refuse = message => { throw new Refused(400, 'InvalidRequest', message); };
 const agentOf = value => (typeof value === 'string' && AGENT.test(value) ? value : refuse('Name the agent as agent: and its name'));
@@ -59,13 +63,20 @@ export function agentStore(db) {
       agent = agentOf(agent); tool = toolOf(tool);
       const planned = jsonOf(plan, 'plan');
       const showing = jsonOf(shown, 'preview');
-      const same = await db.prepare("SELECT * FROM agent_approvals WHERE did = ?1 AND agent = ?2 AND tool = ?3 AND plan = ?4 AND state IN ('waiting', 'approved')").bind(did, agent, tool, planned).first();
+      const open = () => db.prepare("SELECT * FROM agent_approvals WHERE did = ?1 AND agent = ?2 AND tool = ?3 AND plan = ?4 AND state IN ('waiting', 'approved')").bind(did, agent, tool, planned).first();
+      const same = await open();
       if (same) return { approval: approval(same), unchanged: true };
       const { count } = await db.prepare("SELECT COUNT(*) AS count FROM agent_approvals WHERE did = ?1 AND state = 'waiting'").bind(did).first();
       if (count >= WAITING) throw new Refused(409, 'TooManyWaiting', `${WAITING} actions are waiting for the person already. Ask them to answer some in ohm first.`);
       const id = `a${crypto.randomUUID().replaceAll('-', '')}`;
-      await db.prepare("INSERT INTO agent_approvals (did, id, agent, tool, plan, shown, state, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'waiting', ?7)")
+      // One open approval for each agent, tool and plan (agent_approvals_one_open): an ask at the same
+      // moment as this one gives the approval it made.
+      const made = await db.prepare("INSERT INTO agent_approvals (did, id, agent, tool, plan, shown, state, asked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'waiting', ?7) ON CONFLICT DO NOTHING")
         .bind(did, id, agent, tool, planned, showing, now.toISOString()).run();
+      if (!made.meta.changes) {
+        const other = await open();
+        if (other) return { approval: approval(other), unchanged: true };
+      }
       return { approval: approval(await one(did, id)) };
     },
 
@@ -93,13 +104,18 @@ export function agentStore(db) {
       return { id, state };
     },
 
-    // The tool carries out what was approved, once, and only the exact plan.
+    // The tool carries out what was approved, once, and only the exact plan. The same tool, agent
+    // and plan sent again soon after, because the action failed or its answer was lost, is answered
+    // the same, so a retry is not told to ask again.
     async use(did, { id, agent, tool, plan, now = new Date() }) {
       agent = agentOf(agent); tool = toolOf(tool);
       const planned = jsonOf(plan, 'plan');
       const done = await db.prepare("UPDATE agent_approvals SET state = 'used', used_at = ?6 WHERE did = ?1 AND id = ?2 AND agent = ?3 AND tool = ?4 AND plan = ?5 AND state = 'approved'")
         .bind(did, id, agent, tool, planned, now.toISOString()).run();
       if (done.meta.changes) return { id, used: true };
+      const again = await db.prepare("SELECT 1 AS yes FROM agent_approvals WHERE did = ?1 AND id = ?2 AND agent = ?3 AND tool = ?4 AND plan = ?5 AND state = 'used' AND used_at >= ?6")
+        .bind(did, id, agent, tool, planned, new Date(now.getTime() - RETRY).toISOString()).first();
+      if (again) return { id, used: true, unchanged: true };
       const { approval: held } = await this.get(did, id);
       const why = held.state === 'waiting' ? 'The person has not approved this in ohm yet'
         : held.state === 'declined' ? 'The person declined this in ohm'

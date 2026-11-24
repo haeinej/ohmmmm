@@ -446,8 +446,13 @@ test('agents: an action waits for Approve in ohm, is used once, and a paused or 
   await assert.rejects(tools.call('vault_mail_ask', { ...draft, body: 'Changed.', confirm: asked.confirm }), /has changed since it was shown/);
   const sent = await tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm });
   assert.deepEqual([sent.done, sent.approved, sent.send], [true, true, draft]);
-  // Used once: the same approval does nothing again.
-  await assert.rejects(tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm }), /used already/);
+  // Sent again soon after, because its answer was lost, it answers the same rather than "ask again".
+  assert.deepEqual((await tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm })).send, draft);
+  // Another plan, tool or agent cannot use it; and once the retry has passed, it is used up.
+  const plan = { tool: 'vault_mail_ask', ...draft };
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:helper', tool: 'vault_mail_ask', plan: { ...plan, body: 'Changed.' } }), /used already/);
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:other', tool: 'vault_mail_ask', plan }), /used already/);
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:helper', tool: 'vault_mail_ask', plan, now: new Date(Date.now() + 16 * 60 * 1000) }), /used already/);
   // Declined: the agent is told, and nothing is done.
   const other = await tools.call('vault_mail_ask', { ...draft, subject: 'Another' });
   await agents.answer(did, { id: other.confirm, approve: false });
@@ -462,6 +467,20 @@ test('agents: an action waits for Approve in ohm, is used once, and a paused or 
   await agents.setState(did, { agent: 'agent:helper', state: 'disconnected' });
   await assert.rejects(tools.call('vault_tree'), /disconnected this agent/);
   assert.equal((await agents.get(did, left.confirm)).approval.state, 'declined');
+});
+
+test('the same plan asked at the same moment gives one approval, and the database holds no second one open', async () => {
+  const db = await testDatabase();
+  const agents = agentStore(db);
+  const asked = { agent: 'agent:helper', tool: 'vault_mail_ask', plan: { to: ['sam@example.test'], subject: 'The walk' }, shown: { subject: 'The walk' } };
+  const answers = await Promise.all(Array.from({ length: 5 }, () => agents.ask(did, asked)));
+  assert.equal(new Set(answers.map(each => each.approval.id)).size, 1);
+  assert.equal((await agents.list(did)).approvals.length, 1);
+  assert.throws(() => db.sqlite.prepare("INSERT INTO agent_approvals (did, id, agent, tool, plan, shown, state, asked_at) VALUES (?, 'a-second', 'agent:helper', 'vault_mail_ask', ?, '{}', 'approved', '2026-11-24T00:00:00Z')").run(did, JSON.stringify(asked.plan)), /UNIQUE/);
+  // Once it is used, the same plan may be asked for again.
+  await agents.answer(did, { id: answers[0].approval.id, approve: true });
+  await agents.use(did, { ...asked, id: answers[0].approval.id });
+  assert.notEqual((await agents.ask(did, asked)).approval.id, answers[0].approval.id);
 });
 
 test('each tool names real API requests, and vault tools ask only for what they declare', async () => {
