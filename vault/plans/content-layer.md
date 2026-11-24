@@ -55,7 +55,11 @@ Today we rebuild a site and swap where its content is read from. Instead, any As
 - **Public at build time,** from a content loader over the vault service's public reads.
 - **Friends at request time,** through Astro's live collections and the viewer's ohm session, on a server-rendered route. A static build can never hold Friends content, so this split is required, not a choice.
 - **One content API: the vault service.** The PDS stays the public record other apps read. Sites read through the service, because only it can answer for Friends and render media. The loader starts on the PDS only because the service has no reads for anyone yet, and keeps that source for sites with no ohm account.
-- The `migrate-site` skill shrinks to: add the loader, map collections to channels, check the pages against a baseline. Rule 8 ("rebuild it identically") in `vault/AGENTS.md` becomes "swap the content source for the loader".
+- **The curator moves a site onto Astro.** The curator (`vault/agents/curator.md`, PR #34) already screens a site and agrees its channels with the owner. It gains a skill, `vault/skills/move-to-astro/`, that it follows next:
+  - **A site already on Astro:** add the loader, map its collections to the channels agreed, and check every page against a baseline.
+  - **A site not on Astro** (plain HTML, another generator, a CMS export): rebuild it in Astro identically, with its templates becoming layouts and components and its content read through the loader, then check against the baseline.
+  - Either way the design does not change, the site's own files are never edited in place (work on a copy), and the owner approves before anything replaces the live site.
+  - `migrate-site` keeps only what is not Astro-specific (baseline, content map) and points to `move-to-astro`. Rule 8 in `vault/AGENTS.md` becomes "move the site onto Astro and the loader, identically".
 
 ## Publishing and plugins inside the vault
 

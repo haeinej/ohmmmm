@@ -12,7 +12,7 @@ Two writers never touch the same files:
 | Owner | Files |
 | --- | --- |
 | Claude | `vault/service/`, `vault/vault/`, `vault/mcp/`, `vault/lexicons/`, `app/`, `contract/`, `docs/words.md`, `vault/plans/`, `vault/AGENTS.md` |
-| Devin | `vault/astro/` (new), the `haeinej/haeinjung.com` repo, and conflict-only merges of `main` into PRs #34 and #35 |
+| Devin | `vault/astro/` (new), `vault/skills/move-to-astro/` (new), `vault/skills/migrate-site/`, `vault/agents/curator.md` (once #34 merges), rule 8 of `vault/AGENTS.md`, the `haeinej/haeinjung.com` repo, and conflict-only merges of `main` into PRs #34 and #35 |
 
 If a Devin task needs something in a Claude-owned file (a service request, a word), it says so in its PR description and does not make the change.
 
@@ -31,7 +31,7 @@ If a Devin task needs something in a Claude-owned file (a service request, a wor
 | C2 | Claude | Content reads for sites: public channels and blocks by DID, and Friends reads with a viewer's ohm session | After #33 merges | `vault/content-reads` |
 | C3 | Claude | Visibility moves, publishing as one of them (standard.site plan › step 2) | After C2 merges | `home/visibility` |
 | D1 | Devin | The `ohm` Astro loader, public content from the member's PDS | After #37 merges | `vault/astro-loader` |
-| D2 | Devin | haeinjung.com reads its content through the loader | After D1 merges | in `haeinej/haeinjung.com` |
+| D2 | Devin | The curator's `move-to-astro` skill, written while moving haeinjung.com onto Astro and the loader with it | After D1 (stacked if open) | `vault/move-to-astro` here, and a branch in `haeinej/haeinjung.com` |
 | D3 | Devin | Bring #34 and #35 up to date with `main` | After #33 merges | their own branches |
 | D4 | Devin | Friends content in the loader, through Astro live collections and C2's reads | After C2 and D1 merge | `vault/astro-friends` |
 
@@ -58,4 +58,4 @@ C1 on `home/production-wiring` (#33); C2 on `vault/content-reads`, stacked on #3
 
 ### Devin: D1 → D2 → D3 → D4
 
-D1 on `vault/astro-loader`, stacked on #37 if it is not merged; D2 in `haeinej/haeinjung.com`, using D1's branch until it merges; D3 once #33 is merged, otherwise stop and report; D4 once C2 is merged (or its PR is open, stacked on it), otherwise stop and report.
+D1 on `vault/astro-loader`, stacked on #37 if it is not merged; D2 writes `move-to-astro` and wires the curator to it (stacked on #34 if it is not merged), and uses it on `haeinej/haeinjung.com` with D1's branch until it merges; D3 once #33 is merged, otherwise stop and report; D4 once C2 is merged (or its PR is open, stacked on it), otherwise stop and report.
