@@ -40,18 +40,29 @@ This prints a local preview. When ready, set `ATPROTO_APP_PASSWORD` and rerun th
 
 ## What the record needs
 
-The smallest complete record has a type, a body, a publication date, a canonical URL, and its form. This example adds a label. The type is the same on every site.
+A post is kept as a [standard.site](https://standard.site) document. The document carries what every reader understands; its `content` is the post as ohm keeps it. The smallest complete one has a title, a publication date, the publication it belongs to, and content with a body, a canonical URL and a form. This example adds a label. The types are the same on every site.
 
 ```json
 {
-  "$type": "com.ohmmmm.post",
-  "body": "I want to remember how the city smelled after the rain.",
+  "$type": "site.standard.document",
+  "site": "at://did:web:pds.example.com/site.standard.publication/self",
+  "path": "/posts/field-notes/after-the-rain",
+  "title": "I want to remember how the city smelled after the rain.",
+  "textContent": "I want to remember how the city smelled after the rain.",
+  "tags": ["Field notes"],
   "publishedAt": "2026-01-14T09:00:00Z",
-  "canonicalUrl": "https://example.com/posts/field-notes/after-the-rain",
-  "form": "note",
-  "label": "Field notes"
+  "content": {
+    "$type": "com.ohmmmm.post",
+    "body": "I want to remember how the city smelled after the rain.",
+    "canonicalUrl": "https://example.com/posts/field-notes/after-the-rain",
+    "form": "note",
+    "label": "Field notes",
+    "untitled": true
+  }
 }
 ```
+
+The publish command writes all of this from the post: a note has no title of its own, so the document is titled by its first words and `untitled` says so.
 
 The same record can become a full page, a short feed entry, or a gallery card. Your site decides which fields to show and how to lay them out. [Set up with your coding agent](set-up-with-an-agent.md)
 

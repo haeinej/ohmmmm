@@ -1,13 +1,29 @@
 // Checked public repository reads shared by Node commands and edge Workers. A full inventory
 // ends only when the server omits its cursor; a bound or broken cursor is never partial success.
 import { isRecordKey } from './pds.mjs';
+import { CONTENT, DOCUMENT, fromDocument } from './standard.mjs';
 
-export async function listRecords({ did, origin, collection, get = fetch, maxPages = 200, onResponse }) {
+// Posts are kept in a repository as standard.site documents. Asked for posts (`com.ohmmmm.post`),
+// these read documents and give each as the post the vault reads, at the post's own address, so
+// everything that reads posts reads them the same way it always has. A document another
+// application wrote, whose content is not a post, is passed over.
+const wire = collection => (collection === CONTENT ? DOCUMENT : collection);
+const readPost = (record, did, collection) => {
+  if (collection !== CONTENT) return record;
+  const value = fromDocument(record.value, { did });
+  return value && { ...record, uri: record.uri.replace(`at://${did}/${DOCUMENT}/`, `at://${did}/${CONTENT}/`), value };
+};
+
+// `raw` lists exactly the collection named, records as they are: for reading posts kept under
+// `com.ohmmmm.post` itself, from before posts were documents.
+export async function listRecords({ did, origin, collection, get = fetch, maxPages = 200, onResponse, raw = false }) {
+  const stored = raw ? collection : wire(collection);
+  const read = record => (raw ? record : readPost(record, did, collection));
   const url = new URL('/xrpc/com.atproto.repo.listRecords', origin);
-  url.search = new URLSearchParams({ repo: did, collection, limit: '100' });
+  url.search = new URLSearchParams({ repo: did, collection: stored, limit: '100' });
   const records = new Map();
   const cursors = new Set();
-  const prefix = `at://${did}/${collection}/`;
+  const prefix = `at://${did}/${stored}/`;
   for (let page = 0; page < maxPages; page++) {
     const response = await get(url, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
     await onResponse?.(response);
@@ -17,7 +33,8 @@ export async function listRecords({ did, origin, collection, get = fetch, maxPag
     for (const record of data.records) {
       if (typeof record?.uri !== 'string' || !record.uri.startsWith(prefix)) continue;
       const key = record.uri.slice(prefix.length);
-      if (isRecordKey(key)) records.set(record.uri, record);
+      const kept = isRecordKey(key) && read(record);
+      if (kept) records.set(kept.uri, kept);
     }
     if (data.cursor === undefined || data.cursor === null) return { records: [...records.values()], pages: page + 1 };
     if (typeof data.cursor !== 'string' || !data.cursor || cursors.has(data.cursor)) throw new Error('PDS returned an invalid cursor');
@@ -29,13 +46,14 @@ export async function listRecords({ did, origin, collection, get = fetch, maxPag
 
 export async function recordByKey(pds, key, get = fetch) {
   const url = new URL('/xrpc/com.atproto.repo.getRecord', pds.origin);
-  url.search = new URLSearchParams({ repo: pds.did, collection: pds.collection, rkey: key });
+  url.search = new URLSearchParams({ repo: pds.did, collection: wire(pds.collection), rkey: key });
   const response = await get(url, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
   const data = response.status === 404 ? {} : await response.json();
   if (response.status === 404 || (response.status === 400 && data.error === 'RecordNotFound')) return null;
   if (!response.ok) throw new Error(`Reading the post failed (HTTP ${response.status})`);
-  if (data.uri !== `at://${pds.did}/${pds.collection}/${key}` || !data.value || typeof data.value !== 'object' || Array.isArray(data.value)) throw new Error('PDS returned an invalid post');
-  return { ...data, key };
+  if (data.uri !== `at://${pds.did}/${wire(pds.collection)}/${key}` || !data.value || typeof data.value !== 'object' || Array.isArray(data.value)) throw new Error('PDS returned an invalid post');
+  const read = readPost(data, pds.did, pds.collection);
+  return read ? { ...read, key } : null;
 }
 
 // A slug is mutable and is not a repository key. Search a complete bounded owner/collection

@@ -8,7 +8,7 @@ description: What the ohm project is for and the rules for working in it. Use fi
 You are helping someone build their own home on AT Protocol, from the website they already have.
 
 - **Their own PDS.** Their content lives in a repository on a Personal Data Server they run, rooted in their own DID.
-- **One shared post, and a layer of their own.** Every post is the same record type on every site, `com.ohmmmm.post`. What only their site needs is declared in schemas under their own domain, shaped from what their website actually contains.
+- **One shared post, and a layer of their own.** Every post is a standard.site document (`site.standard.document`) on every site, with the post itself inside as `com.ohmmmm.post` content. What only their site needs is declared in schemas under their own domain, shaped from what their website actually contains.
 - **Compatible with other AT Protocol applications.** Identity is standard AT Protocol. The profile uses Bluesky's own fields. The post schema is fixed, and has the same name and fields on every site.
 
 The website stays theirs. It becomes a view of the repository, and its design does not change.
