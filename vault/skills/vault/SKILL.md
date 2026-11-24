@@ -68,10 +68,10 @@ A mirror copies each post as it was published. It does not file, and it does not
 | "Save this address or file" | Use `vault_capture` into the channel you are working in, and tell them where the block landed |
 | "Change that post" | `vault_read`, then `vault_save` with the version and only the fields that change |
 | "File this under Y" | `vault_read`, then `vault_save` with the version and the new `label` or `sublabel` |
-| "Make it public" | `vault_set_visibility` to `public`: show what it answers, then confirm. Say that it is marked for everyone and not yet published |
+| "Make it public" | `vault_set_visibility` to `public`: show what it answers, then confirm. It sends the person a request, which they approve in their cockpit and finish on the Publish page. Say it is not public yet |
 | "Publish" | `vault_publish`: say what would change, then confirm |
 | "What is not published yet?" | `vault_status` |
-| "Take that down" | Ask who should still have access. For friends-only, preview and confirm `vault_set_visibility` to `friends`, then preview and confirm `vault_publish`. Moving into private storage requires the person on their device |
+| "Take that down" | Ask who should still have access. `vault_set_visibility` sends the person a request; they take it down through Publish. For a friends-only block, a move to `private` with your write grant hides it from friends at once, and their device seals it |
 | "Bring in my posts" / "sync from my site" | `vault_mirror`: say what it found, then confirm. Then file what landed under `other` |
 
 ## Setting up

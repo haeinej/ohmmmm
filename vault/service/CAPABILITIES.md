@@ -714,7 +714,7 @@ What publishing would do: the posts it would publish for the first time, replace
 | --- | --- |
 | Reads or changes | Reads only (`GET`) |
 | Who may ask | The member |
-| Takes | `prepare`: optional: `1` to include `writes`, the changes to make |
+| Takes | `prepare`: optional: `1` to include `writes`, the changes to make<br>`only`: optional: one post's ID, for a preview of that post alone, as a visibility move to or from public shows it |
 | Gives | `repository`, `pds`, `collection` (`site.standard.document`), `contentType` (`com.ohmmmm.post`), `publication` when it is to be made, `create`, `replace`, `remove`, `unchanged`, `cannot`, `notInVault`, `changes` (how many); and with `prepare`, `writes` and `plan`, a name for exactly these changes |
 
 ### `com.ohmmmm.vault.getAttachment`

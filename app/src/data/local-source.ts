@@ -27,5 +27,6 @@ export const localSource: HomeSource = {
     history: unavailable, readVersion: unavailable, journal: unavailable,
   },
   media: { has: unavailable, put: unavailable, get: unavailable, rendition: unavailable },
+  moves: { requests: unavailable, decline: unavailable, record: unavailable, publishPage: refuse },
   agenda: unavailable,
 }

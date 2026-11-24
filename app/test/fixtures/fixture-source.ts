@@ -8,7 +8,7 @@ import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
   emptyPlan, mediaName, visibilityMove,
-  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type HomeFile, type HomeSource, type Layer, type VaultEvidence,
+  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
 import { createFixtureSearch } from "./fixture-search"
@@ -35,6 +35,9 @@ export function createFixtureSource() {
   /** Kept versions of sealed blocks, newest last, as the private layer keeps them. */
   const kept = new Map<string, { rev: number; version: string; created: string; file: HomeFile }[]>()
   let revs = 0
+  const requests: MoveRequest[] = []
+  const journalOfMoves: (MoveRecord & { state: string })[] = []
+  const hidden = new Set<string>()
 
   const channelText = (path: string, created: string) => writeNoteFile({ properties: { id: newNodeId(), created } })
   function ensureChannel(path: string, created: string) {
@@ -78,6 +81,7 @@ export function createFixtureSource() {
     listBlocks(layers: readonly Layer[] = allLayers) {
       return blocks.filter(doc => layers.includes(doc.visibility)).map((doc): BlockHead => ({
         id: doc.id, layer: doc.visibility, path: fileOf(doc).path, title: doc.title, version: versionOf(fileOf(doc)), store: storeOf(doc),
+        ...(hidden.has(doc.id) ? { leaving: "2026-11-24T00:00:00.000Z" } : {}),
       }))
     },
     readBlock(ref: BlockRef) {
@@ -86,7 +90,8 @@ export function createFixtureSource() {
     },
     saveBlock(ref: BlockRef, file: HomeFile, replaces: string | null) {
       const held = blocks.find(doc => doc.id === ref.id)
-      if ((held ? versionOf(fileOf(held)) : null) !== replaces || (held && held.visibility !== ref.layer)) throw stale()
+      // A post changes layer in place (to or from public, through Publish); anything else moves between stores.
+      if ((held ? versionOf(fileOf(held)) : null) !== replaces || (held && held.visibility !== ref.layer && storeOf(held) !== "post")) throw stale()
       const { doc } = docOf(ref, { ...file, text: setProperty(file.text, "visibility", ref.layer) })
       if (held) { for (const key of Object.keys(held)) delete (held as Record<string, unknown>)[key]; Object.assign(held, doc) }
       else blocks.push(doc)
@@ -202,6 +207,28 @@ export function createFixtureSource() {
       get: mediaOf,
       rendition: mediaOf,
     },
+    // Agents' requests and the move journal, as the service keeps them; `ask` stands in for an agent.
+    moves: {
+      async requests() { return requests.filter(request => request.state === "waiting") },
+      async decline(id: string) {
+        const request = requests.find(each => each.id === id && each.state === "waiting")
+        if (!request) throw new DOMException("This request has been answered already", "InvalidStateError")
+        request.state = "declined"
+        journalOfMoves.push({ block: request.block, from: request.from, to: request.to, request: id, state: "declined" })
+      },
+      async record(move: MoveRecord) {
+        if (move.request) {
+          const request = requests.find(each => each.id === move.request && each.state === "waiting")
+          if (!request) throw new DOMException("This request has been answered already", "InvalidStateError")
+          if (request.block !== move.block || request.to !== move.to) throw new DOMException("The move made is not the one requested", "InvalidStateError")
+          request.state = "approved"
+        }
+        const state = move.cleanupPending ? "cleanup-pending" : move.to === "public" || move.from === "public" ? "previewed" : "done"
+        journalOfMoves.push({ ...move, state })
+        return { state }
+      },
+      publishPage: (postId: string) => `https://vault.example.test/vault/?publish=${postId}`,
+    },
     async agenda() {
       return {
         unlabelled: blocks.filter(doc => doc.homeChannel === "other").length,
@@ -209,8 +236,15 @@ export function createFixtureSource() {
         counted: "public and friends-only",
       }
     },
-  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "agenda">
-  return Object.assign(source, { fixtureIds, owner })
+  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "agenda">
+  const ask = (request: Omit<MoveRequest, "id" | "asked" | "state">) => {
+    const made = { ...request, id: `r${requests.length + 1}`, asked: "2026-11-24T00:00:00.000Z", state: "waiting" as const }
+    requests.push(made)
+    return made
+  }
+  /** Hides a friends block as an agent with a grant would (vault.hideBlock). */
+  const hide = (id: string) => { hidden.add(id) }
+  return Object.assign(source, { fixtureIds, owner, ask, hide, journalOfMoves })
 }
 
 export type FixtureSource = ReturnType<typeof createFixtureSource>

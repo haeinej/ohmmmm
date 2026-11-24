@@ -185,7 +185,7 @@ To try a capture, grant it `write` on `notes` (below), then ask it to save `http
 
 ### Letting an agent change things
 
-By default an agent can read, search and collect, and nothing else: it captures and writes only into channels you granted it. Grant it one channel at a time (setting up a home with `design-home` ends by granting the channels you agreed there):
+By default an agent can read, search and collect, and nothing else: it captures and writes only into channels you granted it. Grant it one channel at a time (setting up a home with `design-home` ends by granting the channels you agreed there). A grant also lets an agent move a block on that channel to private, never to more people: [who can see a block](visibility.md).
 
 ```sh
 npx github:haeinej/ohmmmm vault grant claude-code link notes     # may link blocks in notes/ to others

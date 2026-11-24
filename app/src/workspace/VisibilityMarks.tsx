@@ -1,6 +1,9 @@
-// The visibility pills show each block's layer. Widening access asks for approval; public is reached only through Publish.
+// The visibility pills show each block's layer. Every move shows its preview first (the shared rules,
+// vault/vault/visibility.mjs); one that shows a block to more people asks for approval, and public
+// is finished on the Publish page, which previews the one post. While the pills are on screen, an
+// agent has the same two steps as tools: visibility.preview and visibility.move.
 // The tree's rows are ohm-ui's, so the pills sit over them, measured from the rows.
-import { useLayoutEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import { CheckIcon, GlobeIcon, LockIcon, UsersIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -10,7 +13,8 @@ import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { isBlock, byId, docIdOf, titleOf, type Doc, type Visibility } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
-import { setVisibility, useWorkspace } from "./store"
+import { previewMove, setVisibility, useWorkspace } from "./store"
+import { registerStepTool } from "@/webmcp"
 
 export const VISIBILITY: Record<Visibility, { label: string; icon: LucideIcon }> = {
   private: { label: "Only you", icon: LockIcon },
@@ -23,7 +27,7 @@ type Mark = { id: string; top: number; height: number }
 export function VisibilityMarks({ container }: { container: HTMLElement | null }) {
   const { rev, showVisibility } = useWorkspace()
   const [marks, setMarks] = useState<Mark[]>([])
-  const [asking, setAsking] = useState<{ doc: Doc; to: Visibility } | null>(null)
+  const [asking, setAsking] = useState<{ doc: Doc; to: Visibility; warning: string; answer?: (ok: boolean) => void } | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
 
   // Measure every block row, again whenever the tree changes shape.
@@ -48,14 +52,53 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
     return () => { mo.disconnect(); ro.disconnect() }
   }, [container, showVisibility, rev])
 
+  const move = (doc: Doc, to: Visibility) => setVisibility(doc.id, to).then(result => {
+    if (result.publish) {
+      notify({ message: `“${titleOf(doc)}” is marked for ${VISIBILITY[to].label.toLowerCase()}. Finish it on the Publish page.`, tone: "info" })
+      window.open(result.publish, "_blank", "noopener")
+    } else notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" })
+    return result
+  })
   const change = (doc: Doc, to: Visibility) => {
     if (to === doc.visibility) return
-    if (to === "public") return notify({ message: "A block becomes public through Publish, which shows a preview and asks first.", tone: "info" })
-    if (openness[to] > openness[doc.visibility]) return setAsking({ doc, to })
-    setVisibility(doc.id, to)
-      .then(() => notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" }))
-      .catch(err => notify({ message: (err as Error).message }))
+    let warning: string
+    try { warning = previewMove(doc.id, to).warning } catch (err) { return notify({ message: (err as Error).message }) }
+    // Showing it to more people, or anything that goes through Publish, asks first.
+    if (openness[to] > openness[doc.visibility] || to === "public" || doc.visibility === "public") return setAsking({ doc, to, warning })
+    move(doc, to).catch(err => notify({ message: (err as Error).message }))
   }
+
+  // An agent's way in: the same preview and the same move, which stops at the same dialog.
+  useEffect(() => {
+    if (!showVisibility) return
+    const steps = new AbortController()
+    const schema = { type: "object", properties: { id: { type: "string" }, to: { type: "string", enum: ["private", "friends", "public"] } }, required: ["id", "to"] } as const
+    void registerStepTool<{ id: string; to: Visibility }, ReturnType<typeof previewMove>>({
+      name: "visibility.preview", title: "Who can see it",
+      description: "What moving one block to another layer would do: the action, whether it shows the block to more people, the warning, and what it still needs. Changes nothing.",
+      inputSchema: schema, annotations: { readOnlyHint: true },
+      run: async ({ id, to }) => previewMove(id, to),
+    }, steps.signal)
+    void registerStepTool<{ id: string; to: Visibility }, Awaited<ReturnType<typeof setVisibility>>>({
+      name: "visibility.move", title: "Change visibility",
+      description: "Moves one block to another layer after the person approves the preview in a dialog. A move to or from public opens the Publish page for that post. Returns the block's id, its layer and the Publish page if any.",
+      inputSchema: schema, annotations: { consequentialHint: true },
+      approve: ({ id, to }, signal) => new Promise<boolean>((resolve, reject) => {
+        const doc = byId(id)
+        if (!isBlock(doc)) return reject(new DOMException("Only blocks have visibility", "DataError"))
+        let warning: string
+        try { warning = previewMove(id, to).warning } catch (err) { return reject(err) }
+        signal.addEventListener("abort", () => { setAsking(null); reject(new DOMException("Cancelled", "AbortError")) })
+        setAsking({ doc, to, warning, answer: resolve })
+      }),
+      run: async ({ id, to }) => {
+        const doc = byId(id)
+        if (!isBlock(doc)) throw new DOMException("Only blocks have visibility", "DataError")
+        return move(doc, to)
+      },
+    }, steps.signal)
+    return () => steps.abort()
+  }, [showVisibility]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!showVisibility) return null
   return <>
@@ -93,23 +136,21 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
       )
     })}
 
-    <Dialog open={!!asking} onOpenChange={o => !o && setAsking(null)}>
+    <Dialog open={!!asking} onOpenChange={o => { if (!o) { asking?.answer?.(false); setAsking(null) } }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Show “{asking && titleOf(asking.doc)}” to {asking && VISIBILITY[asking.to].label.toLowerCase()}?</DialogTitle>
-          <DialogDescription>
-            Your vault service and your friends can read the shared copy. Publishing is a separate step with its own preview and approval.
-          </DialogDescription>
+          <DialogDescription>{asking?.warning}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setAsking(null)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => { asking?.answer?.(false); setAsking(null) }}>Cancel</Button>
           <Button onClick={() => {
             if (!asking) return
-            const { doc, to } = asking
-            setVisibility(doc.id, to)
-              .then(() => notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" }))
-              .catch(err => notify({ message: (err as Error).message }))
+            const { doc, to, answer } = asking
             setAsking(null)
+            // An agent's call runs the move itself once approved; the button runs it here.
+            if (answer) return answer(true)
+            move(doc, to).catch(err => notify({ message: (err as Error).message }))
           }}>Change visibility</Button>
         </DialogFooter>
       </DialogContent>

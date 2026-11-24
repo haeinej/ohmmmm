@@ -1,10 +1,12 @@
 import { evidence, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { isPostId, setProperty } from "../../../vault/vault/file.mjs"
+import { planMove } from "../../../vault/vault/visibility.mjs"
 import type { SearchInput, SearchProvider } from "./search"
 
 export type Layer = "public" | "friends" | "private"
 export type BlockRef = { id: string; layer: Layer; store: "post" | "block" | "sealed" }
-export type BlockHead = BlockRef & { path?: string; title?: string; version?: string }
+/** `leaving`: hidden from friends on its way to private, for this device to seal. */
+export type BlockHead = BlockRef & { path?: string; title?: string; version?: string; leaving?: string }
 export type HomeFile = { path: string; text: string }
 export type BlockFile = HomeFile & { version: string }
 export type Account = { did: string | null; user: { name: string }; mirrored: boolean; service: string | null }
@@ -31,6 +33,13 @@ export type VisibilityMove = {
   warning: string
 }
 export type MoveResult = { ref: BlockRef; version: string; cleanupPending: boolean }
+/** An agent's request for a move it may not finish, waiting for the member (vault.listMoveRequests). */
+export type MoveRequest = {
+  id: string; block: string; store: BlockRef["store"]; from: Layer; to: Layer; version?: string
+  askedBy: string; reason?: string; asked: string; state: "waiting" | "approved" | "declined"
+}
+/** A move the member made, for the journal (vault.recordMove). */
+export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string }
 export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: string }
 /** A channel's `_channel.md` on the vault service, with the version compare-and-set names. */
 export type ChannelHead = { path: string; version: string; title?: string; kind?: string }
@@ -84,6 +93,14 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
     get(name: string): Promise<Blob>
     rendition(name: string, width: MediaWidth): Promise<Blob>
   }
+  /** Visibility moves: agents' requests waiting for the member, and the journal of moves. */
+  moves: {
+    requests(): Promise<MoveRequest[]>
+    decline(id: string, reason?: string): Promise<void>
+    record(move: MoveRecord): Promise<{ state: string }>
+    /** The Publish page, showing one post alone: where a move to or from public is finished. */
+    publishPage(postId: string): string
+  }
   agenda(): Promise<Agenda>
   search: SearchProvider
   history(ref: BlockRef): Result<Mode, HistoryVersion[]>
@@ -112,14 +129,14 @@ export const emptyPlan = (): PublishPlan => ({
 })
 
 /** Explicitly describe the move so the UI can ask before calling any write. */
+/** A move between the friends and private layers, worded by the shared rules (vault/vault/visibility.mjs). */
 export function visibilityMove(ref: BlockRef, to: Layer): VisibilityMove {
   if (ref.layer === to || ref.layer === "public") {
     throw new DOMException("Choose another layer. A published copy is taken down through publishing.", "NotSupportedError")
   }
-  const move = { from: ref.layer, to }
-  if (to === "public") return { ...move, action: "publish", warning: "Publishing makes a public copy and keeps the original." }
-  if (to === "friends") return { ...move, action: "copy", warning: "The vault service and your friends can read the shared copy." }
-  return { ...move, action: "copy-and-remove", warning: "Backups made while the block was shared may still hold a readable copy." }
+  const plan = planMove({ from: ref.layer, to, title: "checked by the caller" })
+  const action = plan.action === "publish" ? "publish" : plan.action === "share" ? "copy" : "copy-and-remove"
+  return { from: ref.layer, to, action, warning: plan.warning }
 }
 
 /** The caller confirms disclosure or removal before invoking this operation. */

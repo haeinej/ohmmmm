@@ -12,7 +12,8 @@ import { docOf } from "@/data/block-document"
 import { setProperty, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type BlockRef, type HomeSource, type MoveTarget } from "@/data/source"
+import { type BlockRef, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
+import { planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
@@ -197,6 +198,7 @@ export async function setSource<Master, Sealed>(
   if (!await selectSource(next && "service" in next ? createServiceSource(next.service) : next)) return
   usedSlugs.clear()
   for (const doc of [...blocks, ...cortex]) usedSlugs.add(doc.slug)
+  await movesOnOpen()
   if (keepView) { set(bump()); return }
   bodyReplacements.clear()
   sourceRevision = ++replacementSequence
@@ -293,23 +295,114 @@ export function setSideWidth(w: number) {
 export const setAudience = (audience: Audience) => set({ audience })
 export const setShowVisibility = (showVisibility: boolean) =>
   set({ showVisibility, side: "repo", repoMode: "tree", ...(showVisibility ? {} : { audience: "private" as Audience }) })
-/** Moves a block between the friends and private layers (data/source.ts moveVisibility). The panel asks first when widening the audience. */
-export function setVisibility(id: string, visibility: Visibility) {
+/** What moving a block would do, by the shared rules (vault/vault/visibility.mjs): the preview both the panel and `visibility.preview` show. */
+export function previewMove(id: string, to: Visibility) {
   const doc = byId(id)
   if (!isBlock(doc)) throw new DOMException("Only blocks have visibility", "DataError")
-  // Public is the PDS's: a block becomes public only through Publish, which asks first.
-  if (visibility === "public") return Promise.reject(new DOMException("A block becomes public through Publish.", "NotSupportedError"))
+  try {
+    return { id, title: doc.title, ...planMove({ from: doc.visibility, to, title: doc.title }) }
+  } catch (err) {
+    throw new DOMException((err as Error).message, "DataError")
+  }
+}
+
+/**
+ * Moves a block to another layer: the one handler the visibility control, an approved agent request
+ * and the `visibility.move` tool all call, after the person approved what `previewMove` showed.
+ * Friends ↔ private moves between stores here; a post to or from public is changed in place and
+ * finished on the Publish page, which previews that one post. Every move is journalled.
+ */
+export function setVisibility(id: string, visibility: Visibility, { request, reason }: { request?: string; reason?: string } = {}) {
+  const preview = previewMove(id, visibility)
+  if (preview.needs?.includes("title")) return Promise.reject(new DOMException("Give it a title before it is published.", "DataError"))
   return serial(async () => {
     const held = blockVersion(id)
     if (!held) throw new DOMException("There is no such block", "NotFoundError")
-    const target: MoveTarget = visibility === "private" ? { layer: "private", opaqueId: newOpaqueId() } : { layer: visibility }
+    const { from } = preview
+    if (preview.via === "publish") {
+      // Public is the PDS's. A post is marked here, then published or taken down on the Publish page.
+      if (held.ref.store !== "post") {
+        throw new DOMException(from === "public" ? "Move it to friends first; Publish then takes it down." : "Only a post goes to the Publish page from here. Move a private post to friends first; a block becomes a post when it is published as one, which is not built yet.", "NotSupportedError")
+      }
+      if (visibility === "private") throw new DOMException("Move it to friends first; Publish then takes it down.", "NotSupportedError")
+      const file = await live().readBlock(held.ref)
+      if (file.version !== held.version) throw new DOMException("The block changed. Review it again before moving it.", "InvalidStateError")
+      const ref = { ...held.ref, layer: visibility }
+      const marked = { path: file.path, text: setProperty(file.text, "visibility", visibility) }
+      const saved = await live().saveBlock(ref, marked, held.version)
+      dropBlock(id)
+      landBlock(ref, marked, saved.version)
+      await live().moves.record({ block: id, from, to: visibility, ...(request ? { request } : {}), ...(reason ? { reason } : {}) })
+      set(bump())
+      return { id, visibility, cleanupPending: false, publish: live().moves.publishPage(id) }
+    }
+    // Not public: that went to Publish above.
+    const target: MoveTarget = visibility === "private" ? { layer: "private", opaqueId: newOpaqueId() } : { layer: "friends" }
     const moved = await live().moveVisibility(held.ref, target, held.version)
     const file = await live().readBlock(moved.ref)
     if (moved.ref.id !== id || held.ref.layer !== moved.ref.layer) dropBlock(id)
     landBlock(moved.ref, { path: file.path, text: file.text }, file.version)
+    await live().moves.record({
+      block: id, from, to: visibility, ...(visibility === "private" ? { sealedAs: moved.ref.id } : {}),
+      ...(moved.cleanupPending ? { cleanupPending: true } : {}), ...(request ? { request } : {}), ...(reason ? { reason } : {}),
+    })
     set(bump())
     return { id: moved.ref.id, visibility, cleanupPending: moved.cleanupPending }
   })
+}
+
+// Agents' requests for moves they may not finish, waiting for the member.
+let moveRequests: MoveRequest[] = []
+/** When the home opens: what agents asked for, and sealing what they hid. Neither keeps the home from opening. */
+async function movesOnOpen() {
+  moveRequests = []
+  try {
+    await loadMoveRequests()
+    await sealHidden()
+  } catch (problem) {
+    failureListeners.forEach(listener => listener(problem as Error))
+  }
+}
+export const waitingRequests = () => moveRequests
+/** Reads the requests waiting for the member. */
+export async function loadMoveRequests() {
+  moveRequests = await live().moves.requests()
+  set(bump())
+  return moveRequests
+}
+/** Approves an agent's request: the same move, by the same handler, recorded as answering it. Consequential: the person approves first. */
+export async function approveMoveRequest(requestId: string) {
+  const request = moveRequests.find(each => each.id === requestId)
+  if (!request) throw new DOMException("That request is no longer waiting", "NotFoundError")
+  const held = blockVersion(request.block)
+  if (!held) throw new DOMException("The block it asks about is not here, or is locked on this device", "NotFoundError")
+  // Pinned to what the agent read: a block changed since then is reviewed again.
+  if (request.version && held.ref.store !== "sealed" && request.version !== held.version) {
+    throw new DOMException("The block changed since the agent asked. Review it again, and move it yourself if you still want to.", "InvalidStateError")
+  }
+  const moved = await setVisibility(request.block, request.to, { request: request.id })
+  await loadMoveRequests()
+  return moved
+}
+export async function declineMoveRequest(requestId: string, reason?: string) {
+  await live().moves.decline(requestId, reason)
+  await loadMoveRequests()
+  return { id: requestId, declined: true }
+}
+/**
+ * Seals what an agent hid on its way to private: friends stopped reading it when it was hidden,
+ * and this device, with the private layer open, finishes the move. Runs when the home opens.
+ */
+export async function sealHidden() {
+  if (privateLayer !== "open") return []
+  const heads = await live().listBlocks(["public", "friends"])
+  const sealed: string[] = []
+  for (const head of heads.filter(each => each.leaving && each.layer === "friends")) {
+    if (!byId(head.id)) continue
+    await setVisibility(head.id, "private")
+    sealed.push(head.id)
+  }
+  return sealed
 }
 
 // Profile and settings

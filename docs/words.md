@@ -43,6 +43,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 - **PDS boundary:** the member's own PDS (for example Cirrus on their Cloudflare account). It holds only public posts (`com.ohmmmm.post`) and their blobs, written only by the member when they publish.
 - **Personal boundary:** everything else: Friends blocks, sealed private blocks, the sealed cortex, the media cache, and the folders a vault reads. Nothing crosses to the PDS except through Publish.
 - **Content reads:** what a member's site reads by their DID (`com.ohmmmm.content.*`). An **entry** is a block as a site sees it. The **audience** is who is looking: anyone sees what is published on the PDS, a friend also sees Friends, and no one sees private.
+- **Visibility move:** moving a block between layers, by one set of rules (`vault/vault/visibility.mjs`). Only the member shows a block to more people. An agent **asks** (a **move request**, waiting in the cockpit) or, with a grant, **hides** a friends-only block on its way to private. Every move is in the **move journal**, by ID.
 - **Viewer token:** ohm's ten-minute proof of who a viewer is, for one member's content, posted back only to one of that member's listed **sites**. It is never a session.
 - **Media record:** a block for a file that is kept where it is. The record saves its path and metadata (origin, hash, size, dimensions, kind, alt); the bytes sit in ohm's media cache, sealed when private, and can always be sent again.
 

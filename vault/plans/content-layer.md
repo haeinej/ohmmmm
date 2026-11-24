@@ -89,6 +89,10 @@ Who builds which, and the prompts to start them: [docs/handoff/content-layer-spl
 - Friends reads use a **short-lived viewer token**. ohm posts it back to the site through `content.view`, only to one of the member's listed sites (`content.addSite`, which only the member, signed in to ohm, can call).
 - Who sees what is decided in one place (`audienceOf`/`sees` in `service/src/content.mjs`), so a later audience of named people for one block is a rule there, not a new set of requests.
 
+## Visibility moves: decided (24 November 2026)
+
+See the standard.site plan › Visibility moves: decided. That plan also leaves room for an audience of named people: a later rule in the shared visibility rules and in content's `audienceOf`/`sees`.
+
 ## Open: the owner's calls
 
 - ~~Where an agent's new block starts~~: **private**, always (decided 24 November 2026). `addToVault`, `vault_capture` and a new block through `vault_write` all write `visibility: private`.
