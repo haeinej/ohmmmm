@@ -9,7 +9,8 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { carryOut } from '../service/public/vault/publish.js';
 import { VISIBILITIES, VaultProblem } from '../vault/core.mjs';
-import { isPostId } from '../vault/file.mjs';
+import { isPostId, postFile } from '../vault/file.mjs';
+import { whyNot } from '../vault/visibility.mjs';
 import { readNode } from '../vault/node.mjs';
 
 const refuse = message => { throw new VaultProblem(message); };
@@ -77,9 +78,9 @@ export const TOOLS = [
   },
   {
     name: 'vault_set_visibility',
-    description: 'Mark a post for everyone or for friends. Always takes two calls. Moves into the private layer require the person on their device.',
-    inputSchema: { type: 'object', properties: { key: which, to: { type: 'string', enum: sharedLayers }, confirm: text }, required: ['key', 'to'] },
-    requests: ['getTree', 'getPost', 'putPost'],
+    description: 'Move a post or friends-only block to another layer: public, friends or private. Takes two calls; the first says what the move does and who may finish it. Showing it to more people, or taking a published post down, is the person\'s move: the second call sends them a request, which waits in their cockpit. With a write grant on its channel, a move to private hides it from friends at once, and the person\'s device seals it.',
+    inputSchema: { type: 'object', properties: { key: { type: 'string', description: "The post's slug or ID, or a friends-only block's ID." }, to: { type: 'string', enum: ['public', 'friends', 'private'] }, reason: { type: 'string', description: 'Why, in a sentence the person will read.' }, confirm: text }, required: ['key', 'to'] },
+    requests: ['getTree', 'getPost', 'getBlock', 'previewMove', 'hideBlock', 'requestMove'],
   },
   {
     name: 'vault_status',
@@ -177,7 +178,9 @@ const audience = {
 // `vault` reaches the vault service as the person: tree, search, get, put, remove
 // (scripts/vault-client.mjs).
 export function createTools(options) {
-  const { vault } = options;
+  // `by` is who the tools act as (agent:<name>). `grants`, when the tools run in a home, answers
+  // whether the person's .vault/grants.json lets this agent write under a path.
+  const { vault, by = 'agent:mcp', grants = null } = options;
   // Every post's line in the tree, each knowing its label and sublabel.
   const lines = async () => (await vault.tree()).labels.flatMap(folder => [
     ...folder.posts.filter(isShared).map(post => ({ ...post, label: folder.label, sublabel: '' })),
@@ -303,18 +306,36 @@ export function createTools(options) {
       }, write);
     },
 
+    // A move is never made here. The shared rules (vault/visibility.mjs) say who may finish it: a
+    // granted agent only starts a move to private; everything else goes to the person as a request.
     async vault_set_visibility(args) {
-      const { key, to } = args;
+      const { key, to, reason } = args;
       if (!VISIBILITIES.includes(to)) refuse(`Visibility is one of: ${VISIBILITIES.join(', ')}`);
-      if (!sharedLayers.includes(to)) refuse('Moving into the private layer requires the person on their device.');
-      const { line, post, version } = await there(key);
-      if (post.visibility === to) return { done: true, unchanged: true, ...summary(line, version) };
-      return twoSteps(args, { tool: 'vault_set_visibility', id: post.id, from: version, to }, {
-        post: post.title ?? post.slug, from: post.visibility, to, audience: audience[to],
-        ...(line.problems?.length && to === 'public' ? { cannotBePublishedYet: line.problems } : {}),
-      }, async () => {
-        await asking(() => vault.put({ ...post, visibility: to }, version));
-        return saved(post.id);
+      if (reason !== undefined && (typeof reason !== 'string' || reason.length > 2000)) refuse('A reason is a sentence or two of text.');
+      const found = await find(key);
+      const block = found ? null : isPostId(key) ? await asking(() => vault.getBlock(key)).catch(() => null) : null;
+      if (!found && !block) refuse(`No post uses "${key}", and no friends-only block has that ID.`);
+      const id = found ? found.post.id : key;
+      const from = found ? found.post.visibility : 'friends';
+      const name = found ? found.post.title ?? found.post.slug : readNode(block.block.path, block.block.text)?.node?.title ?? block.block.path;
+      if (from === to) return { done: true, unchanged: true, id, visibility: to };
+      const preview = await asking(() => vault.previewMove(id, to));
+      const path = found ? postFile(found.post).path : block.block.path;
+      const granted = Boolean(await grants?.allowed('write', path));
+      const why = whyNot(preview, { actor: by, granted });
+      const willHappen = {
+        block: name, from, to, action: preview.action, warning: preview.warning,
+        ...(preview.needs ? { needs: preview.needs } : {}),
+        outcome: why === null ? 'Friends stop reading it now; the person\'s device seals it into the private layer when next unlocked.' : `A request to the person, which waits in their cockpit. ${why}`,
+        ...(preview.waiting?.length ? { alreadyAsked: preview.waiting.map(request => ({ id: request.id, to: request.to, asked: request.asked })) } : {}),
+      };
+      return twoSteps(args, { tool: 'vault_set_visibility', id, from: preview.version, to }, willHappen, async () => {
+        if (why === null) {
+          const hid = await asking(() => vault.hideBlock({ id, replaces: preview.version, by, ...(reason ? { reason } : {}) }));
+          return { hidden: true, since: hid.hidden, next: 'The person\'s device seals it into the private layer when it is next unlocked.' };
+        }
+        const asked = await asking(() => vault.requestMove({ block: id, store: preview.store, from, to, version: preview.version, by, ...(reason ? { reason } : {}) }));
+        return { requested: true, request: asked.request.id, waitsFor: 'the person, in their cockpit', ...(asked.unchanged ? { alreadyWaiting: true } : {}) };
       });
     },
 

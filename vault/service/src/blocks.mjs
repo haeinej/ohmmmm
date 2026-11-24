@@ -62,7 +62,7 @@ export function blockStore(db) {
       const after = since === undefined ? 0 : Number(since);
       if (!Number.isSafeInteger(after) || after < 0) throw new Refused(400, 'InvalidCursor', 'since is a value an earlier list returned');
       const { results } = await db.prepare(
-        `SELECT id, version, path, kind, title, seq FROM blocks
+        `SELECT id, version, path, kind, title, seq, leaving_at FROM blocks
          WHERE did = ?1 AND seq > ?2 ${since === undefined ? 'AND version IS NOT NULL' : ''} ORDER BY seq LIMIT ${PAGE + 1}`,
       ).bind(did, after).all();
       const page = results.slice(0, PAGE);
@@ -72,6 +72,7 @@ export function blockStore(db) {
       return {
         blocks: page.map(row => row.version === null ? { id: row.id, removed: true } : {
           id: row.id, version: row.version, path: row.path, kind: row.kind, ...(row.title ? { title: row.title } : {}),
+          ...(row.leaving_at ? { leaving: row.leaving_at } : {}),
         }),
         cursor: String(latest),
         ...(results.length > PAGE ? { more: true } : {}),
@@ -98,7 +99,8 @@ export function blockStore(db) {
           `INSERT INTO blocks (did, id, version, path, kind, title, text, seq, created_at, updated_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ${next}, ?8, ?8)
            ON CONFLICT (did, id) DO UPDATE SET version = excluded.version, path = excluded.path, kind = excluded.kind,
-             title = excluded.title, text = excluded.text, seq = excluded.seq, updated_at = excluded.updated_at
+             title = excluded.title, text = excluded.text, seq = excluded.seq, updated_at = excluded.updated_at,
+             leaving_at = CASE WHEN blocks.version IS NULL THEN NULL ELSE blocks.leaving_at END
            WHERE blocks.version IS ?9
            RETURNING seq`,
         ).bind(did, id, version, path, node.kind, node.title ?? null, text, now.toISOString(), replaces).first();
@@ -151,8 +153,8 @@ export function blockStore(db) {
     // friends-only blocks, and friends-only posts as the files the post code writes.
     async shared(owner, reader) {
       await allowed(owner, reader);
-      const { results: blocks } = await db.prepare('SELECT id, version, path, kind, title FROM blocks WHERE did = ?1 AND version IS NOT NULL ORDER BY path').bind(owner).all();
-      const { results: posts } = await db.prepare("SELECT id, version, post FROM posts WHERE did = ?1 AND version IS NOT NULL AND visibility = 'friends' ORDER BY label, sublabel, slug").bind(owner).all();
+      const { results: blocks } = await db.prepare('SELECT id, version, path, kind, title FROM blocks WHERE did = ?1 AND version IS NOT NULL AND leaving_at IS NULL ORDER BY path').bind(owner).all();
+      const { results: posts } = await db.prepare("SELECT id, version, post FROM posts WHERE did = ?1 AND version IS NOT NULL AND visibility = 'friends' AND leaving_at IS NULL ORDER BY label, sublabel, slug").bind(owner).all();
       return {
         owner,
         blocks: [
@@ -168,9 +170,9 @@ export function blockStore(db) {
     async readShared(owner, reader, id) {
       await allowed(owner, reader);
       known(id);
-      const block = await db.prepare('SELECT version, path, text FROM blocks WHERE did = ?1 AND id = ?2 AND version IS NOT NULL').bind(owner, id).first();
+      const block = await db.prepare('SELECT version, path, text FROM blocks WHERE did = ?1 AND id = ?2 AND version IS NOT NULL AND leaving_at IS NULL').bind(owner, id).first();
       if (block) return { block: { id, path: block.path, text: block.text }, version: block.version };
-      const post = await db.prepare("SELECT version, post FROM posts WHERE did = ?1 AND id = ?2 AND version IS NOT NULL AND visibility = 'friends'").bind(owner, id).first();
+      const post = await db.prepare("SELECT version, post FROM posts WHERE did = ?1 AND id = ?2 AND version IS NOT NULL AND visibility = 'friends' AND leaving_at IS NULL").bind(owner, id).first();
       if (!post) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
       const file = postFile(JSON.parse(post.post));
       return { block: { id, path: file.path, text: file.text }, version: post.version };

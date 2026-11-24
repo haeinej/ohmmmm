@@ -79,7 +79,8 @@ export function postStore(db) {
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ${next}, ?13, ?13)
            ON CONFLICT (did, id) DO UPDATE SET version = excluded.version, slug = excluded.slug, label = excluded.label,
              sublabel = excluded.sublabel, visibility = excluded.visibility, title = excluded.title, form = excluded.form,
-             date = excluded.date, problems = excluded.problems, post = excluded.post, seq = excluded.seq, updated_at = excluded.updated_at
+             date = excluded.date, problems = excluded.problems, post = excluded.post, seq = excluded.seq, updated_at = excluded.updated_at,
+             leaving_at = CASE WHEN posts.version IS NULL OR excluded.visibility IS NOT posts.visibility THEN NULL ELSE posts.leaving_at END
            WHERE posts.version IS ?14
            RETURNING seq`,
         ).bind(did, post.id, version, post.slug, post.label, post.sublabel, post.visibility, post.title ?? null, made.form ?? null,

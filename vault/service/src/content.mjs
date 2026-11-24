@@ -104,12 +104,12 @@ export function contentStore(db, { get, pdsFor, now = () => Date.now() }) {
     if (!pds) throw new Refused(404, 'NotFound', 'There is nothing here');
     const all = [...await publicEntries(get, pds, owner, now())];
     if (audience.layers.includes('friends')) {
-      const { results: blocks } = await db.prepare('SELECT id, path, text FROM blocks WHERE did = ?1 AND version IS NOT NULL ORDER BY path').bind(owner).all();
+      const { results: blocks } = await db.prepare('SELECT id, path, text FROM blocks WHERE did = ?1 AND version IS NOT NULL AND leaving_at IS NULL ORDER BY path').bind(owner).all();
       for (const row of blocks) {
         const entry = friendsEntry(row.id, row.path, row.text);
         if (entry) all.push(entry);
       }
-      const { results: posts } = await db.prepare("SELECT id, post FROM posts WHERE did = ?1 AND version IS NOT NULL AND visibility = 'friends' ORDER BY label, sublabel, slug").bind(owner).all();
+      const { results: posts } = await db.prepare("SELECT id, post FROM posts WHERE did = ?1 AND version IS NOT NULL AND visibility = 'friends' AND leaving_at IS NULL ORDER BY label, sublabel, slug").bind(owner).all();
       for (const row of posts) {
         const file = postFile(JSON.parse(row.post));
         const entry = friendsEntry(row.id, file.path, file.text);

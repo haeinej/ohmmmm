@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS posts (
   seq INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  leaving_at TEXT,
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS posts_changes ON posts (did, seq);
@@ -50,6 +51,9 @@ CREATE TABLE IF NOT EXISTS blocks (
   seq INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  -- Set when the block is moving to the private layer: friends no longer read it, and the member's
+  -- device seals it when next unlocked (src/visibility.mjs).
+  leaving_at TEXT,
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS blocks_changes ON blocks (did, seq);
@@ -219,3 +223,39 @@ CREATE TABLE IF NOT EXISTS sites (
   added_at TEXT NOT NULL,
   PRIMARY KEY (did, origin)
 );
+
+-- Visibility moves (src/visibility.mjs). Every move is a row in `moves`, oldest first: which block
+-- (its ID, opaque for a private block; never its title or text), from and to which layer, who asked,
+-- who approved, why, and how it stands. An agent's request to show a block to more people waits in
+-- `move_requests` until the member answers it.
+CREATE TABLE IF NOT EXISTS moves (
+  did TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  at TEXT NOT NULL,
+  block TEXT NOT NULL,
+  from_layer TEXT NOT NULL,
+  to_layer TEXT NOT NULL,
+  action TEXT NOT NULL,
+  state TEXT NOT NULL,
+  asked_by TEXT NOT NULL,
+  approved_by TEXT,
+  reason TEXT,
+  request TEXT,
+  PRIMARY KEY (did, seq)
+);
+CREATE TABLE IF NOT EXISTS move_requests (
+  did TEXT NOT NULL,
+  id TEXT NOT NULL,
+  block TEXT NOT NULL,
+  store TEXT NOT NULL,
+  from_layer TEXT NOT NULL,
+  to_layer TEXT NOT NULL,
+  version TEXT,
+  asked_by TEXT NOT NULL,
+  reason TEXT,
+  asked_at TEXT NOT NULL,
+  state TEXT NOT NULL,
+  answered_at TEXT,
+  PRIMARY KEY (did, id)
+);
+CREATE INDEX IF NOT EXISTS move_requests_waiting ON move_requests (did, state);
