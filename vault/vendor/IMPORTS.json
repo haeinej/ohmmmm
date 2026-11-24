@@ -1,0 +1,526 @@
+{
+  "about": "Files copied unchanged from pinned upstream commits by scripts/import-vendor.mjs. Never edit them; ohm overrides live in cirrus/src/index.ts. cirrus/ deploys the published npm tarball named under npm, which matches this source.",
+  "sources": [
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "tag": "@getcirrus/pds@0.18.0",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "license": "MIT",
+      "licenseNote": "No LICENSE file at this commit; MIT is declared in packages/pds/package.json and in the root README (\"MIT. © Matt Kane (@ascorbic)\").",
+      "copied": [
+        "packages/pds/src",
+        "packages/pds/package.json",
+        "packages/pds/README.md",
+        "packages/pds/CHANGELOG.md",
+        "packages/pds/tsconfig.json",
+        "packages/pds/tsdown.config.ts"
+      ],
+      "destination": "vendor/cirrus/packages/pds",
+      "npm": {
+        "name": "@getcirrus/pds",
+        "version": "0.18.0",
+        "integrity": "sha512-JT11jVkRwjzxNKR3LwAytdjFJyIN11+Rv/YooAQK/NxuBOCzDPahFhxWh2lV0JsNFqCBG85fpSi/YXTENWliKw==",
+        "lockfile": "cirrus/pnpm-lock.yaml"
+      }
+    }
+  ],
+  "files": [
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/CHANGELOG.md",
+      "destination": "vendor/cirrus/packages/pds/CHANGELOG.md",
+      "sha256": "be0fa85f93baae0399df61dbd2633dbbbfb07a7805cf219a3f302cd595e931a4"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/README.md",
+      "destination": "vendor/cirrus/packages/pds/README.md",
+      "sha256": "1a2367d015780ed6eaf52601343fbdc43000ab7d88a24a83feff31420d3667bc"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/package.json",
+      "destination": "vendor/cirrus/packages/pds/package.json",
+      "sha256": "4a061adde71d379244903446eb42659485ac364f1f999d31d1fa44f32ead3035"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/account-do.ts",
+      "destination": "vendor/cirrus/packages/pds/src/account-do.ts",
+      "sha256": "0c4b665a11adc01ce970e4008b0c65922fada723f65357fb7169cec63cce482c"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/blobs.ts",
+      "destination": "vendor/cirrus/packages/pds/src/blobs.ts",
+      "sha256": "ab2d26c465e0a1aea04e18e037ce299ab4fe3b859436c38d374a25f881524d44"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cbor-compat.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cbor-compat.ts",
+      "sha256": "4c43c9e0b8234eaf71822cf43594253e023769b0d61774c2747b767b1eb984c3"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/activate.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/activate.ts",
+      "sha256": "202675c7a75d8ec25a363cc8ee4b85868e62def3c77d219842d2f512b6fa9abd"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/app-password/create.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/app-password/create.ts",
+      "sha256": "7fe9af14009bc3df6d9e2368177a2f2b88e366e57fcfa2c35fa064a60ada1a07"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/app-password/index.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/app-password/index.ts",
+      "sha256": "26a8ca84d01890fd4ac0275731a0d2133648313e88b20a45845b30060ea14c03"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/app-password/list.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/app-password/list.ts",
+      "sha256": "dd5fa2abba1b77b94fdea1ffd9f42ef11fdb48ad64de180826fc7909b919bb04"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/app-password/revoke.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/app-password/revoke.ts",
+      "sha256": "b4da41214f34709901ff8bbc48c3aafb7767ec3e6c65e90958010db88d532a46"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/dashboard.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/dashboard.ts",
+      "sha256": "9c18ddde33451d317cdb35c5bfefed676bcef9e79ffeca8ea61364494a00db79"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/deactivate.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/deactivate.ts",
+      "sha256": "54520683b4fd6a7e2bd3c5e4daf04c67677fb1ce5bbe6f543790c172f9162dd6"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/emit-identity.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/emit-identity.ts",
+      "sha256": "da6e109114322860de90f57e26384cab37afb298a9d01d008801830100f0ec8d"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/identity.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/identity.ts",
+      "sha256": "885c59b93027b1002cb3227fbb0160f24404db559c51cd15513acd5d1fc95923"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/init.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/init.ts",
+      "sha256": "79f123b866ee68732ca2a0caca3a58502a6ca6e3401f34c81723575e3e88a133"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/migrate-token.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/migrate-token.ts",
+      "sha256": "0ece42b48e49a2bce857bdee814e95c84463937fb080613bddad2034374e13ba"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/migrate.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/migrate.ts",
+      "sha256": "d17611791b5c24efd5128b54cee2c2f0095518b6852098e2edabfa76e480fc75"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/passkey/add.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/passkey/add.ts",
+      "sha256": "896e8cf919f6fa92f0d1c374887c3f3e56d981ca3ca5f7e7eef5dfb7ffbd838c"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/passkey/index.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/passkey/index.ts",
+      "sha256": "a1ec7253c0906aa147e7e4fb91a74075c303ed4d9f0eed0f6e19ad97006550ea"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/passkey/list.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/passkey/list.ts",
+      "sha256": "8eca397f44a73fcffda3d23ee1e34c71dd6dfb12ebe3ab44f54aa35900e073e7"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/passkey/remove.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/passkey/remove.ts",
+      "sha256": "fc1f1f2e6ea4fbe84b190604b4631f93b9228aa8d70073e84dca924c47925195"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/secret/index.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/secret/index.ts",
+      "sha256": "68ff8d88b5416444bd5e625105b5ae5d622b1741c9a2ca50886cf0615eef1e07"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/secret/jwt.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/secret/jwt.ts",
+      "sha256": "dacd18c8d2aba2284cb70b5303395dee32d5c9f7f4f119defe6c7ae53ccdc103"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/secret/key.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/secret/key.ts",
+      "sha256": "b22b13d1b3288ad7411049700235e8b4ad04ad108d20bfb4e4a928c64d78bfa8"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/secret/password.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/secret/password.ts",
+      "sha256": "173e325425807c98ddfa502d1eec9a13fc60522f1f010ea820907fd2ce6d9021"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/commands/status.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/commands/status.ts",
+      "sha256": "3099b0beef8bb728928c023890c4c9f2ba9054098342edccdfdab0f9e4c0f81c"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/index.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/index.ts",
+      "sha256": "d55f42a4653c5e2c435f72fe964a73adc660051a2edaa5b9f9a2eb797d74f645"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/checks.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/checks.ts",
+      "sha256": "875bd1bff0c442f4f8b3e3b647e8376395f8f1e209f4804388469ea38bc8004c"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/cli-helpers.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/cli-helpers.ts",
+      "sha256": "28f99b72b97ec1caeef5413447aab08b54b2d42fe5fceefb442c7622b6b17f86"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/dotenv.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/dotenv.ts",
+      "sha256": "34d1477f1ecf544875cb29e86b70e11fba68b16f61e15f09ae48c0a9452a16a8"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/handle-resolver.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/handle-resolver.ts",
+      "sha256": "c782df641a20d3a9ff756b5ee680ed2c2119980c722ccb6c55c27efaff4afd2d"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/pds-client.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/pds-client.ts",
+      "sha256": "b2cbe3bbe77f1b153a701f96555705d12b8369c3863642158ff1724170fadf93"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/plc-client.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/plc-client.ts",
+      "sha256": "d9e7669c9bafa87503d1ffba32ee5aabbd3e22213f7456236338dcad365487dc"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/secrets.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/secrets.ts",
+      "sha256": "6e4c2b0e5218f87928f83efa5a4d706cdd160432fe4a11f3c4eba8f7e35f1646"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/cli/utils/wrangler.ts",
+      "destination": "vendor/cirrus/packages/pds/src/cli/utils/wrangler.ts",
+      "sha256": "5089728d3df83d65c86ec358fa1a7f5fc947b63fd9e2d2b3384ff903b2e3a99f"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/dashboard.html",
+      "destination": "vendor/cirrus/packages/pds/src/dashboard.html",
+      "sha256": "dcf7f69771b6a0526e50db9ea6d9c6cffc95ec7e6203a2672253bbb7fc1a72e9"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/dashboard.ts",
+      "destination": "vendor/cirrus/packages/pds/src/dashboard.ts",
+      "sha256": "f5aef200ce618bc2e248f4381417c3ba2d119b90c0e103bb591dc2e6e460050e"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/did-cache.ts",
+      "destination": "vendor/cirrus/packages/pds/src/did-cache.ts",
+      "sha256": "03246163d20e6b8767696e502ad29b397f33d67d8d8f4f4e8b1a63509c51eb09"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/did-resolver.ts",
+      "destination": "vendor/cirrus/packages/pds/src/did-resolver.ts",
+      "sha256": "bcb4c625d5acb0f909a9fc1fabdefa86a6930d9c6be7d2947510991d6a957d4a"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/format.ts",
+      "destination": "vendor/cirrus/packages/pds/src/format.ts",
+      "sha256": "0fd92075c0dae2e7e36b1eb62d4fef6dd5c5610fc09a10eaaecee90dafabd774"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/html.d.ts",
+      "destination": "vendor/cirrus/packages/pds/src/html.d.ts",
+      "sha256": "519070d49a3fe7e0a7ca1bf8be99c007cebf956c8e09680f7ddbf6bd32abcec9"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/index.ts",
+      "destination": "vendor/cirrus/packages/pds/src/index.ts",
+      "sha256": "9b38fc3ce40139f9e4115de539dcdbe8c46d1a6bacb33777b196f6dc8bbcc57d"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/middleware/auth.ts",
+      "destination": "vendor/cirrus/packages/pds/src/middleware/auth.ts",
+      "sha256": "19fe35cc9a3db7cd92e637e7fdc7bf9b14b9e27c500f0ac709e07151237f6e9d"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/migration-token.ts",
+      "destination": "vendor/cirrus/packages/pds/src/migration-token.ts",
+      "sha256": "3c9cd6ef75ede4ff4fbb1e23aba0ab3b6bd43aee67d9dd4e93abb15717d0b0a3"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/oauth-storage.ts",
+      "destination": "vendor/cirrus/packages/pds/src/oauth-storage.ts",
+      "sha256": "f840c5bde550e27c008afa04c717ed195a6dbd483fd5fbac72da135379b615d1"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/oauth.ts",
+      "destination": "vendor/cirrus/packages/pds/src/oauth.ts",
+      "sha256": "3eef341330f29fc5ebdec1477c134273ac16ce4c8356b7563dd0a0f426900873"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/passkey-ui.ts",
+      "destination": "vendor/cirrus/packages/pds/src/passkey-ui.ts",
+      "sha256": "6651aaaa493bc8ff1342eafc704ff08863757c67bf9fd0b45c0440892b07b5bc"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/passkey.ts",
+      "destination": "vendor/cirrus/packages/pds/src/passkey.ts",
+      "sha256": "969165ada13ce4563944416d33e9b177a1bd2c0ab5f1e551208ef16c2ed3ece6"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/sequencer.ts",
+      "destination": "vendor/cirrus/packages/pds/src/sequencer.ts",
+      "sha256": "e88dfc77bf7ea085e510206de490f3aa0d71c8e853a8e30e1968825895112992"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/service-auth.ts",
+      "destination": "vendor/cirrus/packages/pds/src/service-auth.ts",
+      "sha256": "37393f04e60e7a64f2096cc5b8b0ae4f2be13db9d0cda92e9451f994496091c7"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/session.ts",
+      "destination": "vendor/cirrus/packages/pds/src/session.ts",
+      "sha256": "7d834c59432ba250b701fb8fb70348067e19119a905165e6d6b1316da3c33509"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/storage.ts",
+      "destination": "vendor/cirrus/packages/pds/src/storage.ts",
+      "sha256": "79141765e9f8849bbd4d9fb3f0e30833cd21edf807ebfccb6e6a488a27b3cd48"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/types.ts",
+      "destination": "vendor/cirrus/packages/pds/src/types.ts",
+      "sha256": "00b96d64241a46da7a19a37a495126709e9a1af2951b93db929125195dbc0673"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/validation.ts",
+      "destination": "vendor/cirrus/packages/pds/src/validation.ts",
+      "sha256": "5e737da9b2664d17c005f062d30ba19114c6823e7ba7f7c16ae4ddf44c2e5158"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/xrpc-proxy.ts",
+      "destination": "vendor/cirrus/packages/pds/src/xrpc-proxy.ts",
+      "sha256": "b597ff525c9eabe15090fabab3611a530f41498f1d02ab9f2c150906e9add52f"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/xrpc/identity.ts",
+      "destination": "vendor/cirrus/packages/pds/src/xrpc/identity.ts",
+      "sha256": "7aaea293ce2d0076240828727156dc761c6c063838b77606ca138b61540fb73a"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/xrpc/repo.ts",
+      "destination": "vendor/cirrus/packages/pds/src/xrpc/repo.ts",
+      "sha256": "aa42ab52847c054c1ccae53be610165e78583adaa80077d87e343841d87c857a"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/xrpc/server.ts",
+      "destination": "vendor/cirrus/packages/pds/src/xrpc/server.ts",
+      "sha256": "f8f57c1104a374ec37a909cfdbee71bf56e6ea21b6b8d31d6c2079942ed24a82"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/src/xrpc/sync.ts",
+      "destination": "vendor/cirrus/packages/pds/src/xrpc/sync.ts",
+      "sha256": "8cabd5c41cae44c840a25b45ccd8e9df089dd4115e75fc00ef393797bfafe0d1"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/tsconfig.json",
+      "destination": "vendor/cirrus/packages/pds/tsconfig.json",
+      "sha256": "8a7f2f3ed6ba52514b55b8f1d4397f53d3df9e2d773a24d30008325d7266f7cc"
+    },
+    {
+      "repository": "cirrus",
+      "remote": "https://github.com/ascorbic/cirrus.git",
+      "commit": "0aec63160b12bd6a7340eeeee3144f249fed9f23",
+      "path": "packages/pds/tsdown.config.ts",
+      "destination": "vendor/cirrus/packages/pds/tsdown.config.ts",
+      "sha256": "91b542c92b86c7c154143a75249e57b5a0d71b01420caa70db55e94178e07824"
+    }
+  ]
+}
