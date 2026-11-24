@@ -10,10 +10,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/cn"
 import { ago, clearAll, markRead, record, remove, useNotifications, type NotificationKind } from "./notifications"
 import { approveFriend, approveMoveRequest, declineFriend, declineMoveRequest, loadFriendRequests, loadMoveRequests, open as openDoc, previewMove, report, useWorkspace, waitingFriends, waitingRequests } from "./store"
-import { Checkbox } from "@/components/ui/checkbox"
+import { ChannelPicker, chosen, pickedNothing, type Picked } from "./ChannelPicker"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { notify } from "@/components/ui/notice"
-import { byId, channelRecords, titleOf } from "@/data/workspace-data"
+import { byId, titleOf } from "@/data/workspace-data"
 import type { FriendRequest, MoveRequest } from "@/data/source"
 
 const LAYER = { private: "only you", friends: "friends", public: "everyone" } as const
@@ -34,10 +34,9 @@ export function NotificationCenter() {
   const [answering, setAnswering] = useState<MoveRequest | null>(null)
   const waiting = waitingRequests()
   const asking = waitingFriends()
-  const [letIn, setLetIn] = useState<{ request: FriendRequest; every: boolean; channels: string[] } | null>(null)
+  const [letIn, setLetIn] = useState<{ request: FriendRequest } & Picked | null>(null)
   // Requests are read again whenever the panel opens.
   useEffect(() => { if (open) { report(loadMoveRequests()); report(loadFriendRequests()) } }, [open])
-  const topChannels = [...new Set(channelRecords.map(channel => channel.path.split("/")[0]))].sort()
   const nameOf = (request: MoveRequest) => { const doc = byId(request.block); return doc ? titleOf(doc) : "a block locked on this device" }
   const warningOf = (request: MoveRequest) => { try { return previewMove(request.block, request.to).warning } catch (err) { return (err as Error).message } }
 
@@ -151,27 +150,14 @@ export function NotificationCenter() {
               {letIn?.request.email} can read what you share with friends in the channels you choose, and so can their agents. It lasts until you remove them.
             </DialogDescription>
           </DialogHeader>
-          {letIn && (
-            <div className="flex flex-col gap-1.5">
-              <label className="flex items-center gap-2 text-body">
-                <Checkbox checked={letIn.every} onCheckedChange={every => setLetIn({ ...letIn, every: Boolean(every) })} /> Every channel
-              </label>
-              {!letIn.every && topChannels.map(path => (
-                <label key={path} className="flex items-center gap-2 ps-6 text-body">
-                  <Checkbox checked={letIn.channels.includes(path)}
-                    onCheckedChange={on => setLetIn({ ...letIn, channels: on ? [...letIn.channels, path] : letIn.channels.filter(each => each !== path) })} />
-                  {path}
-                </label>
-              ))}
-            </div>
-          )}
+          {letIn && <ChannelPicker value={letIn} onChange={picked => setLetIn({ ...letIn, ...picked })} />}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setLetIn(null)}>Not now</Button>
-            <Button disabled={!!letIn && !letIn.every && !letIn.channels.length} onClick={() => {
+            <Button disabled={!!letIn && pickedNothing(letIn)} onClick={() => {
               if (!letIn) return
               const { request, every, channels } = letIn
               setLetIn(null)
-              report(approveFriend(request.id, every ? "*" : channels)).then(() => notify({ message: `${request.name || "They"} can now see ${every ? "every channel" : channels.join(", ")}.`, tone: "info" }))
+              report(approveFriend(request.id, chosen(letIn))).then(() => notify({ message: `${request.name || "They"} can now see ${every ? "every channel" : channels.join(", ")}.`, tone: "info" }))
             }}>Approve</Button>
           </DialogFooter>
         </DialogContent>

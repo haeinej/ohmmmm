@@ -412,6 +412,12 @@ export async function askFriend(email: string, message?: string) {
   await live().people.askByEmail(typed, message?.trim() || undefined)
   return { email: typed.toLowerCase(), asked: true }
 }
+/** Changes which channels one friend sees. Only you, signed in to ohm; wider asks first in the page. */
+export async function setFriendChannels(did: string, channels: "*" | string[]) {
+  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
+  await live().friendRequests.setChannels(did, channels)
+  return { did, channels }
+}
 /** Stops a friend reading your friends layer. Consequential: the person approves in a dialog first. */
 export async function removeFriend(did: string) {
   await live().removeFriend(did)

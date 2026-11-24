@@ -1,7 +1,7 @@
 // Connections: the people around you, and making friends by email.
 import assert from "node:assert/strict"
 import test from "node:test"
-import { askFriend, loadPeople, openShared, removeFriend, setSource, useWorkspace } from "../src/workspace/store"
+import { askFriend, loadPeople, openShared, removeFriend, setFriendChannels, setSource, useWorkspace } from "../src/workspace/store"
 import { createFixtureSource } from "./fixtures/fixture-source"
 
 test("connections lists who you let in, who let you in, and who you asked by email", async () => {
@@ -20,6 +20,22 @@ test("connections lists who you let in, who let you in, and who you asked by ema
     assert.equal((await loadPeople()).friends.some(friend => friend.did === first.did), false)
     openShared(before.sharers[0].did, "some-id")
     assert.equal(typeof useWorkspace, "function")
+  } finally {
+    await setSource(null)
+  }
+})
+
+test("the friends page changes which channels a friend sees, never to nothing", async () => {
+  const fixture = createFixtureSource()
+  await setSource(fixture)
+  try {
+    const [friend] = (await loadPeople()).friends
+    await assert.rejects(setFriendChannels(friend.did, []), { name: "DataError" })
+    await assert.rejects(setFriendChannels(friend.did, ["../x"]), { name: "DataError" })
+    await setFriendChannels(friend.did, ["writing", "photos"])
+    assert.deepEqual((await loadPeople()).friends.find(each => each.did === friend.did)?.channels, ["writing", "photos"])
+    await setFriendChannels(friend.did, "*")
+    assert.equal((await loadPeople()).friends.find(each => each.did === friend.did)?.channels, "*")
   } finally {
     await setSource(null)
   }

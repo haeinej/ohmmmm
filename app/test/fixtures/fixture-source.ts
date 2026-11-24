@@ -30,7 +30,7 @@ export function createFixtureSource() {
   const channels = new Map<string, string>()
   const cortexFiles = new Map<string, HomeFile>(cortexDocs.map(doc => [doc.id, cortexFileOf(doc)]))
   const media = new Map<string, Uint8Array>()
-  const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*" }))
+  const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*", name: person.name }))
   const friendAsks: FriendRequest[] = []
   const asks: Ask[] = []
   // People who let the owner in: the first entity that is not the owner.

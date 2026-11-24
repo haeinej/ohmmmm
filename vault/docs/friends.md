@@ -8,7 +8,7 @@ Your friends see your Friends layer, but only the channels you let them see. Fri
 2. **You see the request** under **Notifications → Agent**, with their name and email from their ohm account, their DID, and their message.
 3. **You choose**: **Every channel**, or only some, such as `walks` but not `kitchen`. A channel covers the channels inside it. Then **Approve**, or **Decline** (they aren't told).
 
-An approval lasts until you remove them. You can change their channels at any time.
+An approval lasts until you remove them. You can change their channels at any time in **Settings › Friends**, where each friend is listed with their name, email and what they see, and where **Stop sharing** removes them.
 
 ## What a friend sees
 

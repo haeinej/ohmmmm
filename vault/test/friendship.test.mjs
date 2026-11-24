@@ -134,3 +134,11 @@ test('someone asked by email before they joined gets the request when they join,
   await env.DB.prepare('UPDATE links SET email = NULL WHERE did = ?1').bind(cy).run();
   assert.deepEqual((await ask('listFriendRequests', { cookie: 'session=cy' })).requests, []);
 });
+
+test('a friend added before names were kept is named from their ohm account', async () => {
+  const { env, ask } = await setUp();
+  await blockStore(env.DB).addFriend(ada, bo);
+  // Bo has signed in to ohm, so his account's name and email are known.
+  await ask('listFriendRequests', { cookie: 'session=bo' });
+  assert.deepEqual((await ask('listFriends', { as: ada })).friends.map(each => [each.did, each.name, each.email]), [[bo, 'Bo', 'bo@example.test']]);
+});

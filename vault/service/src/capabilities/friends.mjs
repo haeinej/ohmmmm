@@ -47,7 +47,12 @@ export default {
       about: 'Who may read the member\'s friends layer.',
       takes: {},
       gives: '`friends` (did, added, channels: `*` or a list, name, email)',
-      run: ({ blocks, did }) => blocks.friends(did),
+      run: async ({ blocks, linked, did }) => {
+        // A friend added before names were kept is named from their ohm account, as it says now.
+        const { friends } = await blocks.friends(did);
+        const known = await linked.people(friends.filter(each => !each.name || !each.email).map(each => each.did));
+        return { friends: friends.map(each => ({ ...known.get(each.did), ...each })) };
+      },
     },
     'com.ohmmmm.vault.addFriend': {
       verb: 'POST', asks: 'ohm', changes: true,

@@ -137,6 +137,8 @@ How to read each path:
 
 ## G. Profile and settings
 
+Settings › **Friends** lists each friend you let in, with their name, email and the channels they see. **Channels** changes what they see (Every channel, or some; never none), and **Stop sharing** removes them after a dialog. It also says how many are asking, and who you asked.
+
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
 | G1 | Open settings | Rack avatar | The side panel shows you (picture, name, handle) and the settings sections; the main panel shows one | Manage your account and workspace | *UI only* |
