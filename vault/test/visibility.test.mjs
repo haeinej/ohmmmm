@@ -11,6 +11,7 @@ import { createService } from '../service/src/worker.mjs';
 import { newPostId } from '../vault/file.mjs';
 import { planMove, whyNot } from '../vault/visibility.mjs';
 import { testDatabase } from './d1.mjs';
+import { agentControl } from './agent-control.mjs';
 
 const ada = 'did:web:pds.ada.test';
 const bo = 'did:web:pds.bo.test';
@@ -63,8 +64,9 @@ async function setUp({ grant = null } = {}) {
     getBlock: blockId => ask('getBlock', { query: { id: blockId } }),
     previewMove: (blockId, to) => ask('previewMove', { query: { id: blockId, to } }),
     hideBlock: move => ask('hideBlock', { body: move }), requestMove: move => ask('requestMove', { body: move }),
+    ...agentControl(ask, { db: env.DB, did: ada }),
   };
-  const tools = createTools({ vault, by: 'agent:helper', grants: { allowed: async (right, path) => Boolean(grant && right === 'write' && path.startsWith(`${grant}/`)) } });
+  const tools = createTools({ vault, by: 'agent:helper', wait: 0, grants: { allowed: async (right, path) => Boolean(grant && right === 'write' && path.startsWith(`${grant}/`)) } });
   const blocks = blockStore(env.DB);
   const walk = id();
   await blocks.write(ada, { id: walk, path: 'walks/yanaka.md', text: '---\nkind: text\nvisibility: friends\ntitle: Yanaka\n---\n\nA slow walk.\n' });

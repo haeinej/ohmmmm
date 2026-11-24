@@ -7,7 +7,9 @@ import { cn } from "@/lib/cn"
 import { SettingsView } from "./Settings"
 import { surface } from "./Surface"
 import { openDropped, opensOnDrop } from "./drop"
-import { closeSettings, createDraft, report, setAudience, setSearchOpen, useWorkspace } from "./store"
+import { closeSettings, createDraft, readShared, report, setAudience, setSearchOpen, useWorkspace } from "./store"
+import { useEffect, useState } from "react"
+import { readNode } from "../../../vault/vault/node.mjs"
 
 /** Signed out: the home lives on the vault service, so the way in is ohm's sign-in. */
 export function SignIn() {
@@ -59,6 +61,8 @@ export function MainPanel() {
       ) : doc ? (
         // A restore or revert of this block re-reads it; one of another block leaves this editor alone.
         <PageEditor key={`${doc.id}:${restored?.id === doc.id ? restored.n : 0}`} doc={doc} />
+      ) : view.kind === "shared" ? (
+        <SharedView key={`${view.owner}:${view.id}`} owner={view.owner} id={view.id} />
       ) : view.kind === "settings" ? (
         <>
           <header className="flex h-14 shrink-0 items-center justify-end px-5">
@@ -83,3 +87,22 @@ export function MainPanel() {
   )
 }
 
+
+/** A block a friend shares with you: theirs, so it is read here and never edited. */
+function SharedView({ owner, id }: { owner: string; id: string }) {
+  const [file, setFile] = useState<{ title: string; body: string } | null>(null)
+  useEffect(() => {
+    report(readShared(owner, id).then(read => {
+      const node = readNode(read.path, read.text)?.node as { title?: string; body?: string } | undefined
+      setFile({ title: node?.title || read.path.split("/").at(-1)!.replace(/\.md$/, ""), body: node?.body ?? read.text })
+    }))
+  }, [owner, id])
+  if (!file) return <div className="flex-1" />
+  return (
+    <article className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-8 py-6">
+      <p className="text-small text-muted-foreground">Shared with you. It is theirs, so it opens to read.</p>
+      <h1>{file.title}</h1>
+      <div className="whitespace-pre-wrap text-body">{file.body.trim()}</div>
+    </article>
+  )
+}

@@ -32,8 +32,12 @@ CREATE TABLE IF NOT EXISTS links (
   did TEXT NOT NULL UNIQUE,
   linked_at TEXT NOT NULL,
   -- When what the account had already published was first brought into the vault. Empty until then.
-  mirrored_at TEXT
+  mirrored_at TEXT,
+  -- The ohm account's name and email, as its own sign-in last said, so a friend can be found by email.
+  name TEXT,
+  email TEXT
 );
+CREATE INDEX IF NOT EXISTS links_email ON links (email);
 
 -- The friends layer: blocks a member keeps readable here, so the friends they chose can read them.
 -- One row for each block that is not a post (posts stay in `posts`, whose friends-only rows are part
@@ -292,4 +296,52 @@ CREATE TABLE IF NOT EXISTS published_copies (
   did TEXT PRIMARY KEY,
   entries TEXT NOT NULL,
   read_at TEXT NOT NULL
+);
+
+-- Who a person asked to be friends with, by the email they typed. Kept whether or not that email has
+-- an ohm account, so the asker's list never says which emails do (src/friendship.mjs).
+CREATE TABLE IF NOT EXISTS friend_asks (
+  viewer TEXT NOT NULL,
+  email TEXT NOT NULL,
+  message TEXT,
+  asked_at TEXT NOT NULL,
+  -- When ohm emailed the invite, once (src/mail.mjs).
+  mailed_at TEXT,
+  PRIMARY KEY (viewer, email)
+);
+
+-- Coding agents the member connected, the approvals each waits for, and what each did lately
+-- (src/agents.mjs). An agent's two-step tool waits for Approve in the cockpit's Agents panel.
+CREATE TABLE IF NOT EXISTS agents (
+  did TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  state TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  last_seen TEXT NOT NULL,
+  last_tool TEXT,
+  PRIMARY KEY (did, agent)
+);
+CREATE TABLE IF NOT EXISTS agent_approvals (
+  did TEXT NOT NULL,
+  id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  shown TEXT NOT NULL,
+  state TEXT NOT NULL,
+  asked_at TEXT NOT NULL,
+  answered_at TEXT,
+  used_at TEXT,
+  PRIMARY KEY (did, id)
+);
+CREATE INDEX IF NOT EXISTS agent_approvals_waiting ON agent_approvals (did, state);
+-- One open approval for each agent, tool and plan: the same plan asked twice at once gives one.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_approvals_one_open ON agent_approvals (did, agent, tool, plan) WHERE state IN ('waiting', 'approved');
+CREATE TABLE IF NOT EXISTS agent_activity (
+  did TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  agent TEXT NOT NULL,
+  at TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  PRIMARY KEY (did, seq)
 );

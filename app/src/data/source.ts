@@ -12,6 +12,10 @@ export type BlockFile = HomeFile & { version: string }
 export type Account = { did: string | null; user: { name: string }; mirrored: boolean; service: string | null }
 /** A friend: their DID (their ohm account), and the channels they see, `*` for every one. */
 export type Friend = { did: string; added: string; channels?: "*" | string[]; name?: string; email?: string }
+/** Someone the member asked to be friends with, by the email they typed. */
+export type Ask = { email: string; asked: string; state: "waiting" | "friends"; did?: string }
+/** Someone who let the member into their friends layer. */
+export type Sharer = { did: string; since: string; name?: string; email?: string }
 /** Someone signed in to ohm asking to be a friend, waiting for the member. */
 export type FriendRequest = { id: string; did: string; name?: string; email?: string; message?: string; asked: string }
 export type PublishPlan = {
@@ -40,6 +44,16 @@ export type MoveResult = { ref: BlockRef; version: string; cleanupPending: boole
 export type MoveRequest = {
   id: string; block: string; store: BlockRef["store"]; from: Layer; to: Layer; version?: string
   askedBy: string; reason?: string; asked: string; state: "waiting" | "approved" | "declined"
+}
+/** A coding agent that used ohm's tools (vault.listAgents): paused or disconnected only by the member. */
+export type AgentAccess = "active" | "paused" | "disconnected"
+export type AgentInfo = {
+  agent: string; state: AgentAccess; firstSeen: string; lastSeen: string; lastTool?: string; waiting: number
+  recent: { at: string; tool: string }[]
+}
+/** An action an agent's tool waits for the member to approve in ohm (vault.listApprovals). `shown` is its preview. */
+export type AgentApproval = {
+  id: string; agent: string; tool: string; shown: Record<string, unknown>; state: "waiting" | "approved" | "declined" | "used"; asked: string
 }
 /** A move the member made, for the journal (vault.recordMove). `moveId` names it, so sending it again journals nothing more. */
 export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string; moveId?: string }
@@ -105,6 +119,13 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
     /** The Publish page, showing one post alone: where a move to or from public is finished. */
     publishPage(postId: string): string
   }
+  /** The member's coding agents, and the actions they wait for the member to approve. */
+  agents: {
+    list(): Promise<AgentInfo[]>
+    approvals(): Promise<AgentApproval[]>
+    answer(id: string, approve: boolean): Promise<void>
+    setState(agent: string, state: AgentAccess): Promise<void>
+  }
   agenda(): Promise<Agenda>
   search: SearchProvider
   history(ref: BlockRef): Result<Mode, HistoryVersion[]>
@@ -113,6 +134,12 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   moveVisibility(ref: BlockRef, to: MoveTarget, version: string): Promise<MoveResult>
   listFriends(): Promise<Friend[]>
   removeFriend(did: string): Promise<void>
+  /** The member's own side of friendship: asking by email, what they asked, and who let them in. */
+  people: {
+    askByEmail(email: string, message?: string): Promise<void>
+    asked(): Promise<Ask[]>
+    friendOf(): Promise<Sharer[]>
+  }
   /** Friends approved like devices: who asked, and which channels each friend sees. */
   friendRequests: {
     list(): Promise<FriendRequest[]>

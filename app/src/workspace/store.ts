@@ -12,7 +12,7 @@ import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type BlockRef, type FriendRequest, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget } from "@/data/source"
+import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -20,6 +20,7 @@ import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
 import type { CortexWaiting } from "@/data/workspace-model"
+import { features } from "@/features"
 import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
 import { keep, makeSizes, measure } from "@/media/cache"
 
@@ -97,10 +98,12 @@ async function saveChannelProperty(path: string, key: string, value: unknown) {
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "visibility" | "profile" | null
+export type Side = "repo" | "visibility" | "connections" | "agents" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
+  /** A block a friend shares with you, read-only. */
+  | { kind: "shared"; owner: string; id: string }
   | { kind: "settings"; tab: SettingsTab }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
@@ -469,11 +472,68 @@ export async function declineFriend(id: string) {
   return { id, declined: true }
 }
 
+// Agents: the member's coding agents, and what they wait for the member to approve in ohm.
+export type Agents = { agents: AgentInfo[]; approvals: AgentApproval[] }
+let agentsWaiting = 0
+/** How many agent actions wait for the member, as last read. The rack marks the Agents button while any do. */
+export const waitingAgentActions = () => agentsWaiting
+export async function loadAgents(): Promise<Agents> {
+  const [agents, approvals] = await Promise.all([live().agents.list(), live().agents.approvals()])
+  if (approvals.length !== agentsWaiting) { agentsWaiting = approvals.length; set(bump()) }
+  return { agents, approvals }
+}
+/** The member approves or declines one agent action. Only here, signed in to ohm; never by an agent. */
+export async function answerAgent(id: string, approve: boolean) {
+  await live().agents.answer(id, approve)
+  return { id, state: approve ? "approved" as const : "declined" as const }
+}
+const AGENT_NAME = /^agent:[A-Za-z0-9._-]{1,64}$/
+/** Pauses, resumes, disconnects or allows again one coding agent. */
+export async function setAgentState(agent: string, state: AgentAccess) {
+  if (!AGENT_NAME.test(agent)) throw new DOMException("Name the agent as agent: and its name", "DataError")
+  if (!["active", "paused", "disconnected"].includes(state)) throw new DOMException("Choose active, paused or disconnected", "DataError")
+  await live().agents.setState(agent, state)
+  return { agent, state }
+}
+
+// Connections: the people around you. Friends you let in, people who let you in, and who you asked.
+export type People = { friends: Friend[]; sharers: Sharer[]; asks: Ask[] }
+export async function loadPeople(): Promise<People> {
+  const [friends, sharers, asks] = await Promise.all([live().listFriends(), live().people.friendOf(), live().people.asked()])
+  return { friends, sharers, asks }
+}
+/** Asks someone, by their email, to let you see what they share with friends. Nothing says whether the email is on ohm. */
+export async function askFriend(email: string, message?: string) {
+  const typed = email.trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed)) throw new DOMException("Give their email address", "DataError")
+  await live().people.askByEmail(typed, message?.trim() || undefined)
+  return { email: typed.toLowerCase(), asked: true }
+}
+/** Changes which channels one friend sees. Only you, signed in to ohm; wider asks first in the page. */
+export async function setFriendChannels(did: string, channels: "*" | string[]) {
+  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
+  await live().friendRequests.setChannels(did, channels)
+  return { did, channels }
+}
+/** Stops a friend reading your friends layer. Consequential: the person approves in a dialog first. */
+export async function removeFriend(did: string) {
+  await live().removeFriend(did)
+  return { did, removed: true }
+}
+/** What one person shares with you, as block heads. */
+export const sharedBy = (owner: string) => live().listShared(owner)
+/** Opens a block a friend shares with you, read-only, in the main panel. */
+export function openShared(owner: string, id: string) {
+  set({ view: { kind: "shared", owner, id }, ...bump() })
+}
+export const readShared = (owner: string, id: string): Promise<BlockFile> => live().readShared(owner, id)
+
 /** When the home opens: who asks to be a friend, what agents asked for, and sealing what they hid. None keeps the home from opening. */
 async function movesOnOpen() {
   moveRequests = []
   friendRequests = []
-  try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
+  // Friends are not shown in the first release (features.ts); their requests are read only when they are.
+  if (features.connections) try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
   pendingSeals.clear()
   try {
     await loadMoveRequests()

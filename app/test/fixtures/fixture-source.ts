@@ -8,7 +8,7 @@ import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
   emptyPlan, mediaName, moveVisibility, visibilityMove,
-  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveResult, type MoveTarget, type MoveRequest, type VaultEvidence,
+  type AgentAccess, type AgentApproval, type AgentInfo, type Ask, type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type MoveResult, type MoveTarget, type Sharer, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
 import { createMemorySearch } from "../../src/data/memory-search"
@@ -30,13 +30,18 @@ export function createFixtureSource() {
   const channels = new Map<string, string>()
   const cortexFiles = new Map<string, HomeFile>(cortexDocs.map(doc => [doc.id, cortexFileOf(doc)]))
   const media = new Map<string, Uint8Array>()
-  const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*" }))
+  const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*", name: person.name }))
   const friendAsks: FriendRequest[] = []
+  const asks: Ask[] = []
+  // People who let the owner in: the first entity that is not the owner.
+  const sharers: Sharer[] = entities.filter(person => person.did !== owner.did).slice(0, 1).map(person => ({ did: person.did, since: "2026-11-01", name: person.name }))
   const journal = seededJournal([...blocks, ...cortexDocs], fixtureIds)
   /** Kept versions of sealed blocks, newest last, as the private layer keeps them. */
   const kept = new Map<string, { rev: number; version: string; created: string; file: HomeFile }[]>()
   let revs = 0
   const requests: MoveRequest[] = []
+  const agentList: AgentInfo[] = []
+  const approvals: AgentApproval[] = []
   const journalOfMoves: (MoveRecord & { state: string })[] = []
   const hidden = new Set<string>()
   /** Failures to come, as a dropped connection would cause: the next delete, or the next record. */
@@ -137,6 +142,11 @@ export function createFixtureSource() {
       return moveVisibility(source as unknown as Pick<HomeSource, "readBlock" | "saveBlock" | "deleteBlock">, ref, to, replaces)
     },
     async listFriends() { return structuredClone(friendList) },
+    people: {
+      async askByEmail(email: string) { if (!asks.some(each => each.email === email.toLowerCase())) asks.push({ email: email.toLowerCase(), asked: "2026-11-24T00:00:00.000Z", state: "waiting" }) },
+      async asked() { return structuredClone(asks) },
+      async friendOf() { return structuredClone(sharers) },
+    },
     friendRequests: {
       async list() { return structuredClone(friendAsks) },
       async approve(id: string, channels: "*" | string[]) {
@@ -257,6 +267,22 @@ export function createFixtureSource() {
       },
       publishPage: (postId: string) => `https://vault.example.test/vault/?publish=${postId}`,
     },
+    // The member's coding agents, as the service keeps them; `agentAsks` stands in for an agent's tool.
+    agents: {
+      async list() { return structuredClone(agentList.map(each => ({ ...each, waiting: approvals.filter(a => a.agent === each.agent && a.state === "waiting").length }))) },
+      async approvals() { return structuredClone(approvals.filter(each => each.state === "waiting")) },
+      async answer(id: string, approve: boolean) {
+        const held = approvals.find(each => each.id === id && each.state === "waiting")
+        if (!held) throw new DOMException("This action has been answered already", "InvalidStateError")
+        held.state = approve ? "approved" : "declined"
+      },
+      async setState(agent: string, state: AgentAccess) {
+        const held = agentList.find(each => each.agent === agent)
+        if (!held) throw new DOMException("No such agent has used ohm", "NotFoundError")
+        held.state = state
+        if (state === "disconnected") for (const each of approvals) if (each.agent === agent && each.state === "waiting") each.state = "declined"
+      },
+    },
     async agenda() {
       return {
         unlabelled: blocks.filter(doc => doc.homeChannel === "other").length,
@@ -264,7 +290,7 @@ export function createFixtureSource() {
         counted: "public and friends-only",
       }
     },
-  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "friendRequests" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "friendRequests" | "agenda">
+  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agents" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agents" | "agenda">
   const ask = (request: Omit<MoveRequest, "id" | "asked" | "state">) => {
     const made = { ...request, id: `r${requests.length + 1}`, asked: "2026-11-24T00:00:00.000Z", state: "waiting" as const }
     requests.push(made)
@@ -278,7 +304,17 @@ export function createFixtureSource() {
     friendAsks.push(made)
     return made
   }
-  return Object.assign(source, { fixtureIds, owner, ask, hide, askFriend, journalOfMoves, failing })
+  /** An agent's tool checks in and asks the member to approve an action (vault.askApproval). */
+  const agentAsks = (agent: string, tool: string, shown: Record<string, unknown>) => {
+    if (!agentList.some(each => each.agent === agent)) agentList.push({ agent, state: "active", firstSeen: "2026-11-24T00:00:00.000Z", lastSeen: "2026-11-24T00:00:00.000Z", waiting: 0, recent: [] })
+    const held = agentList.find(each => each.agent === agent)!
+    held.lastTool = tool
+    held.recent.unshift({ at: "2026-11-24T00:00:00.000Z", tool })
+    const made: AgentApproval = { id: `a${approvals.length + 1}`, agent, tool, shown, state: "waiting", asked: "2026-11-24T00:00:00.000Z" }
+    approvals.push(made)
+    return made
+  }
+  return Object.assign(source, { fixtureIds, owner, ask, hide, askFriend, agentAsks, approvals, journalOfMoves, failing })
 }
 
 export type FixtureSource = ReturnType<typeof createFixtureSource>

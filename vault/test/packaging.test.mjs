@@ -60,7 +60,8 @@ test('the packed CLI initializes MCP with only its declared runtime dependencies
     const names = replies[1].result.tools.map(tool => tool.name);
     assert.ok(names.includes('vault_publish'));
     assert.ok(names.includes('vault_friends_save'));
-    assert.equal(names.length, 18);
+    assert.equal(names.length, 21);
+    assert.ok(names.includes('vault_friends_ask'));
     assert.equal(names.length, new Set(names).size);
   } finally {
     await rm(directory, { recursive: true, force: true });

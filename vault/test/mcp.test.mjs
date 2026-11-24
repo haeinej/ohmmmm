@@ -8,14 +8,17 @@ import { createTools, OFFERED, TOOLS } from '../mcp/tools.mjs';
 import { REQUESTS } from '../service/src/capabilities/index.mjs';
 import { createService } from '../service/src/worker.mjs';
 import { blockStore } from '../service/src/blocks.mjs';
+import { links } from '../service/src/ohm.mjs';
+import { agentStore } from '../service/src/agents.mjs';
 import { newPostId } from '../vault/file.mjs';
 import { testDatabase } from './d1.mjs';
+import { agentControl, CONTROL } from './agent-control.mjs';
 import { CONTENT, DOCUMENT, fromDocument, notFound, PUBLICATION, PUBLICATION_KEY, toDocument } from './standard.mjs';
 
 // The tools, against the vault service itself: the real service, on a database in memory, asked
 // the way the tools ask it. Only who is asking is stood in for.
 const did = 'did:web:pds.example.test';
-async function toolsOf({ beforeApply = () => {}, grants = null } = {}) {
+async function toolsOf({ beforeApply = () => {}, grants = null, approve = true } = {}) {
   const env = { DB: await testDatabase(), SERVICE_DID: 'did:web:vault.example.test' };
   // What the person has published, as their own PDS lists it: a type of their own from before the
   // shared one. A test changes `published` to change what is there.
@@ -64,11 +67,15 @@ async function toolsOf({ beforeApply = () => {}, grants = null } = {}) {
     deleteBlock: (id, replaces) => ask('deleteBlock', { body: { id, replaces } }),
     listFriends: () => ask('listFriends'),
     removeFriend: did => ask('removeFriend', { body: { did } }),
+    listFriendOf: () => ask('listFriendOf'),
+    listAsked: () => ask('listAsked'),
+    askFriend: (email, message) => ask('askFriend', { body: { email, ...(message === undefined ? {} : { message }) } }),
     listShared: owner => ask('listShared', { query: { owner } }),
     getShared: (owner, id) => ask('getShared', { query: { owner, id } }),
     previewMove: (id, to) => ask('previewMove', { query: { id, to } }),
     hideBlock: move => ask('hideBlock', { body: move }),
     requestMove: move => ask('requestMove', { body: move }),
+    ...agentControl(ask, { db: env.DB, did, approve }),
     mirror: ({ apply = false, expectedSummary } = {}) => {
       if (apply) beforeApply(published);
       return ask('importPublished', { body: { apply, ...(expectedSummary ? { expectedSummary } : {}) } });
@@ -108,7 +115,7 @@ async function toolsOf({ beforeApply = () => {}, grants = null } = {}) {
     await vault.put({ id, slug, label: '', sublabel: '', body: 'Seeded post.', visibility: 'friends', ...fields });
     return vault.get(id);
   };
-  return { tools: createTools({ vault, by: 'agent:helper', grants }), vault, asked, published, repository, publication, uploads, seed, ask, blocks: blockStore(env.DB) };
+  return { tools: createTools({ vault, by: 'agent:helper', grants, wait: 0 }), vault, asked, published, repository, publication, uploads, seed, ask, env, blocks: blockStore(env.DB) };
 }
 
 test('service tools hide legacy private posts and keep search counts and publish previews free of private content', async () => {
@@ -351,14 +358,14 @@ test('an agent publishes: it shows what would change first, and the repository c
 });
 
 test('friends tools preview changes, enforce versions and use the reader’s own DID', async () => {
-  const { tools, asked, blocks, ask } = await toolsOf();
+  const { tools, asked, blocks, ask, env } = await toolsOf();
   const reader = 'did:web:reader.example.test';
   const block = { id: newPostId(), path: 'reading/first.md', text: '---\nkind: text\nvisibility: friends\n---\n\nCollected words.' };
   await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: 'A private block.' }, replaces: 'v' }), /visibility: friends/);
   await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text.replace('friends', 'public') }, replaces: 'v' }), /visibility: friends/);
   // An agent never makes a new friends-only block: a new block starts private.
   await assert.rejects(tools.call('vault_friends_save', { block }), /A new block starts private/);
-  assert.deepEqual(asked, []);
+  assert.deepEqual(asked.filter(name => name !== 'agentCheckIn'), []);
   assert.deepEqual((await tools.call('vault_friends_list')).blocks, []);
   // The person shares it; the agent may then change it, from the version it read.
   const { version: first } = await blocks.write(did, block);
@@ -376,6 +383,7 @@ test('friends tools preview changes, enforce versions and use the reader’s own
   const shared = createTools({ vault: {
     listShared: owner => ask('listShared', { query: { owner }, reader }),
     getShared: (owner, id) => ask('getShared', { query: { owner, id }, reader }),
+    ...agentControl((name, options) => ask(name, { ...options, reader }), { db: env.DB, did: reader }),
   } });
   await assert.rejects(shared.call('vault_shared_list', { owner: did }), /Nothing here is shared/);
   await blocks.addFriend(did, reader);
@@ -402,6 +410,79 @@ test('friends tools preview changes, enforce versions and use the reader’s own
   await assert.rejects(tools.call('vault_friends_read', { id: block.id }), /There is no such block/);
 });
 
+test('connections: an agent reads the person\'s people and asks someone by email, after a preview', async () => {
+  const { tools, env } = await toolsOf();
+  // The person has signed in to ohm once, so the people they ask see their name and email.
+  await links(env.DB).connect('u-me', did);
+  await links(env.DB).remember({ id: 'u-me', name: 'Me', email: 'me@example.test' });
+  assert.deepEqual(await tools.call('vault_connections'), { friends: [], friendOf: [], asked: [] });
+  await assert.rejects(tools.call('vault_friends_ask', { email: 'not an email' }), /Give their email address/);
+  const preview = await tools.call('vault_friends_ask', { email: 'Sam@Example.test', message: 'We wrote about the walk' });
+  assert.deepEqual([preview.done, preview.willHappen.email, preview.willHappen.alreadyAsked], [false, 'sam@example.test', undefined]);
+  // Nothing is asked until the person agrees, and only to the exact address and line shown.
+  assert.deepEqual((await tools.call('vault_connections')).asked, []);
+  await assert.rejects(tools.call('vault_friends_ask', { email: 'sam@example.test', message: 'Something else', confirm: preview.confirm }), /has changed since it was shown/);
+  assert.equal((await tools.call('vault_friends_ask', { email: 'sam@example.test', message: 'We wrote about the walk', confirm: preview.confirm })).asked, true);
+  assert.deepEqual((await tools.call('vault_connections')).asked.map(each => [each.email, each.state]), [['sam@example.test', 'waiting']]);
+  assert.equal((await tools.call('vault_friends_ask', { email: 'sam@example.test' })).willHappen.alreadyAsked, 'waiting');
+});
+
+test('agents: an action waits for Approve in ohm, is used once, and a paused or disconnected agent is refused', async () => {
+  const { tools, ask, env } = await toolsOf({ approve: false });
+  const agents = agentStore(env.DB);
+  const draft = { to: ['sam@example.test'], subject: 'The walk', body: 'Saturday at nine?' };
+  const asked = await tools.call('vault_mail_ask', draft);
+  assert.deepEqual([asked.done, asked.waitingFor, asked.willHappen.subject], [false, 'the person, in ohm', 'The walk']);
+  // A yes in the chat is not an approval: calling again only finds it still waiting.
+  assert.equal((await tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm })).done, false);
+  // The cockpit sees the agent and what waits for it.
+  const [seen] = (await ask('listAgents')).agents;
+  assert.deepEqual([seen.agent, seen.state, seen.lastTool, seen.waiting], ['agent:helper', 'active', 'vault_mail_ask', 1]);
+  assert.deepEqual((await ask('listApprovals')).approvals.map(each => [each.tool, each.shown.subject]), [['vault_mail_ask', 'The walk']]);
+  // Only the member, signed in to ohm, answers and controls agents.
+  await assert.rejects(ask('answerApproval', { body: { id: asked.confirm, approve: true } }), { code: 'SignInRequired' });
+  await assert.rejects(ask('setAgentState', { body: { agent: 'agent:helper', state: 'paused' } }), { code: 'SignInRequired' });
+  await agents.answer(did, { id: asked.confirm, approve: true });
+  await assert.rejects(tools.call('vault_mail_ask', { ...draft, body: 'Changed.', confirm: asked.confirm }), /has changed since it was shown/);
+  const sent = await tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm });
+  assert.deepEqual([sent.done, sent.approved, sent.send], [true, true, draft]);
+  // Sent again soon after, because its answer was lost, it answers the same rather than "ask again".
+  assert.deepEqual((await tools.call('vault_mail_ask', { ...draft, confirm: asked.confirm })).send, draft);
+  // Another plan, tool or agent cannot use it; and once the retry has passed, it is used up.
+  const plan = { tool: 'vault_mail_ask', ...draft };
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:helper', tool: 'vault_mail_ask', plan: { ...plan, body: 'Changed.' } }), /used already/);
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:other', tool: 'vault_mail_ask', plan }), /used already/);
+  await assert.rejects(agents.use(did, { id: asked.confirm, agent: 'agent:helper', tool: 'vault_mail_ask', plan, now: new Date(Date.now() + 16 * 60 * 1000) }), /used already/);
+  // Declined: the agent is told, and nothing is done.
+  const other = await tools.call('vault_mail_ask', { ...draft, subject: 'Another' });
+  await agents.answer(did, { id: other.confirm, approve: false });
+  await assert.rejects(tools.call('vault_mail_ask', { ...draft, subject: 'Another', confirm: other.confirm }), /declined this in ohm/);
+  // Paused: every tool is refused until the person resumes it.
+  await agents.setState(did, { agent: 'agent:helper', state: 'paused' });
+  await assert.rejects(tools.call('vault_tree'), /paused this agent/);
+  await agents.setState(did, { agent: 'agent:helper', state: 'active' });
+  assert.ok(await tools.call('vault_tree'));
+  // Disconnected: refused, and what it waited for is declined.
+  const left = await tools.call('vault_mail_ask', { ...draft, subject: 'Left waiting' });
+  await agents.setState(did, { agent: 'agent:helper', state: 'disconnected' });
+  await assert.rejects(tools.call('vault_tree'), /disconnected this agent/);
+  assert.equal((await agents.get(did, left.confirm)).approval.state, 'declined');
+});
+
+test('the same plan asked at the same moment gives one approval, and the database holds no second one open', async () => {
+  const db = await testDatabase();
+  const agents = agentStore(db);
+  const asked = { agent: 'agent:helper', tool: 'vault_mail_ask', plan: { to: ['sam@example.test'], subject: 'The walk' }, shown: { subject: 'The walk' } };
+  const answers = await Promise.all(Array.from({ length: 5 }, () => agents.ask(did, asked)));
+  assert.equal(new Set(answers.map(each => each.approval.id)).size, 1);
+  assert.equal((await agents.list(did)).approvals.length, 1);
+  assert.throws(() => db.sqlite.prepare("INSERT INTO agent_approvals (did, id, agent, tool, plan, shown, state, asked_at) VALUES (?, 'a-second', 'agent:helper', 'vault_mail_ask', ?, '{}', 'approved', '2026-11-24T00:00:00Z')").run(did, JSON.stringify(asked.plan)), /UNIQUE/);
+  // Once it is used, the same plan may be asked for again.
+  await agents.answer(did, { id: answers[0].approval.id, approve: true });
+  await agents.use(did, { ...asked, id: answers[0].approval.id });
+  assert.notEqual((await agents.ask(did, asked)).approval.id, answers[0].approval.id);
+});
+
 test('each tool names real API requests, and vault tools ask only for what they declare', async () => {
   const { tools, asked, seed } = await toolsOf();
   // Dated, so the publish plan is the same on both calls.
@@ -415,6 +496,7 @@ test('each tool names real API requests, and vault tools ask only for what they 
     vault_publish: [{}],
     vault_mirror: [{}],
     vault_delete: [{ key: 'another' }],
+    vault_connections: [{}],
   };
   for (const tool of TOOLS) {
     // Every request a tool names is one the service has, and reading tools name none that change anything.
@@ -425,7 +507,7 @@ test('each tool names real API requests, and vault tools ask only for what they 
       asked.length = 0;
       const first = await tools.call(tool.name, args);
       if (first.confirm) await tools.call(tool.name, { ...args, confirm: first.confirm });
-      assert.deepEqual([...new Set(asked)].filter(name => !tool.requests.includes(name)), [], `${tool.name} asked for more than it names`);
+      assert.deepEqual([...new Set(asked)].filter(name => !tool.requests.includes(name) && !CONTROL.includes(name)), [], `${tool.name} asked for more than it names`);
     }
   }
 });
@@ -444,12 +526,12 @@ test('the server speaks the protocol: it lists the tools, answers calls, and rep
   const listed = (await ask('tools/list')).result.tools;
   assert.deepEqual(listed.map(tool => tool.name),
     ['vault_tree', 'vault_list', 'vault_read', 'vault_search', 'vault_save', 'vault_set_visibility', 'vault_status', 'vault_publish', 'vault_mirror', 'vault_delete',
-      'vault_friends_list', 'vault_friends_read', 'vault_friends_save', 'vault_friends_delete', 'vault_friends_who', 'vault_friends_remove', 'vault_shared_list', 'vault_shared_read']);
+      'vault_friends_list', 'vault_friends_read', 'vault_friends_save', 'vault_friends_delete', 'vault_friends_who', 'vault_friends_remove', 'vault_connections', 'vault_friends_ask', 'vault_mail_ask', 'vault_shared_list', 'vault_shared_read']);
   // An agent is told a tool's name, what it does and what it takes, and nothing else.
   for (const tool of listed) assert.deepEqual([tool.inputSchema.type, Object.keys(tool).filter(key => !['name', 'description', 'inputSchema', 'annotations'].includes(key))], ['object', []]);
   // Only the tools that read are marked as changing nothing.
   assert.deepEqual(listed.filter(tool => tool.annotations?.readOnlyHint).map(tool => tool.name),
-    ['vault_tree', 'vault_list', 'vault_read', 'vault_search', 'vault_status', 'vault_friends_list', 'vault_friends_read', 'vault_friends_who', 'vault_shared_list', 'vault_shared_read']);
+    ['vault_tree', 'vault_list', 'vault_read', 'vault_search', 'vault_status', 'vault_friends_list', 'vault_friends_read', 'vault_friends_who', 'vault_connections', 'vault_shared_list', 'vault_shared_read']);
 
   const saved = await ask('tools/call', { name: 'vault_save', arguments: { key: 'hello', body: 'A first post.' } });
   assert.equal(saved.result.isError, true);
@@ -477,7 +559,7 @@ test('the server starts on its own and answers over standard input and output', 
   const lines = out.trim().split('\n').map(line => JSON.parse(line));
   assert.equal(code, 0);
   assert.deepEqual(lines.map(line => line.id), [1, 2, 3]);
-  assert.equal(lines[1].result.tools.length, 18);
+  assert.equal(lines[1].result.tools.length, OFFERED.length);
   assert.match(lines[0].result.instructions, /Saving never publishes/);
   assert.equal(lines[2].result.isError, true);
   assert.match(lines[2].result.content[0].text, /No site configuration here/);

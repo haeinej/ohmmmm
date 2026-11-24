@@ -57,6 +57,10 @@ The app is where ohm's **user flows** are designed and built. Every flow has two
 21. **One radius for every surface.** Panels, menus, popovers, tooltips and sheets are `rounded-2xl` (the card token); rows are `rounded-lg`; items and small controls are `rounded-md`. Never set a radius in pixels, and never give a surface a different radius from the menus beside it. The density setting decides how round these are, in [src/theme.css](src/theme.css). See [docs/design.md](docs/design.md) for why: hand-set radii on panels are what made the menus look rounder than the panels before.
 22. **Menus are compact.** Tight rows, and the highlighted row is filled forest with white contents. Restyle ohm-ui components only by slot rules in `src/theme.css`, never by editing the installed copies.
 
+## What the first release shows
+
+[src/features.ts](src/features.ts) holds the switches for what is built but not shown yet. `connections` is off: the rack's Connections panel, Settings › Friends and friend requests in the bell are not on screen, and the home does not read friend requests when it opens. Their store handlers, the vault service's requests and the MCP tools stay built and tested, so turning the switch on is the only change needed. Don't delete code behind a switch that is off, and don't add a way to it that skips the switch.
+
 ## Running it
 
 From the ohmmmm repository root:

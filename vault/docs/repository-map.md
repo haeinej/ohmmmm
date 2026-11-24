@@ -35,6 +35,7 @@ are the outcomes the module boundaries and failure checks protect.
 | Public records and post addresses | [feed](../feed/), [labels](labels.md) | Public readers resolve the owner's records and their label-derived addresses. |
 | The attached notes interface | [site](../site/) | These files are mounted as Worker assets; they are reached by HTTP routes rather than JavaScript imports. |
 | Who is a friend, and what they see | [friends](friends.md) | People ask, signed in to ohm; the member approves them like devices, for every channel or some; their agents read as they do. |
+| What your coding agents may do | [your agents in ohm](agents-panel.md) | Each action an agent's ohm tools take waits in the Agents panel for the member's Approve; the member pauses or disconnects agents there. Mail is sent by the agent from the member's own address. |
 | Who can see a block, and moving it | [visibility](visibility.md) | Only the member shows a block to more people; agents ask, or with a grant hide a block on its way to private; every move is journalled. |
 | What a member's website reads, and who sees what | [content for sites](content-for-sites.md) | Sites read the vault by DID: public is what is published on the PDS, Friends only for a friend with a viewer token, never private. |
 | Scheduled copying from published sources | [mirror](mirror.md) | A configured source reader has its own budget, ownership checkpoints and recovery; it is different from bringing PDS posts into a private vault. |

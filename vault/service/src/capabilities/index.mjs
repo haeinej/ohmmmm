@@ -10,6 +10,7 @@
 //   ohm     an ohm session only
 //   viewer  anyone, about the member named by `did`; a viewer token says who they are, for Friends
 import account from './account.mjs';
+import agents from './agents.mjs';
 import channels from './channels.mjs';
 import content from './content.mjs';
 import cortex from './cortex.mjs';
@@ -25,7 +26,7 @@ import search from './search.mjs';
 import structure from './structure.mjs';
 import visibility from './visibility.mjs';
 
-export const CAPABILITIES = [posts, friends, privateLayer, visibility, channels, cortex, media, structure, search, mirror, publish, exporting, content, account, identity];
+export const CAPABILITIES = [posts, friends, privateLayer, visibility, channels, cortex, media, structure, search, mirror, publish, exporting, content, agents, account, identity];
 
 // Every request by its name, with the capability it belongs to.
 export const REQUESTS = Object.fromEntries(CAPABILITIES.flatMap(capability =>

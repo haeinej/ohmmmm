@@ -19,7 +19,7 @@ const ASKS = {
   viewer: ['Anyone, about the member `did` names', 'Nothing is needed for what the member published. A viewer token (`Authorization: Bearer`, from `content.view`) says who is looking; if the member put them on their friend list, the answer also holds the friends layer. Never the private layer'],
 };
 const FILES = Object.fromEntries(Object.entries({
-  Posts: 'posts', Friends: 'friends', Private: 'private', Visibility: 'visibility', Channels: 'channels', Cortex: 'cortex', Media: 'media', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Content: 'content', Account: 'account', Identity: 'identity',
+  Posts: 'posts', Friends: 'friends', Private: 'private', Visibility: 'visibility', Channels: 'channels', Cortex: 'cortex', Media: 'media', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Content: 'content', Agents: 'agents', Account: 'account', Identity: 'identity',
 }).map(([name, file]) => [name, `src/capabilities/${file}.mjs`]));
 
 // Every way the service says no. The same words go to a person in the editor and to an agent.
@@ -59,10 +59,14 @@ export const REFUSALS = {
   ViewerTokenInvalid: [401, 'The viewer token is not one this service made, is for another member, or has run out'],
   ViewersUnavailable: [503, 'Viewer tokens, and so Friends reads for sites, are not set up on this service'],
   NotFriendsOnly: [409, 'Only a friends-only block or post is hidden on its way to private'],
-  Answered: [409, 'The move request has been approved or declined already'],
+  Answered: [409, 'The move request or agent action has been approved or declined already'],
   NotThisMove: [409, 'The move recorded is not the one the request asked for'],
   InvalidMove: [400, 'The layer named is not public, friends or private, or the block is in it already'],
   NotTheirSite: [400, 'The return address is not on one of the member\'s sites'],
+  AgentPaused: [409, 'The member paused this agent in the cockpit\'s Agents panel'],
+  AgentDisconnected: [403, 'The member disconnected this agent in the cockpit\'s Agents panel'],
+  NotApproved: [409, 'The action waits for the member, was declined, was carried out already, or is not the one the member approved'],
+  TooManyWaiting: [409, 'A hundred agent actions wait for the member already'],
   InternalError: [500, 'Something went wrong in the service itself'],
 };
 
@@ -137,7 +141,7 @@ export function capabilitiesPage() {
     'Three rules hold for every tool that changes something:',
     '',
     '1. Create private blocks on the person\'s device. Service-backed tools expose only the public and friends layers.',
-    '2. Changing a post, publishing, bringing posts in from the PDS, saving or removing a friends block, and removing a friend each take two calls. The first gives a preview and a `confirm` value for the second call.',
+    '2. Changing a post, publishing, bringing posts in from the PDS, saving or removing a friends block, asking someone to be a friend, approving a mail draft and removing a friend each take two calls. The first puts the action in the cockpit\'s Agents panel and gives its approval ID as `confirm`; the second carries it out only once the member approved exactly that action there.',
     '3. A post or friends block is changed from the version that was read. If it has changed since, the tool refuses the write.',
     '',
     '### Requests with no tool',
@@ -160,12 +164,12 @@ const NO_TOOL = {
   'com.ohmmmm.vault.listPosts': 'It is for keeping a copy in step: every post\'s version, and what changed since. The tools read the structure instead',
   Export: 'The command line and the editor write the vault out. An agent reads posts one at a time',
   'com.ohmmmm.vault.addFriend': 'Only the member can widen who can read the friends layer, through their ohm session',
-  'com.ohmmmm.vault.askFriend': 'A person asks, signed in to ohm, from the cockpit or a member\'s site',
   'com.ohmmmm.vault.listFriendRequests': 'The member answers requests in the cockpit. An agent never lets anyone in',
   'com.ohmmmm.vault.approveFriend': 'Only the member can widen who can read the friends layer, through their ohm session',
   'com.ohmmmm.vault.declineFriend': 'The member answers requests in the cockpit',
   'com.ohmmmm.vault.setFriendChannels': 'Only the member changes what a friend sees, through their ohm session',
   Private: 'Private contents never reach the service readable. Agents read them only on the person\'s device, after unlock',
+  Agents: 'Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member\'s, in the cockpit\'s Agents panel',
   Account: 'It rides on an ohm session, which an agent does not have',
   Identity: 'It is part of signing in',
   Channels: 'The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write',

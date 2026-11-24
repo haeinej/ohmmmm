@@ -167,3 +167,14 @@
 @keyframes ux-flash { 0% { background-color: color-mix(in oklab, var(--ohm-green-light) 45%, var(--ohm-card)); } 100% { background-color: var(--ux-row-selected); } }
 [data-slot=file-tree-item][data-flash]::before { animation: ux-flash 900ms var(--ohm-ease-out); }
 @media (prefers-reduced-motion: reduce) { [data-slot=file-tree-item][data-flash]::before { animation: none; } }
+
+/* ─── ohm-ui's ApprovalCard (the Agents panel) ────────────────────────────────
+   The card is a surface, so it takes the card radius like every other; a message in its details
+   keeps its own line breaks. Unlayered, so these win over the component's utility classes. */
+[data-slot=approval-card] { border-radius: var(--ohm-radius-card); }
+[data-slot=approval-card] dd { white-space: pre-wrap; }
+/* Its Approve is the view's one forest action, like every primary button here (ohm-ui's ink otherwise). */
+[data-slot=approval-card]:not([data-variant=destructive]) [data-slot=approval-card-allow-once] {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}

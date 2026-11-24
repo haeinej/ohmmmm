@@ -20,6 +20,9 @@ import { RowMenu } from "./RowMenu"
 import { FilterMenu } from "./FilterMenu"
 import { activeCount, NO_FILTERS } from "./filters"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ConnectionsPanel } from "./ConnectionsPanel"
+import { features } from "@/features"
+import { AgentsPanel } from "./AgentsPanel"
 import { VisibilityMarks } from "./VisibilityMarks"
 import { startChannel } from "./PageActions"
 import { SETTINGS_TABS } from "./settings-tabs"
@@ -491,6 +494,8 @@ export function SidePanel() {
   const { side } = useWorkspace()
   if (side && homeStatus() !== "ready") return null
   if (side === "repo") return <RepoPanel />
+  if (side === "connections" && features.connections) return <ConnectionsPanel />
+  if (side === "agents") return <AgentsPanel />
   if (side === "profile") return <ProfilePanel />
   return null
 }

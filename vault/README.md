@@ -21,6 +21,7 @@ This repository is a Claude Code plugin. Its bundled skills are:
 | --- | --- |
 | [start](skills/start/SKILL.md) | The project's purpose and rules |
 | [vault](skills/vault/SKILL.md) | Working in your notes with the vault's tools |
+| [connections](skills/connections/SKILL.md) | Finding friends from your inbox, and writing to them, with your own mail tools |
 | [host-pds](skills/host-pds/SKILL.md) | Hosting your own PDS on Cloudflare with Cirrus and connecting it to ohm |
 | [suggest-labels](skills/suggest-labels/SKILL.md) | Deciding your site's sections with you |
 | [design-home](skills/design-home/SKILL.md) | The curator's first job: screening your site, feeds, PDS and folders read-only, reporting them, and applying only what you decide |
