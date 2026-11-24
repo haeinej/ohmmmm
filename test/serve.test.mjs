@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { initHome } from '../bin/ohmmmm.mjs';
-import { addAgent, AGENT_KEY, AGENT_KEYS, agentKeys, APP, APP_KEYS, homeBridge, listenHome, OLD_TOKEN, pairApp, pairingLink, removeAgent, removeSharedAgentKey, sharedAgentKey } from '../home/serve.mjs';
+import { addAgent, AGENT_KEY, AGENT_KEYS, agentKeys, APP, APP_KEYS, appKeys, browserId, homeBridge, KEYS_LOCK, listenHome, OLD_TOKEN, pairApp, pairedBrowsers, pairingLink, removeAgent, removeSharedAgentKey, sharedAgentKey } from '../home/serve.mjs';
 import { blobCid } from '../vault/vault/core.mjs';
 import { readEvents } from '../vault/vault/journal.mjs';
 import { readNode } from '../vault/vault/node.mjs';
@@ -143,6 +143,46 @@ test("each agent has a key of its own, which reaches only MCP; no key is kept in
   const fresh = await pairApp(layout.home, { replace: true });
   for (const old of [token, second]) assert.equal((await call('GET', '/', { headers: { Authorization: `Bearer ${old}` } })).status, 401);
   assert.equal((await call('GET', '/vault/files', { headers: { Authorization: `Bearer ${fresh}` } })).status, 200);
+});
+
+test('a paired browser can be named by itself, listed, and forgotten alone; keys are never written over each other', async t => {
+  const { layout, token, agent, call, signed } = await setUp(t);
+  const second = await pairApp(layout.home, { app: 'http://localhost:5190' });
+  const asSecond = { Authorization: `Bearer ${second}` };
+  const hash = key => createHash('sha256').update(key).digest('hex');
+  const json = (headers, method, path, body) => call(method, path, { headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  // Each names itself, as the app does once it is paired; the list says which one is asking.
+  assert.deepEqual((await json(signed, 'POST', '/vault/keys/self', { name: '  Chrome on\nmacOS  ' })).json, { id: browserId(hash(token)), name: 'Chrome on macOS' });
+  assert.equal((await json(asSecond, 'POST', '/vault/keys/self', { name: 'Firefox on Linux' })).status, 200);
+  const listed = (await call('GET', '/vault/keys', { headers: signed })).json;
+  assert.deepEqual(listed.browsers.map(each => [each.id, each.name, each.you ?? false, Boolean(each.seen)]), [
+    [browserId(hash(token)), 'Chrome on macOS', true, true],
+    [browserId(hash(second)), 'Firefox on Linux', false, true],
+  ]);
+  assert.equal(listed.browsers[1].app, 'http://localhost:5190');
+  assert.deepEqual(listed.agents.map(each => each.name), ['helper']);
+  assert.equal(listed.shared, false);
+  assert.ok(!JSON.stringify(listed).includes(hash(token)), 'an ID is only the start of the hash');
+  // Only the person's app sees or changes them.
+  assert.equal((await call('GET', '/vault/keys', { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
+  assert.equal((await call('DELETE', `/vault/keys/${browserId(hash(token))}`, { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
+
+  // Forgetting one shuts out that browser alone.
+  assert.equal((await call('DELETE', '/vault/keys/000000000000', { headers: signed })).status, 404);
+  const forgot = await call('DELETE', `/vault/keys/${browserId(hash(second))}`, { headers: signed });
+  assert.deepEqual(forgot.json, { forgotten: browserId(hash(second)), you: false });
+  assert.equal((await call('GET', '/', { headers: asSecond })).status, 401);
+  assert.equal((await call('GET', '/vault/files', { headers: signed })).status, 200);
+  // A browser can forget itself; the app then goes back to the sample.
+  assert.deepEqual((await call('DELETE', `/vault/keys/${browserId(hash(token))}`, { headers: signed })).json, { forgotten: browserId(hash(token)), you: true });
+  assert.equal((await call('GET', '/', { headers: signed })).status, 401);
+  assert.deepEqual(await pairedBrowsers(layout.home), []);
+
+  // Many keys made at once, from many processes' worth of calls: none is lost to another's write.
+  const made = await Promise.all(Array.from({ length: 10 }, () => pairApp(layout.home)));
+  assert.deepEqual(new Set((await appKeys(layout.home)).map(each => each.hash)), new Set(made.map(hash)));
+  await assert.rejects(stat(join(layout.home, KEYS_LOCK)), { code: 'ENOENT' }, 'the lock is let go');
 });
 
 test("an agent is the agent its key says, whatever it calls itself, and its sessions answer only that key", async t => {
@@ -287,6 +327,15 @@ test('ohmmmm serve starts inside a home and prints the link that pairs the app',
   assert.match(run('agents').stdout, /^claude-code\tkey made /);
   assert.match(run('agents', 'add', 'claude-code').stderr, /has a key already/);
   assert.match(run('agents', 'remove', 'claude-code').stdout, /claude-code's key no longer works/);
+
+  // The paired browsers, listed and forgotten one at a time.
+  const browsers = run('browsers').stdout.trim().split('\n');
+  assert.equal(browsers.length, 2);
+  assert.match(browsers[0], /^[0-9a-f]{12}\ta browser not named yet\tpaired \d{4}-\d{2}-\d{2}/);
+  const first = browsers[0].split('\t')[0];
+  assert.match(run('browsers', 'forget', first).stdout, /^Forgotten/);
+  assert.equal(JSON.parse(await readFile(join(layout.home, APP_KEYS), 'utf8')).keys.length, 1);
+  assert.match(run('browsers', 'forget', first).stdout, /No paired browser has the ID/);
 });
 
 test('the person edits files through the bridge only over the version they read, and every version is kept', async t => {

@@ -69,3 +69,28 @@ test("an image the browser lacks comes from the home folder through the bridge, 
     setMediaBackend(memoryBackend())
   }
 })
+
+test("a paired browser names itself in words a person recognises, once", async t => {
+  const { browserName, nameThisBrowser } = await import("../src/data/browsers")
+  assert.equal(browserName("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"), "Chrome on macOS")
+  assert.equal(browserName("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"), "Edge on Windows")
+  assert.equal(browserName("Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"), "Firefox on Linux")
+  assert.equal(browserName("Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1"), "Safari on iPhone")
+  assert.equal(browserName(""), "A browser")
+
+  const sent: string[] = []
+  let named: string | undefined
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
+    sent.push(`${init.method ?? "GET"} ${new URL(input).pathname}`)
+    if (init.method === "POST") named = (JSON.parse(String(init.body)) as { name: string }).name
+    const browsers = [{ id: "aaaaaaaaaaaa", made: "2026-11-24T00:00:00Z", you: true, ...(named ? { name: named } : {}) }]
+    return new Response(JSON.stringify(init.method === "POST" ? { id: "aaaaaaaaaaaa", name: named } : { browsers, agents: [], shared: false }), { status: 200, headers: { "Content-Type": "application/json" } })
+  }) as typeof fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  const bridge = { url: "http://127.0.0.1:8766", token: TOKEN }
+  await nameThisBrowser(bridge, "Chrome on macOS")
+  await nameThisBrowser(bridge, "Something else")
+  assert.deepEqual(sent, ["GET /vault/keys", "POST /vault/keys/self", "GET /vault/keys"])
+  assert.equal(named, "Chrome on macOS", "a browser already named keeps its name")
+})

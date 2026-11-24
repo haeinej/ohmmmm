@@ -136,7 +136,8 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | G2 | Your profile | Settings → Your profile | Name, description and picture fields; Review changes notes that publishing your profile asks first | Shape how other apps show you | *UI only* · publishing **asks first** |
 | G3 | Identity | Settings → Identity | Your DID (copy), handle, server | Know and share your root identity | *UI only* |
 | G4 | **Agents** | Settings → Agents → Offer tools to browser agents; one switch per tool | Tools are offered to an agent, or withdrawn, at once | Control what an agent can do here | Governs every tool |
-| G5 | Vault | Settings → Vault | New blocks start private (always); your channels | Review how your vault is organised | *UI only* |
+| G5 | Vault | Settings → Vault | Where this is (your home through `ohmmmm serve`, or the sample); new blocks start private (always); your channels | Review how your vault is organised | *UI only* |
+| G5a | **Forget a paired browser** (your home) | Settings → Vault → Browsers paired with your home → Forget → **Forget** (red) | That browser can no longer open your home; the others stay paired. Forgetting this browser goes back to the sample, with a notice saying how to pair again | Shut out a browser you no longer use, or have lost | *UI only* · **asks first** |
 | G6 | Cortex | Settings → Cortex | Your profile, how many observations, skills and tools | Review what your agents know about you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
 | G8 | Sign out | Settings → Sign out | A notice (not in the wireframe) | Leave | *Not yet* |

@@ -5,6 +5,7 @@ import { installWebMcpShim } from "./webmcp-shim"
 import { App } from "./App"
 import { applyDensity, open, setSource, sourceChanged } from "./workspace/store"
 import { bridgeMedia, currentBridge, pairFromLocation } from "./data/bridge"
+import { nameThisBrowser } from "./data/browsers"
 import { createLocalSource, UNPAIRED } from "./data/local-source"
 import { setMediaRemote } from "./media/cache"
 import { notify } from "./components/ui/notice"
@@ -29,6 +30,8 @@ if (bridge) {
       addEventListener("beforeunload", event => { if (home.unsent()) event.preventDefault() })
       await setSource(home)
       if (opening) { try { open(opening) } catch { /* not in this home */ } }
+      // In the home's list of paired browsers, this one is shown by the name it gives itself, once.
+      nameThisBrowser(bridge).catch(() => {})
     })
     .catch(problem => notify({
       message: problem instanceof DOMException && problem.name === "NotAllowedError" ? UNPAIRED : "Your home on this computer did not answer, so this is the sample. Run ohmmmm serve in your home, then reload.",
