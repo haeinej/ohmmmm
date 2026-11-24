@@ -27,12 +27,21 @@ loader PR, record its commit so the same preview can be rebuilt.
 For the PDS source, compare the actual public `site.standard.document` inventory
 with the content map before changing routes. Each mapped item needs an ohm
 document with `com.ohmmmm.post` content. Legacy collections, documents from
-other apps, and an empty inventory cannot supply an ohm collection. Check
+other apps, and an empty inventory leave that PDS source without matching posts. Check
 pagination, labels, sublabels, record keys, dates, and whether attachments
 resolve. A successful empty response is still a coverage gap when the baseline
 has pages. Keep the baseline content intact and report any missing decisions or
-records. A local PDS with approved public content can exercise a preview. Use
-synthetic data in committed fixtures and examples. Production publication and
+records.
+
+An empty remote inventory still allows work on the Astro copy. Use the loader's
+`read({ channel })` source interface with the site's existing, tracked public
+content for a local preview. Keep stable IDs, channel membership, source order,
+languages, original routes and complete snapshots. Preserve the authored content
+and adapt it at the template boundary. Use raw rendered HTML only for reviewed,
+trusted public sources. Record the adapter and its provenance in the site guides,
+and report remote record coverage and integration as pending. A local PDS with
+approved public content can also exercise a preview. Use synthetic data in
+committed test fixtures and documentation examples. Production publication and
 visibility decisions belong to the owner.
 
 ## If the site already uses Astro
@@ -77,6 +86,13 @@ state. Compare rendered screenshots, visible text, markup, metadata, dates,
 order, links, navigation and behavior. Verify media paths, alt text and hashes
 where bytes are available. Check the built output for duplicate routes and
 unintentionally widened access to source snapshots, drafts, and private files.
+
+Check the preview server's redirects, slashless directory paths, query retention,
+directory-listing policy and media byte ranges against the baseline. An Astro
+build with identical files can still behave differently under another server.
+Use equivalent static-server options and capture those options with the evidence.
+Where possible, compare the complete output path inventory and file bytes before
+browser checks, including copied assets and source fragments.
 
 Where the site's style guide, generator, sitemap and committed pages disagree,
 record the discrepancy and use the served baseline for parity. Test query
