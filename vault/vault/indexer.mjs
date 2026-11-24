@@ -257,7 +257,7 @@ async function journal(vault, db, report, lastScan) {
     }
   }
   // A tool that changed or removed a file journaled it already, with the versions it kept.
-  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore', 'rename'].includes(known.via) && (op === 'removed' || known.hash === hash);
+  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore', 'rename', 'editor'].includes(known.via) && (op === 'removed' || known.hash === hash);
   // A move a tool journaled already is not journaled again.
   const toldMove = new Set(before.filter(event => event.op === 'moved' && event.via !== 'scan' && event.at > lastScan)
     .map(event => `${event.root}\u0000${event.from}\u0000${event.path}`));

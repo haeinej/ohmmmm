@@ -24,10 +24,13 @@ Call and await `setSource({ service: { origin, did } })` to construct and select
 a service adapter, or pass a constructed adapter to `setSource(source)`. The
 workspace exposes a read-only public and Friends projection for service adapter
 verification. The app starts on samples and live session integration is a later
-step. `localSource` still refuses with `NotSupportedError`: the bridge,
-`ohmmmm serve`, now exists ([docs/serve.md](../../../docs/serve.md)), and the
-local source over it is the next step. Pairing (`src/data/bridge.ts`) and the
-media cache's read through the bridge are built.
+step. The local source, `createLocalSource` in `src/data/local-source.ts`, reads
+the home through `ohmmmm serve` and is a `Workspace` like the sample: the store
+edits it at once, and it writes each change back to the file, merged, over the
+version read. Its contract, and what it does not do yet, are in
+[docs/serve.md](../../../docs/serve.md#for-agents-the-contract). `Workspace`
+(`workspace-data.ts`) is any source with the workspace's own part; `sampleWorkspace()`
+returns either.
 
 Use `listBlocks` and `readBlock` to find a file and its version. Pass that exact
 version as `replaces` to update it, or `null` to create it. Refresh and review the
@@ -70,8 +73,8 @@ typecheck includes test files. Adapter tests cover
 the selected workspace, compare-and-set, XRPC routing and a synthetic keys
 fixture. Live sign-in, the account app's unlock screens, and publishing
 await app integration and live verification. Kept versions in the service
-adapter currently cover private files. The local source is to be built over
-`ohmmmm serve` (decided: hosted, with the bridge when it runs).
+adapter currently cover private files. The local source keeps its history from
+when the home was read; the vault's own journal through the bridge comes next.
 
 ## Workspace vocabulary
 

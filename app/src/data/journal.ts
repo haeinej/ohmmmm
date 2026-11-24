@@ -67,7 +67,12 @@ export function diffWords(a: string, b: string): DiffPart[] {
 
 // ─── Seed: a few days of history, by you and two agents ─────────────────────────
 
-export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>) {
+/**
+ * The workspace's history of its blocks. The sample seeds a few days of it (`fixtureIds`). A home
+ * read from disk starts with each block as it is (`baseline`): no lines, so only what changes now
+ * is written down, and it is compared with how the block was when it was read.
+ */
+export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>, { baseline = false }: { baseline?: boolean } = {}) {
   const byId = (id: string) => all.find(doc => doc.id === id)
   const journals: Record<HistoryOwner, Line[]> = { vault: [], cortex: [] }
   const historyLines = (owner?: HistoryOwner): readonly Line[] =>
@@ -94,7 +99,8 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
 
   const changeById = (id: string) => historyLines().find((l): l is ChangeLine => l.type === "change" && l.id === id)
   const linesFor = (node: string) => historyLines().filter((l): l is ChangeLine => l.type === "change" && l.node === node)
-  const currentVersion = (node: string) => linesFor(node).at(-1)?.after
+  const bases = new Map<string, string>()
+  const currentVersion = (node: string) => linesFor(node).at(-1)?.after ?? bases.get(node)
   const snapshotAt = (version: string) => versions.get(version)
 
   const words = (s: string) => s.split(/\s+/).filter(Boolean).length
@@ -219,6 +225,14 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     recordSession(muse, "Looked for blocks that belong together", [
       { tried: "Connecting Reading list to Tokyo walks, day one", why: "Nothing on the list is about the walks" },
     ], day("2026-11-19", "09:12"))
+  }
+  if (baseline) {
+    for (const doc of all) {
+      const s = snap(doc)
+      const version = versionOf(s)
+      versions.set(version, s)
+      bases.set(doc.id, version)
+    }
   }
   if (fixtureIds) {
     seed(fixtureIds)

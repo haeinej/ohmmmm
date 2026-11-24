@@ -4,6 +4,8 @@
 //   /vault/mcp      the vault's local tools (vault/mcp/local.mjs) over MCP's Streamable HTTP
 //   /cortex/mcp     the cortex's tools, the same as `cortex serve`
 //   /media/<cid>    GET an image's bytes by their CID; PUT them to make a media block in the home
+//   /vault/files    GET the home's Markdown, each file with its version
+//   /vault/file     PUT or DELETE one file, as the person, only over the version it was read at
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -12,22 +14,24 @@
 // A preflight, which carries no token, learns nothing but which headers it may send.
 //
 // MCP sessions are agents: each is named by its client, and the vault's grants decide what it may
-// change. A PUT to /media is the person, through the app: its writes are journaled `by: me`.
+// change. /media and /vault/file are the person, through the app (app/src/data/local-source.ts): their
+// writes are journaled `by: me`, `via: editor`, and every version is kept, so any of it can be restored.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { cortexSessions, httpTransport } from '../cortex/src/http.mjs';
 import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
-import { createLocalTools, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
+import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
 import { blobCid, FILE_TYPES, isSlug } from '../vault/vault/core.mjs';
 import { isPostId, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
 import { appendEvents } from '../vault/vault/journal.mjs';
-import { isChannelPath, newNodeId } from '../vault/vault/node.mjs';
+import { isChannelPath, newNodeId, readNode, SOURCES } from '../vault/vault/node.mjs';
+import { readVaultFolder } from '../vault/vault/rename.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
@@ -126,7 +130,10 @@ export async function addMedia({ vault, db, bytes, type, channel, name, title, a
   const held = db.prepare("SELECT path FROM files WHERE root = 'vault' AND hash = ? ORDER BY path LIMIT 1").get(hash)?.path;
   if (held) {
     const block = blockOf(held);
-    if (block) return { created: false, id: block.node.id, slug: block.slug, path: block.path, file: held };
+    if (block) {
+      const text = await readFile(join(vault, block.path), 'utf8');
+      return { created: false, id: block.node.id, slug: block.slug, path: block.path, file: held, text, version: await blobCid(Buffer.from(text, 'utf8')) };
+    }
   }
   // A file already there gets its block beside it; a new one goes in the channel asked for.
   const folder = held ? held.split('/').slice(0, -1).join('/') : channel;
@@ -160,9 +167,74 @@ export async function addMedia({ vault, db, bytes, type, channel, name, title, a
   events.push({ at, op: 'added', root: 'vault', path, by: 'me', via: 'editor', hash: await blobCid(Buffer.from(text, 'utf8')) });
   await appendEvents(vault, events);
   await scan({ vault, db });
-  return { created: true, id: readId(text), slug: made, path, file };
+  return { created: true, id: readId(text), slug: made, path, file, text, version: await blobCid(Buffer.from(text, 'utf8')) };
 }
 const readId = text => /^id:\s*(\S+)/m.exec(text)?.[1];
+
+// ---- Files: the person's edits from the app ----
+
+export const MAX_TEXT = 600_000;
+const versionOf = text => blobCid(Buffer.from(text, 'utf8'));
+
+/** A path the app may write as the person: a Markdown file in the vault, not hidden, not machinery, not a captured source. */
+export const editablePath = path => typeof path === 'string' && path.length <= 1000 && /^[^/]+(?:\/[^/]+)*\.md$/.test(path)
+  && !path.split('/').some(part => !part || part.startsWith('.') || part === '..') && !path.startsWith(`${SOURCES}/`);
+
+// The file, after checking that nothing on the way to it is a link out of the vault.
+async function inVault(vault, path) {
+  let at = vault;
+  for (const part of path.split('/')) {
+    at = join(at, part);
+    const info = await lstat(at).catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+    if (info?.isSymbolicLink()) throw Object.assign(new Error('A path through a link out of the vault is refused'), { status: 403 });
+  }
+  return at;
+}
+
+// A version kept once by its address, as the vault's tools keep theirs, so `ohm vault restore` can bring it back.
+async function keep(vault, text) {
+  const address = await versionOf(text);
+  await mkdir(join(vault, HISTORY), { recursive: true });
+  await writeFile(join(vault, HISTORY, address), text, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
+  return address;
+}
+
+/**
+ * Writes one file as the person, only over the version it was read at: `replaces` is that version,
+ * or null for a file that must not exist yet. `text` undefined removes it. Returns the new version.
+ * Refusals carry the HTTP status they answer with: 412 when the file is not at that version any more.
+ */
+export async function writeAsPerson({ vault, path, text, replaces }) {
+  if (!editablePath(path)) throw Object.assign(new Error('Give the path of a Markdown file inside the vault, such as notes/idea.md'), { status: 400 });
+  if (text !== undefined) {
+    const read = readNode(path, text);
+    if (!read) throw Object.assign(new Error('That path is not a block, channel or entity'), { status: 422 });
+    if (read.problems.length) throw Object.assign(new Error(`The file cannot be read: ${read.problems.join(' ')}`), { status: 422 });
+  }
+  const file = await inVault(vault, path);
+  const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  const now = before === undefined ? null : await versionOf(before);
+  if (now !== replaces) throw Object.assign(new Error(now === null ? 'There is no such file any more' : replaces === null ? 'A file is already there' : 'The file changed since it was read'), { status: 412, version: now });
+  const at = new Date().toISOString();
+  if (text === undefined) {
+    const kept = await keep(vault, before);
+    await unlink(file);
+    await appendEvents(vault, [{ at, op: 'removed', root: 'vault', path, by: 'me', via: 'editor', before: kept }]);
+    return { path, removed: true, before: kept };
+  }
+  const kept = before === undefined ? undefined : await keep(vault, before);
+  const hash = await keep(vault, text);
+  await mkdir(dirname(file), { recursive: true });
+  const temp = join(dirname(file), `.edit-${randomUUID()}`);
+  try {
+    await writeFile(temp, text, { flag: 'wx' });
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
+  await appendEvents(vault, [{ at, op: before === undefined ? 'added' : 'changed', root: 'vault', path, by: 'me', via: 'editor', ...(kept ? { before: kept } : {}), hash }]);
+  return { path, version: hash, created: before === undefined };
+}
 
 // ---- The bridge ----
 
@@ -239,12 +311,12 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         if (!allowed(origin)) return said(res, 403, 'Forbidden origin');
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
-        res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+        res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id, ETag');
       }
       if (req.method === 'OPTIONS') {
         return send(res, 204, undefined, {
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE',
-          'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, If-Match, If-None-Match, Mcp-Session-Id, MCP-Protocol-Version',
           'Access-Control-Max-Age': '600',
           // A public page reaching this machine asks first (Private Network Access); this bridge says yes to the origins above.
           ...(req.headers['access-control-request-private-network'] === 'true' ? { 'Access-Control-Allow-Private-Network': 'true' } : {}),
@@ -257,6 +329,28 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
+      }
+      if (url.pathname === '/vault/files' && req.method === 'GET') {
+        const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });
+        return send(res, 200, { home: layout.handle, files: await Promise.all(files.map(async file => ({ ...file, version: await versionOf(file.text) }))) });
+      }
+      if (url.pathname === '/vault/file' && (req.method === 'PUT' || req.method === 'DELETE')) {
+        const path = url.searchParams.get('path') ?? '';
+        const match = req.headers['if-match'];
+        const none = req.headers['if-none-match'];
+        if (match === undefined && none !== '*') return said(res, 428, 'Say which version you read: If-Match: "<version>", or If-None-Match: * for a new file');
+        const replaces = match === undefined ? null : String(match).replace(/^W\//, '').replace(/^"|"$/g, '');
+        let text;
+        if (req.method === 'PUT') {
+          try { text = (await body(req, MAX_TEXT)).toString('utf8'); } catch (problem) { return problem.tooLarge ? said(res, 413, 'A file is up to 600 KB') : said(res, 400, 'The file did not arrive whole'); }
+        }
+        try {
+          const done = await withCollectLock(layout.vault, DatabaseSync, () => writeAsPerson({ vault: layout.vault, path, text, replaces }));
+          return send(res, done.created ? 201 : 200, done, done.version ? { ETag: `"${done.version}"` } : {});
+        } catch (problem) {
+          if (!problem.status) throw problem;
+          return send(res, problem.status, { error: problem.message, ...(problem.version !== undefined ? { version: problem.version } : {}) });
+        }
       }
       const media = /^\/media\/([^/]+)$/.exec(url.pathname);
       if (media) {
@@ -277,10 +371,10 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file' },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file and /media/<cid>');
     } catch (problem) {
       if (!res.headersSent) said(res, problem?.name === 'VaultProblem' ? 409 : 500, problem?.name === 'VaultProblem' ? problem.message : 'Internal error');
       else res.destroy();

@@ -163,3 +163,47 @@ test('ohmmmm serve starts inside a home and prints the link that pairs the app',
   assert.ok(printed.includes(`http://localhost:5190/#bridge=http%3A%2F%2F127.0.0.1%3A`), printed);
   assert.ok(printed.includes(`&token=${token}`));
 });
+
+test('the person edits files through the bridge only over the version they read, and every version is kept', async t => {
+  const { layout, call, signed, mcp } = await setUp(t);
+  const vault = await mcp('/vault/mcp', 'checker');
+  await vault.send('tools/call', { name: 'vault_index' });
+  const listed = await call('GET', '/vault/files', { headers: signed });
+  assert.equal(listed.status, 200);
+  const walk = listed.json.files.find(file => file.path === 'notes/walk.md');
+  assert.equal(walk.version, await blobCid(Buffer.from(walk.text, 'utf8')));
+  const put = (path, text, headers) => call('PUT', `/vault/file?path=${encodeURIComponent(path)}`, { headers: { ...signed, 'Content-Type': 'text/markdown', ...headers }, body: text });
+
+  // Which version was read must be said, and must still be the file's.
+  assert.equal((await put('notes/walk.md', 'changed')).status, 428);
+  const stale = await put('notes/walk.md', '---\ntitle: Slow walk\n---\n\nRain.\n', { 'If-Match': '"bafkreiaaaaaaaaaaaaaaaaaaaaaaaaaaa"' });
+  assert.equal(stale.status, 412);
+  assert.equal(stale.json.version, walk.version);
+  const edited = '---\ntitle: Slow walk\norigin: /Users/mira/notes/walk.md\n---\n\nYanaka in the rain.\n';
+  const saved = await put('notes/walk.md', edited, { 'If-Match': `"${walk.version}"` });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.version, await blobCid(Buffer.from(edited, 'utf8')));
+  assert.equal(saved.headers.etag, `"${saved.json.version}"`);
+  assert.equal(await readFile(join(layout.vault, 'notes/walk.md'), 'utf8'), edited);
+  assert.equal(await readFile(join(layout.vault, '.vault/history', walk.version), 'utf8'), walk.text, 'the version before is kept');
+
+  // A new file only where none is; and only Markdown the vault can read, in an ordinary place.
+  assert.equal((await put('notes/new.md', '---\ntitle: New\n---\n\nHello.\n', { 'If-None-Match': '*' })).status, 201);
+  assert.equal((await put('notes/new.md', '---\ntitle: New\n---\n\nAgain.\n', { 'If-None-Match': '*' })).status, 412);
+  for (const path of ['.vault/grants.json', '../outside.md', 'notes/.hidden.md', '_sources/x/extracted.md', 'notes/image.png']) {
+    assert.equal((await put(path, 'x', { 'If-None-Match': '*' })).status, 400, path);
+  }
+  assert.equal((await put('notes/bad.md', '---\ntitle: Bad\nid: not-one-the-vault-gave\n---\n\nx\n', { 'If-None-Match': '*' })).status, 422);
+
+  const removed = await call('DELETE', '/vault/file?path=notes%2Fnew.md', { headers: { ...signed, 'If-Match': `"${await blobCid(Buffer.from('---\ntitle: New\n---\n\nHello.\n', 'utf8'))}"` } });
+  assert.equal(removed.status, 200);
+  assert.ok(removed.json.removed);
+
+  // Journaled once, as the person; the next scan adds nothing of its own.
+  const { events } = await readEvents(layout.vault);
+  assert.deepEqual(events.filter(event => event.via === 'editor').map(event => `${event.op} ${event.path} ${event.by}`), [
+    'changed notes/walk.md me', 'added notes/new.md me', 'removed notes/new.md me',
+  ]);
+  const indexed = JSON.parse((await vault.send('tools/call', { name: 'vault_index' })).json.result.content[0].text);
+  assert.equal(indexed.journaled, 0);
+});

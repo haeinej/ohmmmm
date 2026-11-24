@@ -25,7 +25,7 @@ A light, Obsidian-like workspace, the first flow ([flows/workspace.md](flows/wor
 
 Renaming a sample channel keeps its record and updates its path throughout the tree and graph.
 
-All data is synthetic. Run the app to explore a sample vault and cortex. Reloading restores the sample.
+Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
 
 To try saving and searching, create a block titled “Alder lantern”, add a line of text, and open Search. Search for “Alder lantern” to find the same block you just edited. This workspace uses the sample adapter, so those edits last for the current session. The service adapter is available for integrating signed-in vault access in the app. Private service files require an unlocked device and reach the service as ciphertext.
 

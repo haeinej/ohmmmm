@@ -10,11 +10,12 @@ import { Input } from "@/components/ui/input"
 import { notify } from "@/components/ui/notice"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { blocks, cortex, channelRecords } from "@/data/workspace-data"
+import { blocks, cortex, channelRecords, getSource } from "@/data/workspace-data"
+import { forgetBridge } from "@/data/bridge"
 import { SETTINGS_TABS, type SettingsTab } from "./settings-tabs"
 import { panelTitle } from "./Surface"
 import {
-  me, setAgentsAllowed, setAppearance, setDensity, setOffered, useWorkspace, type Appearance, type Density, type ToolName,
+  me, setAgentsAllowed, setAppearance, setDensity, setOffered, setSource, useWorkspace, type Appearance, type Density, type ToolName,
 } from "./store"
 import { cn } from "@/lib/cn"
 
@@ -112,7 +113,15 @@ function Page({ tab }: { tab: SettingsTab }) {
       </>
     case "vault": {
       const paths = channelRecords.map(channel => channel.path)
+      const source = getSource()
+      const home = "home" in source ? (source.home as { handle: string; url: string }) : null
       return <>
+        <Section title="Where this is">
+          {home
+            ? <Row title={`Your home, ohmmmm.${home.handle}`} note={`On this computer, through ohmmmm serve at ${home.url}. Changes are written to its files.`}
+                action={<Button variant="secondary" onClick={() => { forgetBridge(); void setSource() }}>Use the sample</Button>} />
+            : <Row title="A sample home" note="Run ohmmmm serve in your home and open the link it prints, to work on your own files. Changes here last until you reload." />}
+        </Section>
         <Section title="New blocks">
           <Row title="Start private" note="Every new block is yours alone until you choose who it is for." action={<Badge variant="secondary">Always</Badge>} />
         </Section>

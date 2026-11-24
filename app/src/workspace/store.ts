@@ -7,7 +7,8 @@ import { docOf, fileOf } from "@/data/block-document"
 import { inferKind, isChannelPath, newNodeId } from "../../../vault/vault/node.mjs"
 import { createServiceSource, type ServiceOptions } from "@/data/service-source"
 import type { BlockRef, HomeSource } from "@/data/source"
-import { sampleSource, type SampleSource } from "@/data/sample-source"
+import { sampleSource } from "@/data/sample-source"
+import type { Workspace } from "@/data/workspace-data"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
@@ -143,7 +144,7 @@ const refresh = () => {
 }
 
 export async function setSource<Master, Sealed>(
-  next: HomeSource | SampleSource | { service: ServiceOptions<Master, Sealed> } = sampleSource,
+  next: HomeSource | Workspace | { service: ServiceOptions<Master, Sealed> } = sampleSource,
 ) {
   if (!await selectSource("service" in next ? createServiceSource(next.service) : next)) return
   usedSlugs.clear()

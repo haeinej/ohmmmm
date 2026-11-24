@@ -5,7 +5,12 @@ import type { Account, BlockFile, BlockHead, HomeSource, VaultContents, VaultEvi
 import { outgoing as describeOutgoing, type ChannelRecord, type Doc, type Outgoing, type Entity } from "./workspace-model"
 export * from "./workspace-model"
 
-type Selection = HomeSource | SampleSource
+/**
+ * A source the workspace edits as it goes: the sample, or the home on this computer (local-source.ts).
+ * It answers at once, and carries the workspace's own part (`demo`: owner, entities, cortex, inbox, history).
+ */
+export type Workspace = HomeSource<"sync"> & { demo: SampleSource["demo"] }
+type Selection = HomeSource | Workspace
 const emptyJournal = createJournal([])
 const defaultOwner = { did: "", handle: "", name: "" }
 let source: Selection = sampleSource
@@ -53,7 +58,7 @@ const publish = (next: Selection, account: Account, files: [BlockHead, BlockFile
 export const getSource = () => source
 export const sampleWorkspace = () => "demo" in source ? source : undefined
 
-export function refreshSample(current: SampleSource) {
+export function refreshSample(current: Workspace) {
   publish(current, current.account(), current.listBlocks().map(ref => [ref, current.readBlock(ref)]), current.vault(), current.connections())
 }
 refreshSample(sampleSource)

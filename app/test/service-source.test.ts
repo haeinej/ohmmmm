@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { newNodeId } from "../../vault/vault/node.mjs"
 import { createServiceSource, type ServiceOptions } from "../src/data/service-source"
-import { localSource } from "../src/data/local-source"
+import { createLocalSource } from "../src/data/local-source"
 import { blockOf, emptyPlan, type BlockRef } from "../src/data/source"
 import { setSource } from "../src/workspace/store"
 import { byId, getSource, workspaceEvidence } from "../src/data/workspace-data"
@@ -143,7 +143,6 @@ test("the workspace can select a service and project its blocks and evidence", a
   assert.equal(byId(id), undefined)
 })
 
-test("the local source refuses operations until there is a bridge", async () => {
-  await assert.rejects(localSource.account(), { name: "NotSupportedError" })
-  await assert.rejects(localSource.search({ query: "alder" }), { name: "NotSupportedError" })
+test("the local source needs a paired bridge before it reads anything", async () => {
+  await assert.rejects(createLocalSource(null as never), { name: "NotFoundError" })
 })

@@ -1,24 +1,310 @@
-import type { HomeSource } from "./source"
+// Your home on this computer, through `ohmmmm serve` (docs/serve.md). The vault's Markdown is read
+// once through the bridge into a working copy, which the workspace reads and edits at once, as it
+// does the sample; each change is then written back to the home folder in the background, only over
+// the version that was read (If-Match), so nothing on disk is written over unseen.
+//
+// What the workspace writes is merged into the file as it is on disk: only the properties the
+// workspace knows are set, and every other property, the order of the properties and the file's name
+// stay as they were. What this source cannot do yet is said, and the file left as it is: moving a
+// block or a channel to another folder (`ohm vault rename` does), changing who sees a block, the cortex.
+import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
+import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
+import { heldNow, original } from "@/media/cache"
+import { docOf, fileOf } from "./block-document"
+import { bridgeFetch, type Bridge } from "./bridge"
+import { createJournal } from "./journal"
+import { createSampleSearch } from "./sample-search"
+import {
+  emptyPlan, visibilityMove, type BlockHead, type BlockRef, type HomeFile, type HomeSource, type Layer, type VaultEvidence,
+} from "./source"
+import type { ChannelRecord, Doc, Entity, InboxItem } from "./workspace-model"
 
-const refuse = () => { throw new DOMException("The local home bridge is unavailable.", "NotSupportedError") }
-const unavailable = async () => refuse()
+const visibleLayers: readonly Layer[] = ["public", "friends", "private"]
+const stale = () => new DOMException("The block changed. Read it again before saving.", "InvalidStateError")
+const missing = () => new DOMException("There is no such block in your home.", "NotFoundError")
+const CHANNEL_FILE = "_channel.md"
 
-export const localSource: HomeSource = {
-  account: unavailable,
-  listBlocks: unavailable,
-  readBlock: unavailable,
-  saveBlock: unavailable,
-  deleteBlock: unavailable,
-  vault: unavailable,
-  connections: unavailable,
-  search: unavailable,
-  history: unavailable,
-  readVersion: unavailable,
-  visibilityMove: refuse,
-  moveVisibility: unavailable,
-  listFriends: unavailable,
-  removeFriend: unavailable,
-  listShared: unavailable,
-  readShared: unavailable,
-  publishPlan: unavailable,
+/** The properties the workspace writes (block-document.ts `fileOf`); every other one is left as it is. */
+const MANAGED = ["title", "channels", "updated", "connect", "icon", "connectionNotes", "alt", "hash", "mime", "width", "height"] as const
+
+type Node = { type: string; kind?: string; home?: string; slug?: string; visibility?: string; id?: string; channels?: string[] }
+const nodeOf = (path: string, text: string) => readNode(path, text)?.node as Node | undefined
+const props = (text: string) => readProperties(splitFile(text).head).properties as Record<string, unknown>
+// An empty list or text is no property at all.
+const value = (v: unknown) => (v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length) ? undefined : v)
+const same = (a: unknown, b: unknown) => JSON.stringify(value(a) ?? null) === JSON.stringify(value(b) ?? null)
+
+/**
+ * The file on disk with what the workspace changed: its body, and the properties it manages when they
+ * differ. `kind` and `visibility` are written only when the file would not already say them.
+ */
+export function mergeFile(original: string, path: string, written: string, layer: Layer): string {
+  const { body: oldBody } = splitFile(original)
+  const head = original.slice(0, original.length - oldBody.length)
+  const body = splitFile(written).body
+  let text = head + (head.replace(/^﻿/, "") ? body : body.replace(/^\n+/, ""))
+  const was = props(original)
+  const now = props(written)
+  for (const key of MANAGED) if (!same(was[key], now[key])) text = setProperty(text, key, value(now[key]))
+  if (now.id !== undefined && was.id === undefined && isPostId(String(now.id))) text = setProperty(text, "id", now.id)
+  const kind = nodeOf(path, written)?.kind
+  if (kind && nodeOf(path, text)?.kind !== kind) text = setProperty(text, "kind", kind)
+  if (nodeOf(path, text)?.visibility !== layer) text = setProperty(text, "visibility", layer)
+  return text
 }
+
+type Held = { text: string; version: string | null; sent?: string }
+export type LocalOptions = { onProblem?: (message: string) => void }
+
+/** Reads the home through the bridge, and gives the workspace its working copy. */
+export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }: LocalOptions = {}) {
+  const answer = await bridgeFetch("/vault/files", {}, bridge)
+  if (!answer.ok) throw new DOMException(`Your home did not answer (HTTP ${answer.status}).`, "NetworkError")
+  const listed = await answer.json() as { home: string; files: { path: string; text: string; version: string }[] }
+  const files = new Map<string, Held>(listed.files.map(file => [file.path, { text: file.text, version: file.version, sent: file.text }]))
+
+  // Blocks as the workspace knows them. A block with no ID is known by its path.
+  const pathOf = new Map<string, string>()
+  const blocks: Doc[] = []
+  const refOf = (path: string, node: Node): BlockRef => {
+    const layer = (node.visibility ?? "private") as Layer
+    return { id: node.id ?? `path:${path}`, layer, store: layer === "private" ? "sealed" : node.kind === "post" ? "post" : "block" }
+  }
+  for (const [path, held] of files) {
+    const node = nodeOf(path, held.text)
+    if (node?.type !== "block") continue
+    const ref = refOf(path, node)
+    pathOf.set(ref.id, path)
+    blocks.push(docOf(ref, { path, text: held.text }).doc)
+  }
+  const all: Doc[] = [...blocks]
+  const contents = () => readVault([...files].map(([path, held]) => ({ path, text: held.text })))
+  const entities: Entity[] = contents().entities.map(entity => ({
+    did: typeof entity.uri === "string" ? entity.uri.replace(/^at:\/\//, "") : "",
+    handle: entity.aliases?.[0] ?? entity.slug, name: entity.name ?? entity.slug,
+  }))
+  const owner: Entity = { did: "", handle: listed.home, name: listed.home }
+  const journal = createJournal(all, undefined, { baseline: true })
+  const versions = new Map<string, number>()
+  let sequence = 0
+  const versionOf = (id: string) => `local-${versions.get(id) ?? 0}`
+  const touch = (id: string) => versions.set(id, ++sequence)
+
+  // ---- Writing back, one change at a time, in order ----
+  const refused = new Set<string>()
+  let queue: Promise<void> = Promise.resolve()
+  const later = (path: string, work: () => Promise<void>) => {
+    queue = queue.then(() => (refused.has(path) ? undefined : work())).catch(problem => {
+      refused.add(path)
+      onProblem(`${path} was not saved to your home: ${problem instanceof Error ? problem.message : String(problem)}`)
+    })
+  }
+  const failed = async (response: Response) => {
+    const said = await response.json().catch(() => ({})) as { error?: string }
+    if (response.status === 412) return new Error("it changed on disk since it was read. Open your home again to see it")
+    return new Error(said.error ?? `HTTP ${response.status}`)
+  }
+  const writeBack = (path: string) => later(path, async () => {
+    const held = files.get(path)
+    if (!held || held.text === held.sent) return
+    const text = held.text
+    const response = await bridgeFetch(`/vault/file?path=${encodeURIComponent(path)}`, {
+      method: "PUT", body: text,
+      headers: { "Content-Type": "text/markdown", ...(held.version ? { "If-Match": `"${held.version}"` } : { "If-None-Match": "*" }) },
+    }, bridge)
+    if (!response.ok) throw await failed(response)
+    held.version = ((await response.json()) as { version: string }).version
+    held.sent = text
+  })
+  const removeBack = (path: string, held: Held) => later(path, async () => {
+    if (!held.version) return
+    const response = await bridgeFetch(`/vault/file?path=${encodeURIComponent(path)}`, { method: "DELETE", headers: { "If-Match": `"${held.version}"` } }, bridge)
+    if (!response.ok) throw await failed(response)
+  })
+  // A new media block: its image goes to the home first, and the bridge writes the file and its block together.
+  const mediaBack = (path: string, doc: Doc) => later(path, async () => {
+    const media = doc.media!
+    const bytes = heldNow(media.hash)?.bytes ?? (await original(media.hash, media.mime))?.bytes
+    if (!bytes) throw new Error("its image is not in this browser any more")
+    const file = /!\[\[([^\]|#\n]+)/.exec(doc.body)?.[1]?.trim()
+    const query = new URLSearchParams({
+      channel: doc.homeChannel!, slug: doc.slug, title: doc.title, ...(file ? { name: file } : {}), ...(isPostId(doc.id) ? { id: doc.id } : {}),
+      ...(media.alt ? { alt: media.alt } : {}), ...(media.width && media.height ? { width: String(media.width), height: String(media.height) } : {}),
+    })
+    const response = await bridgeFetch(`/media/${media.hash}?${query}`, { method: "PUT", body: bytes.slice(), headers: { "Content-Type": media.mime } }, bridge)
+    if (!response.ok) throw await failed(response)
+    const made = await response.json() as { path: string; text: string; version: string }
+    if (made.path !== path) throw new Error(`your home already keeps this image as ${made.path}. Open your home again to see it`)
+    const held = files.get(path)!
+    // What is on disk now is what the bridge wrote; the workspace's later changes merge into it.
+    const edited = held.text !== held.sent ? held.text : undefined
+    held.version = made.version
+    held.sent = made.text
+    held.text = edited ? mergeFile(made.text, path, edited, "private") : made.text
+    if (edited) writeBack(path)
+  })
+
+  const findDoc = (ref: BlockRef) => {
+    const doc = blocks.find(each => each.id === ref.id)
+    if (!doc) throw missing()
+    return doc
+  }
+
+  const source = {
+    // The workspace's own part: this home has no inbox or sample cortex; history starts from now.
+    demo: {
+      cortex: [] as Doc[], owner, entities, inbox: [] as InboxItem[], journal,
+      markInboxRead() {},
+      saveCortex() { throw new DOMException("The cortex is not read through the bridge yet.", "NotSupportedError") },
+    },
+    /** Where this home is: its handle, and the bridge it is read through. */
+    home: { handle: listed.home, url: bridge.url },
+    /** Every change written back so far, for tests. */
+    settled: () => queue,
+    /** Whether a change is not on disk yet, so leaving the page would lose it. */
+    unsent: () => [...files].some(([path, held]) => held.text !== held.sent && !refused.has(path)),
+    account() { return { did: null, user: { name: listed.home }, mirrored: false, service: null } },
+    listBlocks(layers: readonly Layer[] = visibleLayers) {
+      return blocks.filter(doc => layers.includes(doc.visibility)).map((doc): BlockHead => {
+        const path = pathOf.get(doc.id)!
+        return { ...refOf(path, nodeOf(path, files.get(path)!.text)!), path, title: doc.title, version: versionOf(doc.id) }
+      })
+    },
+    readBlock(ref: BlockRef) {
+      const doc = findDoc(ref)
+      const path = pathOf.get(doc.id)!
+      return { path, text: files.get(path)!.text, version: versionOf(doc.id) }
+    },
+    saveBlock(ref: BlockRef, file: HomeFile, replaces: string | null, change?: Parameters<HomeSource["saveBlock"]>[3]) {
+      const path = pathOf.get(ref.id)
+      const written = nodeOf(file.path, file.text)
+      if (!written || written.type !== "block") throw new DOMException("Give a vault block file.", "DataError")
+      if (path) {
+        if (versionOf(ref.id) !== replaces) throw stale()
+        const held = files.get(path)!
+        const was = nodeOf(path, held.text)!
+        // Not yet: these would rename the file. The block stays as it is, and the person is told how.
+        if (written.home !== was.home) {
+          onProblem(`Moving a block to another channel in your home is not built here yet. Run: ohmmmm vault rename ${was.slug} --channel ${written.home}`)
+          return { version: versionOf(ref.id) }
+        }
+        if ((written.visibility ?? "private") !== (was.visibility ?? "private")) {
+          onProblem("Who sees a block in your home is changed through Publish, which is not built here yet.")
+          return { version: versionOf(ref.id) }
+        }
+        const text = mergeFile(held.text, path, file.text, ref.layer)
+        const read = readNode(path, text)
+        if (!read || read.problems.length) throw new DOMException(`The block would not read: ${read?.problems.join(" ")}`, "DataError")
+        if (text !== held.text) {
+          held.text = text
+          touch(ref.id)
+          const doc = blocks.find(each => each.id === ref.id)!
+          Object.assign(doc, docOf(ref, { path, text }).doc)
+          writeBack(path)
+        }
+      } else {
+        if (replaces !== null) throw stale()
+        if (files.has(file.path)) throw new DOMException(`There is already a file at ${file.path}.`, "DataError")
+        const text = ref.layer === "private" ? setProperty(file.text, "visibility", undefined) : file.text
+        const doc = docOf(ref, { path: file.path, text }).doc
+        files.set(file.path, { text, version: null })
+        pathOf.set(ref.id, file.path)
+        blocks.push(doc)
+        all.push(doc)
+        touch(ref.id)
+        if (doc.media) mediaBack(file.path, doc)
+        else writeBack(file.path)
+      }
+      journal.syncJournal(change)
+      return { version: versionOf(ref.id) }
+    },
+    deleteBlock(ref: BlockRef, replaces: string) {
+      const doc = findDoc(ref)
+      if (versionOf(ref.id) !== replaces) throw stale()
+      const path = pathOf.get(doc.id)!
+      const held = files.get(path)!
+      files.delete(path)
+      pathOf.delete(doc.id)
+      blocks.splice(blocks.indexOf(doc), 1)
+      all.splice(all.indexOf(doc), 1)
+      removeBack(path, held)
+      journal.syncJournal()
+    },
+    /** Each channel's order, and new channels, written to their _channel.md. A channel moved elsewhere is not built here yet. */
+    saveChannels(records: readonly ChannelRecord[]) {
+      const now = contents().channels
+      const idOf = (channel: (typeof now)[number]) => channel.id ?? channel.path
+      const slugOf = (id: string) => blocks.find(doc => doc.id === id)?.slug
+      for (const record of records) {
+        const held = now.find(channel => idOf(channel) === record.id)
+        if (held && held.path !== record.path) {
+          onProblem(`Moving or renaming a channel in your home is not built here yet. Run: ohmmmm vault rename ${held.path} ${record.path}`)
+          continue
+        }
+        const path = `${record.path}/${CHANNEL_FILE}`
+        const order = record.order.map(slugOf).filter((slug): slug is string => !!slug)
+        const file = files.get(path)
+        if (file) {
+          if (same(nodeOf(path, file.text) && (readNode(path, file.text)!.node as { order: string[] }).order, order)) continue
+          file.text = setProperty(file.text, "order", order.length ? order : undefined)
+          writeBack(path)
+        } else if (!held || order.length) {
+          const text = nodeFile({ type: "channel", path: record.path, order, description: record.description ?? "", properties: {}, id: isPostId(record.id) ? record.id : newNodeId() }).text
+          files.set(path, { text, version: null })
+          writeBack(path)
+        }
+      }
+      for (const channel of now) {
+        const path = `${channel.path}/${CHANNEL_FILE}`
+        const held = files.get(path)
+        if (!records.some(record => record.id === idOf(channel)) && held) {
+          files.delete(path)
+          removeBack(path, held)
+        }
+      }
+    },
+    markVisibility() {
+      onProblem("Who sees a block in your home is changed through Publish, which is not built here yet.")
+    },
+    vault(layers: readonly Layer[] = visibleLayers) {
+      return readVault([...files].filter(([path, held]) => {
+        const node = nodeOf(path, held.text)
+        return node?.type !== "block" || layers.includes((node.visibility ?? "private") as Layer)
+      }).map(([path, held]) => ({ path, text: held.text })))
+    },
+    connections(layers?: readonly Layer[]): VaultEvidence {
+      const vault = source.vault(layers)
+      // A private block's whole-block links are a property, as in the sample; posts keep theirs in the post.
+      return evidence({
+        ...vault,
+        blocks: vault.blocks.map(block => "properties" in block && Array.isArray(block.properties.connect)
+          ? { ...block, post: { connect: block.properties.connect } }
+          : block),
+      })
+    },
+    search: createSampleSearch(all, entities),
+    history(ref: BlockRef) {
+      return journal.linesFor(ref.id).filter(line => line.op !== "remove")
+        .map(line => ({ rev: line.id, version: line.after, created: line.at })).reverse()
+    },
+    readVersion(ref: BlockRef, rev: string | number) {
+      const doc = findDoc(ref)
+      const line = typeof rev === "string" ? journal.changeById(rev) : undefined
+      const snapshot = line && line.node === ref.id && journal.snapshotAt(line.after)
+      if (!snapshot) throw missing()
+      // That version as the workspace would write it, merged onto the file as it is on disk now.
+      const path = pathOf.get(doc.id)!
+      return { path, text: mergeFile(files.get(path)!.text, path, fileOf({ ...doc, ...snapshot }).text, doc.visibility) }
+    },
+    visibilityMove,
+    async moveVisibility(): Promise<never> { throw new DOMException("Who sees a block in your home is changed through Publish, which is not built here yet.", "NotSupportedError") },
+    async listFriends() { return [] },
+    async removeFriend() { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
+    async listShared() { return [] },
+    async readShared(): Promise<never> { throw missing() },
+    async publishPlan() { return emptyPlan() },
+  } satisfies HomeSource<"sync"> & { demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean }
+  return source
+}
+
+export type LocalSource = Awaited<ReturnType<typeof createLocalSource>>
