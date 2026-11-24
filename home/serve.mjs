@@ -10,6 +10,7 @@
 //   /vault/rename   POST a rename or move of a block or channel, as the person, rewriting what used the old name
 //   /vault/visibility  POST a block's move between Only you and Friends, as the person
 //   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
+//   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -37,6 +38,7 @@ import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
 import { isChannelPath, newNodeId, readNode, SOURCES } from '../vault/vault/node.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
 import { decideRequest, layerOf, readRequests, withVisibility } from '../vault/vault/visibility.mjs';
+import { cortexRoutes } from './cortex-routes.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
@@ -359,6 +361,8 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
     req.on('error', fail);
   });
 
+  const cortexRoute = cortexRoutes({ dir: layout.cortex, send, said, body });
+
   async function putMedia(req, res, cid, query) {
     const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
     if (!IMAGE_TYPES[type]) return said(res, 415, `An image is one of: ${Object.keys(IMAGE_TYPES).join(', ')}`);
@@ -407,6 +411,10 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
+      }
+      if (url.pathname.startsWith('/cortex/')) {
+        if (!await cortexReady()) return said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
+        if (await cortexRoute(req, res, url)) return;
       }
       if (url.pathname === '/vault/journal' && req.method === 'GET') {
         const limit = Number(url.searchParams.get('limit') ?? 500);
@@ -504,10 +512,10 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests', cortexParts: '/cortex/parts', cortexJournal: '/cortex/journal' },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests, /cortex/parts, /cortex/journal, /cortex/profile, /cortex/observation, /cortex/skill, /cortex/tool and /media/<cid>');
     } catch (problem) {
       // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
       if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');

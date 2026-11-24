@@ -889,6 +889,114 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
       return { name, proposed: true };
     },
 
+    // --- What the person does from the app (home/serve.mjs) ---------------------------------------
+    // Each is the person's own change, made through edit() so it is kept and journaled as theirs, and
+    // refused to an agent in code.
+
+    // A skill in force, whole: its SKILL.md, the body under its properties, and its version.
+    async readSkill(name) {
+      const found = await skillAt(at('skills', known(name, 'skill')));
+      if (!found) throw new Refused('NotFound', 'There is no such skill');
+      return { name, description: String(found.description ?? ''), text: found.skill.text, body: splitFront(found.skill.text).body, files: found.skill.files.map(file => file.path), version: found.version };
+    },
+
+    // The person rewrites a skill's instructions: the body of its SKILL.md. Its properties and the
+    // files beside it stay as they are. `replaces` is the version read.
+    async writeSkill(name, { body, replaces, reason } = {}) {
+      onlyPerson('edits a skill');
+      if (typeof body !== 'string' || bytes(body) > 65536) throw new Refused('InvalidRequest', 'A skill is Markdown, at most 64 KB');
+      const spec = nodeOf(`skill/${known(name, 'skill')}`);
+      const live = await skillAt(at('skills', name));
+      if (!live) throw new Refused('NotFound', 'There is no such skill');
+      if (replaces !== undefined && replaces !== live.version) throw changed(`skill ${name}`, live.version);
+      const held = splitFront(live.skill.text);
+      const head = live.skill.text.slice(0, live.skill.text.length - held.body.length);
+      const content = `${head}${held.body.startsWith('\n') ? '\n' : ''}${body.trim()}\n`;
+      if (content === live.skill.text) return { name, version: live.version, unchanged: true };
+      return { name, ...await edit(spec, 'update', { text: content, files: live.skill.files }, { before: live.version, reason: checkReason(reason) ?? 'skill edited' }) };
+    },
+
+    // The person removes a skill. It is kept, and can be restored.
+    async removeSkill(name, { replaces, reason } = {}) {
+      onlyPerson('removes a skill');
+      const spec = nodeOf(`skill/${known(name, 'skill')}`);
+      const live = await spec.live();
+      if (!live) return { name, removed: true, unchanged: true };
+      if (replaces !== undefined && replaces !== live.version) throw changed(`skill ${name}`, live.version);
+      return { name, removed: true, ...await edit(spec, 'remove', null, { before: live.version, reason: checkReason(reason) ?? 'skill removed' }) };
+    },
+
+    // Skills agents proposed, waiting for the person: each whole, with who proposed it.
+    async proposedSkills() {
+      const root = at('.cortex', 'proposed', 'skills');
+      const found = [];
+      for (const entry of await names(root)) {
+        if (!entry.isDirectory() || !NAME.test(entry.name)) continue;
+        const skill = await skillAt(join(root, entry.name));
+        if (!skill) continue;
+        let proposal = {};
+        try { proposal = JSON.parse(await text(join(root, entry.name, '.proposal.json')) ?? '{}') ?? {}; } catch {}
+        found.push({ name: entry.name, description: String(skill.description ?? ''), text: skill.skill.text, files: skill.skill.files.filter(file => file.path !== '.proposal.json').map(file => file.path), by: typeof proposal.by === 'string' ? proposal.by : null, when: typeof proposal.when === 'string' ? proposal.when : null, version: skill.version });
+      }
+      return found.sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // The person turns a proposed skill down. It was never in force, so it is no change to a node;
+    // it is moved aside to .cortex/declined/skills/, so nothing is lost.
+    async declineSkill(name) {
+      onlyPerson('declines a skill');
+      const root = at('.cortex', 'proposed', 'skills', known(name, 'skill'));
+      if (!await skillAt(root)) throw new Refused('NotFound', 'No skill of that name is waiting');
+      const stamp = now().toISOString().replace(/[:.]/g, '-');
+      await mkdir(at('.cortex', 'declined', 'skills'), { recursive: true });
+      await rename(root, at('.cortex', 'declined', 'skills', `${name}_${stamp}`));
+      return { name, declined: true };
+    },
+
+    // A tool in tools/: its file, the body under its properties, whether it is on, and its version.
+    async readTool(name) {
+      const live = await nodeOf(`tool/${known(name, 'tool')}`).live();
+      if (!live) throw new Refused('NotFound', 'There is no such tool');
+      const { properties, body } = splitFront(live.content);
+      return { name, description: String(properties.description ?? ''), on: properties.on === true, text: live.content, body, version: live.version };
+    },
+
+    // The person switches a tool on or off, or rewrites what it says. Every other property stays.
+    async writeTool(name, { body, on, replaces, reason } = {}) {
+      onlyPerson('changes a tool');
+      if (body !== undefined && (typeof body !== 'string' || bytes(body) > 65536)) throw new Refused('InvalidRequest', 'A tool is Markdown, at most 64 KB');
+      if (on !== undefined && typeof on !== 'boolean') throw new Refused('InvalidRequest', 'on is true or false');
+      const spec = nodeOf(`tool/${known(name, 'tool')}`);
+      const live = await spec.live();
+      if (!live) throw new Refused('NotFound', 'There is no such tool');
+      if (replaces !== undefined && replaces !== live.version) throw changed(`tool ${name}`, live.version);
+      const held = splitFront(live.content);
+      let content = live.content;
+      if (body !== undefined) content = `${content.slice(0, content.length - held.body.length)}${held.body.startsWith('\n') ? '\n' : ''}${body.trim()}\n`;
+      if (on !== undefined && (held.properties.on === true) !== on) content = writeFront({ ...splitFront(content).properties, on }, splitFront(content).body);
+      if (content === live.content) return { name, version: live.version, unchanged: true };
+      const why = checkReason(reason) ?? (on !== undefined && (held.properties.on === true) !== on ? (on ? 'switched on' : 'switched off') : 'tool edited');
+      return { name, ...await edit(spec, 'update', content, { before: live.version, reason: why }) };
+    },
+
+    // Tools agents asked for: requests for one to be built, never usable as they are.
+    async proposedTools() {
+      const found = [];
+      for (const entry of await names(at('.cortex', 'proposed', 'tools'))) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        const content = await readFile(at('.cortex', 'proposed', 'tools', entry.name), 'utf8');
+        const { properties, body } = splitFront(content);
+        found.push({ name: entry.name.slice(0, -3), description: String(properties.description ?? ''), body, by: typeof properties.proposedBy === 'string' ? properties.proposedBy : null });
+      }
+      return found.sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // A node's text at one of its versions, now or kept, or null. For history; it changes nothing.
+    async textAt(node, version) {
+      const content = await contentAt(nodeOf(node), version);
+      return content === null ? null : typeof content === 'string' ? content : content.text;
+    },
+
     // --- From before docs/model.md ---------------------------------------------------------------
 
     // Brings a cortex made before docs/model.md to the four parts, once, as the person's changes.
