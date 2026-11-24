@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS friend_requests (
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS friend_requests_waiting ON friend_requests (did, state);
+-- One request waits for each asker: a second ask, even at the same moment, keeps the first.
+CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_one_waiting ON friend_requests (did, friend) WHERE state = 'waiting';
 CREATE INDEX IF NOT EXISTS friends_of ON friends (friend);
 
 -- Channels: each member's channel files (`_channel.md`), kept readable like the friends layer.

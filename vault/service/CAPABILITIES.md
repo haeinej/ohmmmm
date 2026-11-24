@@ -199,7 +199,7 @@ Who has asked to be the member's friend and is waiting for an answer, oldest fir
 
 ### `com.ohmmmm.vault.approveFriend`
 
-The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend's own agents read with the friend's access.
+The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend's own agents read with the friend's access. Sent again with the same channels, it answers the same; a request already declined, or approved for other channels, is `Answered`.
 
 | | |
 | --- | --- |
@@ -210,7 +210,7 @@ The member lets someone who asked into their friends layer, for every channel (`
 
 ### `com.ohmmmm.vault.declineFriend`
 
-The member declines someone who asked. They are not told.
+The member declines someone who asked. They are not told. Sent again, it answers the same; a request already approved is `Answered`.
 
 | | |
 | --- | --- |
