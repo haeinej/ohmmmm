@@ -10,10 +10,12 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createLocalTools } from '../mcp/local.mjs';
+import { blobCid } from '../vault/core.mjs';
 import { readEvents } from '../vault/journal.mjs';
 import { readProperties, splitFile } from '../vault/file.mjs';
 import { readNode } from '../vault/node.mjs';
-import { planRename } from '../vault/rename.mjs';
+import { formerNames } from '../vault/names.mjs';
+import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 
 const CLI = fileURLToPath(new URL('../scripts/vault.mjs', import.meta.url));
 const RAIN = '3m2zx5u6ifk2a';
@@ -95,6 +97,37 @@ async function setUp(t) {
   return { vault, call: tools.call };
 }
 
+test('a rename that stops after its moves strands nothing: old names keep working, and trying again finishes it', async t => {
+  const { vault } = await setUp(t);
+  const change = { block: 'notes/rain.md', slug: 'rain-walk', title: 'Rain in Busan' };
+  const before = (await readEvents(vault)).events.length;
+  const read = await readVaultFolder(vault);
+  // The disk fills up once the file is moved: keeping the first version fails.
+  const broken = async () => { throw new Error('ENOSPC: no space left on device'); };
+  await assert.rejects(applyRename({ vault, plan: planRename(read.files, change, { paths: read.paths }), by: 'me', keep: broken }), /no space/);
+  assert.ok((await stat(join(vault, 'notes/rain-walk.md'))).isFile());
+  assert.match(await readFile(join(vault, 'writing/essay.md'), 'utf8'), /\[\[rain\|the rain\]\]/, 'not rewritten yet');
+
+  // The move and the old names are journaled already, so [[rain]] and [[Rain in Seoul]] still find it.
+  const stopped = (await readEvents(vault)).events.slice(before);
+  assert.deepEqual(stopped.map(event => event.op), ['moved', 'renamed']);
+  const { blocks } = formerNames((await readEvents(vault)).events);
+  assert.deepEqual(['rain', 'rain in seoul', 'notes/rain'].map(name => blocks.get(name)), Array(3).fill('notes/rain-walk.md'));
+
+  // The same rename again, by the path it had: the move is not made or journaled twice, the rest is done.
+  const keep = text => blobCid(Buffer.from(text, 'utf8'));
+  const now = await readVaultFolder(vault);
+  assert.throws(() => planRename(now.files, change, { paths: now.paths }), /no block at "notes\/rain.md"/);
+  const done = await applyRename({ vault, plan: planRename(now.files, change, { paths: now.paths, events: (await readEvents(vault)).events }), by: 'me', keep });
+  assert.deepEqual([done.from, done.to, done.left], ['notes/rain.md', 'notes/rain-walk.md', []]);
+  const essay = await readFile(join(vault, 'writing/essay.md'), 'utf8');
+  assert.match(essay, /\[\[rain-walk\|the rain\]\] and \[\[Rain in Busan\]\]/);
+  assert.equal(props(await readFile(join(vault, 'notes/rain-walk.md'), 'utf8')).title, 'Rain in Busan');
+  const finished = (await readEvents(vault)).events.slice(before + stopped.length);
+  assert.deepEqual(finished.filter(event => event.op !== 'changed'), []);
+  assert.ok(finished.some(event => event.path === 'writing/essay.md'));
+});
+
 test('an agent renames within its grant; what it may not write keeps working through the old name', async t => {
   const { vault, call } = await setUp(t);
   await assert.rejects(call('vault_rename', { ref: 'notes', to: 'journal' }), /ohm vault grant helper write/);
@@ -134,7 +167,7 @@ test('an agent renames within its grant; what it may not write keeps working thr
   // Moved and rewritten at once, the file is still one move to the scan, not a removal and an addition.
   const own = (await readEvents(vault)).events.slice(mark);
   assert.deepEqual(own.filter(event => event.via === 'scan'), []);
-  assert.deepEqual(own.filter(event => event.path === 'journal/rain-walk.md').map(event => event.op), ['moved', 'changed', 'renamed']);
+  assert.deepEqual(own.filter(event => event.path === 'journal/rain-walk.md').map(event => event.op), ['moved', 'renamed', 'changed']);
   assert.deepEqual([block.kind, block.from, block.to, block.left], ['block', 'journal/rain.md', 'journal/rain-walk.md', []]);
   // The link it could not rewrite before follows the block through both renames.
   const again = await call('vault_index');

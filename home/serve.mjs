@@ -503,12 +503,13 @@ export async function recentHistory(vault, { limit = 500 } = {}) {
  * A rename or move as the person (vault/vault/rename.mjs): `{ channel, to }`, or `{ block, slug?,
  * title?, home? }`. Every file that used the old name is rewritten; all of it is journaled `by: me`,
  * `via: rename`. Answers what the rename did, and each file it moved or wrote as it is on disk now.
+ * The same rename tried again after it stopped part-way finishes what is left (planRename's `events`).
  */
 export async function renameAsPerson({ vault, change }) {
   const { files, paths } = await readVaultFolder(vault, { open: path => inVault(vault, path) });
   const plan = planRename(files, change.block === undefined
     ? { channel: change.channel, to: change.to }
-    : { block: change.block, ...(change.slug === undefined ? {} : { slug: change.slug }), ...(change.title === undefined ? {} : { title: change.title }), ...(change.home === undefined ? {} : { channel: change.home }) }, { paths });
+    : { block: change.block, ...(change.slug === undefined ? {} : { slug: change.slug }), ...(change.title === undefined ? {} : { title: change.title }), ...(change.home === undefined ? {} : { channel: change.home }) }, { paths, events: (await readEvents(vault)).events });
   const done = await applyRename({ vault, plan, by: 'me', keep: text => keep(vault, text) });
   const touched = [...new Set([...plan.moves.map(move => move.to), ...plan.writes.map(write => write.path)])].filter(path => path.endsWith('.md'));
   const now = [];
