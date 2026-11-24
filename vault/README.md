@@ -21,6 +21,7 @@ This repository is a Claude Code plugin. Its bundled skills are:
 | --- | --- |
 | [start](skills/start/SKILL.md) | The project's purpose and rules |
 | [vault](skills/vault/SKILL.md) | Working in your notes with the vault's tools |
+| [connections](skills/connections/SKILL.md) | Finding friends from your inbox, and writing to them, with your own mail tools |
 | [suggest-labels](skills/suggest-labels/SKILL.md) | Deciding your site's sections with you |
 | [migrate-site](skills/migrate-site/SKILL.md) | Moving a website and social posts in without loss |
 | [build-renderer](skills/build-renderer/SKILL.md) | Making your site's pages build from records |

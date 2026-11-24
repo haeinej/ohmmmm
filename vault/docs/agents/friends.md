@@ -7,7 +7,7 @@ Human guide: [friends](../friends.md). Code: [service/src/friendship.mjs](../../
   - Used by `blocks.shared`/`readShared` (a block out of scope gives `NotFound`) and by content's `audienceOf`/`sees` (Friends entries filtered by `channel`/`channels`).
   - A friend's agents read as the friend: with the friend's PDS token (friends tools) or the friend's viewer token (sites).
 - **Requests:**
-  - `askFriend {owner, message?}` asks `ohm`. It needs a connected DID (`NotConnected`). It is idempotent, and always answers `{asked: true}`.
+  - `askFriend {owner | email, message?}` asks `member`: an ohm session, or the member's PDS token (their agent). The asker's `name`/`email` come from the session, else from `links` for that DID. With a token and no `links.email`, it is refused `NotConnected`, as is a session with no connected DID. It is idempotent, and always answers `{asked: true}`.
   - `listFriendRequests` asks `member`.
   - `approveFriend {id, channels?: '*' | paths}`, `declineFriend {id}` and `setFriendChannels {friend, channels}` ask `ohm`: never an agent's token.
   - `listFriends` gives `channels` (`'*'` or a list), `name` and `email`.
@@ -22,3 +22,5 @@ Human guide: [friends](../friends.md). Code: [service/src/friendship.mjs](../../
 - `listShared`/`getShared` now ask `member` (a PDS token, or the ohm session the cockpit uses). The same `friendScope` applies.
 - Migration [0009_people.sql](../../service/migrations/0009_people.sql) adds `links.name`, `links.email` and `friend_asks`.
 - **Cockpit:** the rack's **Connections** ([ConnectionsPanel.tsx](../../../app/src/workspace/ConnectionsPanel.tsx)) shows the list and graph, Make friends (`askFriend`, with the `connections.ask` tool behind a Dialog), the person card with `sharedBy`, `openShared` (view `shared`, read-only), and Stop sharing (`removeFriend`, behind a Dialog). Tests: `app/test/connections.test.ts`.
+- **Agents (MCP, [mcp/tools.mjs](../../mcp/tools.mjs)):** `vault_connections` reads `listFriends`, `listFriendOf` and `listAsked`, and returns `{friends, friendOf, asked}`. `vault_friends_ask {email, message?, confirm?}` lower-cases and checks the email, reads `listAsked` for `alreadyAsked`, and previews. Only a second call whose `confirm` matches the same email and message calls `askFriend`. No tool approves, declines or sets channels. Tests: `test/mcp.test.mjs` (connections), `test/friendship.test.mjs` (token ask).
+- **Mail stays with the agent:** ohm sends only the invite above. The [connections skill](../../skills/connections/SKILL.md) has the agent read the member's inbox and send mail with its own tools (from the member's own address, after approval). The only things that reach ohm are the addresses the member picked, through `vault_friends_ask`.

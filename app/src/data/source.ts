@@ -45,6 +45,16 @@ export type MoveRequest = {
   id: string; block: string; store: BlockRef["store"]; from: Layer; to: Layer; version?: string
   askedBy: string; reason?: string; asked: string; state: "waiting" | "approved" | "declined"
 }
+/** A coding agent that used ohm's tools (vault.listAgents): paused or disconnected only by the member. */
+export type AgentAccess = "active" | "paused" | "disconnected"
+export type AgentInfo = {
+  agent: string; state: AgentAccess; firstSeen: string; lastSeen: string; lastTool?: string; waiting: number
+  recent: { at: string; tool: string }[]
+}
+/** An action an agent's tool waits for the member to approve in ohm (vault.listApprovals). `shown` is its preview. */
+export type AgentApproval = {
+  id: string; agent: string; tool: string; shown: Record<string, unknown>; state: "waiting" | "approved" | "declined" | "used"; asked: string
+}
 /** A move the member made, for the journal (vault.recordMove). */
 export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string }
 export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: string }
@@ -107,6 +117,13 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
     record(move: MoveRecord): Promise<{ state: string }>
     /** The Publish page, showing one post alone: where a move to or from public is finished. */
     publishPage(postId: string): string
+  }
+  /** The member's coding agents, and the actions they wait for the member to approve. */
+  agents: {
+    list(): Promise<AgentInfo[]>
+    approvals(): Promise<AgentApproval[]>
+    answer(id: string, approve: boolean): Promise<void>
+    setState(agent: string, state: AgentAccess): Promise<void>
   }
   agenda(): Promise<Agenda>
   search: SearchProvider

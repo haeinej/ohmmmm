@@ -4,7 +4,7 @@ import { words } from "../../../vault/vault/words.mjs"
 import {
   blockOf, CORTEX_CONTEXT, mediaName, moveVisibility, readEvidence, searchInput, visibilityMove,
   type Account, type Agenda, type BlockFile, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove,
-  type CortexEntry, type CortexFile, type Ask, type Friend, type FriendRequest, type HistoryVersion, type Sharer, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
+  type CortexEntry, type CortexFile, type Ask, type Friend, type FriendRequest, type HistoryVersion, type Sharer, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan, type AgentInfo, type AgentApproval,
 } from "./source"
 import { isBlockKind } from "./block-kind"
 import type { SearchHit } from "./search"
@@ -444,6 +444,12 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       async decline(id, reason) { await vaultAsk("declineMoveRequest", { body: { id, ...(reason ? { reason } : {}) } }) },
       record: move => vaultAsk<{ state: string }>("recordMove", { body: move }),
       publishPage: postId => new URL(`?publish=${encodeURIComponent(postId)}`, base).href,
+    },
+    agents: {
+      list: async () => (await vaultAsk<{ agents: AgentInfo[] }>("listAgents")).agents,
+      approvals: async () => (await vaultAsk<{ approvals: AgentApproval[] }>("listApprovals")).approvals,
+      async answer(id, approve) { await vaultAsk("answerApproval", { body: { id, approve } }) },
+      async setState(agent, state) { await vaultAsk("setAgentState", { body: { agent, state } }) },
     },
     agenda: () => vaultAsk<Agenda>("getAgenda"),
   }

@@ -135,6 +135,18 @@ How to read each path:
 | K4 | What someone shares with you | Click a person who shares with you → a block | The block opens in the main panel to read; it is theirs, so it is never edited | Read what friends share | *UI only* |
 | K5 | **Stop sharing** | A person you let in → **Stop sharing** → confirm | They and their agents stop reading your friends-only blocks | Take someone out | *UI only* · asks first |
 
+## F″. Agents (rack)
+
+The coding agents that use ohm's tools (the `ohm-vault` MCP server), and every action they wait on. A two-step tool waits here: a yes in the agent's own chat approves nothing. Talking to an agent stays in its own chat. Flow: [agents.md](agents.md).
+
+| # | Path | Entry → steps | End state | For | Agent |
+| --- | --- | --- | --- | --- | --- |
+| A1 | **Agents** | Rack → Agents (a dot while anything waits) | Each agent with its state and last tool, its waiting actions as cards, and its recent calls | See what your coding agents are doing | *UI only* |
+| A2 | **Approve** | Agents → click a card to open it → **Approve** | The agent's next call carries out exactly that action, once (an email is sent by the agent, from your own address) | Let an agent go ahead | `agents.answer` (consequential: a dialog first) |
+| A3 | Decline | Agents → open a card → Decline | The agent is told you declined; nothing is done | Stop an action | `agents.answer` (consequential: a dialog first) |
+| A4 | Pause, resume | Agents → an agent → pause button, or **Resume** | While paused, ohm's tools refuse every call from it | Hold an agent | *UI only* |
+| A5 | Disconnect | Agents → an agent → disconnect → confirm; later **Allow again** | ohm's tools refuse it, and what it waited for is declined | Cut an agent off | *UI only* · asks first |
+
 ## G. Profile and settings
 
 Settings › **Friends** lists each friend you let in, with their name, email and the channels they see. **Channels** changes what they see (Every channel, or some; never none), and **Stop sharing** removes them after a dialog. It also says how many are asking, and who you asked.

@@ -8,6 +8,7 @@
 import { REQUESTS } from './capabilities/index.mjs';
 import { admitMember, createIdentity } from './identity.mjs';
 import { fromOurPages, links, ohmUser } from './ohm.mjs';
+import { agentStore } from './agents.mjs';
 import { blockStore } from './blocks.mjs';
 import { channelStore } from './channels.mjs';
 import { contentStore } from './content.mjs';
@@ -113,6 +114,7 @@ export function createService({ whoIs, get = fetch } = {}) {
         sites: siteStore(env.DB),
         moves: visibilityStore(env.DB),
         friendships: friendshipStore(env.DB),
+        agentsOf: agentStore(env.DB),
         // Who is signed in to ohm, for content.view: asked only there, and never required.
         viewers: {
           signedIn: () => ohmUser(request, env, get),

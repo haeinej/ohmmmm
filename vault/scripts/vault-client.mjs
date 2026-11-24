@@ -88,10 +88,17 @@ export function vaultClient({ pds, session, renew, vault, audience, get = fetch 
     deleteBlock: (id, replaces) => ask('deleteBlock', { body: { id, replaces } }),
     listFriends: () => ask('listFriends'),
     removeFriend: did => ask('removeFriend', { body: { did } }),
+    listFriendOf: () => ask('listFriendOf'),
+    listAsked: () => ask('listAsked'),
+    askFriend: (email, message) => ask('askFriend', { body: { email, ...(message === undefined ? {} : { message }) } }),
     listShared: owner => ask('listShared', { query: { owner } }),
     getShared: (owner, id) => ask('getShared', { query: { owner, id } }),
     previewMove: (id, to) => ask('previewMove', { query: { id, to } }),
     hideBlock: move => ask('hideBlock', { body: move }),
     requestMove: move => ask('requestMove', { body: move }),
+    checkIn: call => ask('agentCheckIn', { body: call }),
+    askApproval: asked => ask('askApproval', { body: asked }),
+    getApproval: id => ask('getApproval', { query: { id } }),
+    useApproval: used => ask('useApproval', { body: used }),
   };
 }

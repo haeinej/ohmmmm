@@ -70,21 +70,25 @@ export default {
       run: async ({ body, blocks, did }) => blocks.removeFriend(did, (await body()).did),
     },
     'com.ohmmmm.vault.askFriend': {
-      verb: 'POST', asks: 'ohm', changes: true,
-      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member\'s ohm account or by their DID. Asked by email, ohm also emails them an invite once, from its own address with the asker\'s name, replies going to the asker\'s email (at most 20 a day for each asker). The member sees the asker\'s name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.',
+      verb: 'POST', asks: 'member', changes: true,
+      about: 'A member asks someone to be their friend, by the email of that person\'s ohm account or by their DID: signed in to ohm, or through their agent with a token from their own PDS, once their ohm account is connected and has signed in here. Asked by email, ohm also emails them an invite once, from its own address with the asker\'s name, replies going to the asker\'s email (at most 20 a day for each asker). The member sees the asker\'s name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.',
       takes: { email: 'the email of the person asked', owner: 'or: their DID', message: 'optional: a line for them' },
       gives: '`asked`',
       run: async ({ body, friendships, linked, did, user, env }) => {
         if (!did) throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first');
+        // The person asked sees who is asking by their ohm account. An agent's token carries no ohm
+        // session, so the name and email are the ones that account last signed in with.
+        const asker = user ?? [(await linked.people([did])).get(did)].find(known => known?.email)
+          ?? (() => { throw new Refused(409, 'NotConnected', 'Sign in to ohm once with this account, so the people you ask can see who you are'); })();
         const { owner, email, message } = await body();
         if (email !== undefined) {
           const link = env.OHM_APP_ORIGIN ? new URL('/', env.OHM_APP_ORIGIN).href : null;
           return friendships.askByEmail({
-            viewer: did, email, name: user?.name, ownEmail: user?.email, message, didByEmail: linked.didByEmail,
+            viewer: did, email, name: asker.name, ownEmail: asker.email, message, didByEmail: linked.didByEmail,
             mail: link ? invite => sendInvite(env, { ...invite, link }) : null,
           });
         }
-        return friendships.ask(owner, { viewer: did, name: user?.name, email: user?.email, message });
+        return friendships.ask(owner, { viewer: did, name: asker.name, email: asker.email, message });
       },
     },
     'com.ohmmmm.vault.listAsked': {

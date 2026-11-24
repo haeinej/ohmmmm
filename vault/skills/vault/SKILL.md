@@ -23,10 +23,11 @@ The post is the same post at every visibility. Changing visibility marks it; it 
 
 1. **Private reading is device-local.** Use the local tools in a vault the person selected. Never include private content in a post, message or commit unless the person approves the disclosure.
 2. **Capture new work locally.** `vault_capture` adds an HTTP(S) reference or an eligible configured-root file as a block in a channel you were granted (`vault_where` lists them). It is marked as yours and starts private; only the person shows it to more people. `vault_save` edits existing public and friends-only posts, and `vault_friends_save` edits friends-only blocks that are already shared; neither makes a new shared block.
-3. **Show the preview before the write.** `vault_set_visibility`, `vault_publish`, `vault_delete`, `vault_mirror`, `vault_save`, `vault_friends_save`, `vault_friends_delete` and `vault_friends_remove` use two calls when they change something. Show the answer and call with `confirm` only when the person agrees.
+3. **Show the preview before the write.** `vault_set_visibility`, `vault_publish`, `vault_delete`, `vault_mirror`, `vault_save`, `vault_friends_save`, `vault_friends_delete`, `vault_friends_remove` and `vault_friends_ask` use two calls when they change something. The first call puts the action in the person's **Agents** panel in ohm. Tell them it waits there, then call again with `confirm`: it goes ahead only once they approve it in ohm, and a yes in your chat doesn't count. If they declined, or paused or disconnected you, say so and stop. A move request (`vault_set_visibility` widening a block) already waits in ohm, so it isn't asked for twice.
 4. **Read before you change.** `vault_read` gives a post's version, and `vault_save` needs it to change the post. If the save is refused because the post changed, read it again and redo the change on the new text; do not retry with the old text.
 5. **Use the person's own labels.** Look at `vault_tree` before filing a new post, and file it under a label they already use. Ask before inventing a new label.
 6. **Never choose a form.** What kind of thing a post is, is identified from its content.
+7. **People and mail:** `vault_connections` lists the person's friends, who let them in and who they asked. To find friends from their inbox, or to write to a friend, follow the [connections skill](../connections/SKILL.md).
 
 ## A post
 

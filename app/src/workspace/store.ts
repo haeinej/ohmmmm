@@ -12,7 +12,7 @@ import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
+import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -94,7 +94,7 @@ async function saveChannelProperty(path: string, key: string, value: unknown) {
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "visibility" | "connections" | "profile" | null
+export type Side = "repo" | "visibility" | "connections" | "agents" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
@@ -397,6 +397,30 @@ export async function declineFriend(id: string) {
   await live().friendRequests.decline(id)
   await loadFriendRequests()
   return { id, declined: true }
+}
+
+// Agents: the member's coding agents, and what they wait for the member to approve in ohm.
+export type Agents = { agents: AgentInfo[]; approvals: AgentApproval[] }
+let agentsWaiting = 0
+/** How many agent actions wait for the member, as last read. The rack marks the Agents button while any do. */
+export const waitingAgentActions = () => agentsWaiting
+export async function loadAgents(): Promise<Agents> {
+  const [agents, approvals] = await Promise.all([live().agents.list(), live().agents.approvals()])
+  if (approvals.length !== agentsWaiting) { agentsWaiting = approvals.length; set(bump()) }
+  return { agents, approvals }
+}
+/** The member approves or declines one agent action. Only here, signed in to ohm; never by an agent. */
+export async function answerAgent(id: string, approve: boolean) {
+  await live().agents.answer(id, approve)
+  return { id, state: approve ? "approved" as const : "declined" as const }
+}
+const AGENT_NAME = /^agent:[A-Za-z0-9._-]{1,64}$/
+/** Pauses, resumes, disconnects or allows again one coding agent. */
+export async function setAgentState(agent: string, state: AgentAccess) {
+  if (!AGENT_NAME.test(agent)) throw new DOMException("Name the agent as agent: and its name", "DataError")
+  if (!["active", "paused", "disconnected"].includes(state)) throw new DOMException("Choose active, paused or disconnected", "DataError")
+  await live().agents.setState(agent, state)
+  return { agent, state }
 }
 
 // Connections: the people around you. Friends you let in, people who let you in, and who you asked.

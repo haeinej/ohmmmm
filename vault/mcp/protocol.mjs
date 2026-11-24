@@ -4,8 +4,9 @@ const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 export const INSTRUCTIONS = [
   "These tools reach the public and friends layers of one person's vault service. Private blocks stay on the person's device.",
-  'When a tool returns a preview and a confirm value, show the preview to the person and call again only when they agree.',
+  'When a tool returns a preview and a confirm value, the action waits for the person in ohm, in the Agents panel: tell them so, and call again with the confirm value. A yes in this chat approves nothing.',
   'Saving never publishes. A friends-only block is shared as soon as it is saved. The signed-in member manages who can become a friend.',
+  "You may ask someone to be the person's friend by email (vault_friends_ask), never approve one. Before sending mail with your own mail tools, from the person's own address, have the draft approved with vault_mail_ask and send exactly what was approved.",
 ].join(' ');
 
 // `tools` is ready-made, or a function that makes them the first time a tool is used, so that

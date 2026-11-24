@@ -3,9 +3,13 @@
 // lives only here, so a post saved by an agent is exactly a post saved in the editor.
 //
 // Reading is free. Anything that changes a post other people are meant to see, or removes one,
-// takes two calls: the first says exactly what would happen and returns a `confirm` value, and
-// only a second call carrying that value does it. The person sees the first answer before the
-// second is made.
+// takes two calls: the first says exactly what would happen, puts it in the person's Agents panel
+// in ohm, and returns a `confirm` value; the second carries it out only once the person approved
+// exactly that there (service/src/agents.mjs). A yes in the agent's chat approves nothing. A move
+// request already waits for the person in ohm, so it is not asked for twice.
+//
+// Every call checks in first: the person sees the agent in the Agents panel, and a paused or
+// disconnected agent is refused.
 import { createHmac, randomBytes } from 'node:crypto';
 import { carryOut } from '../service/public/vault/publish.js';
 import { VISIBILITIES, VaultProblem } from '../vault/core.mjs';
@@ -150,6 +154,31 @@ export const TOOLS = [
     requests: ['listFriends', 'removeFriend'],
   },
   {
+    name: 'vault_connections',
+    description: "The person's Connections: their friends (who reads their friends layer, with name, email and channels), the people who let them in, and everyone they asked by email with whether that person answered yet. Read it before asking someone, so you do not ask a friend again.",
+    inputSchema: fields({}),
+    annotations: { readOnlyHint: true },
+    requests: ['listFriends', 'listFriendOf', 'listAsked'],
+  },
+  {
+    name: 'vault_friends_ask',
+    description: "Ask someone to be the person's friend on ohm, by their email. ohm emails them one invite from \"<the person> via ohm\", replies going to the person's own email; at most 20 invites a day. They join their Connections as asked, and become a friend only when they let the person in. Preview, then confirm. It never lets anyone read the person's friends layer: only the person approves friends, in ohm.",
+    inputSchema: fields({ email: text, message: { type: 'string', description: 'Optional: one line for them, in the person\'s words.' }, confirm: text }, ['email']),
+    annotations: { openWorldHint: true },
+    requests: ['listAsked', 'askFriend'],
+  },
+  {
+    name: 'vault_mail_ask',
+    description: "Ask the person to approve an email before you send it with your own mail tool, from their own address. The draft waits in their Agents panel in ohm; call again with confirm, and once they approve, send exactly the approved draft. ohm itself never sends it.",
+    inputSchema: fields({
+      to: { type: 'array', items: { type: 'string' }, description: 'The addresses it goes to.' },
+      cc: { type: 'array', items: { type: 'string' } },
+      subject: text, body: text, confirm: text,
+    }, ['to', 'subject', 'body']),
+    annotations: { openWorldHint: true },
+    requests: [],
+  },
+  {
     name: 'vault_shared_list',
     description: 'List the friends-only blocks and posts an owner shares with your signed-in DID.',
     inputSchema: fields({ owner: text }, ['owner']),
@@ -180,7 +209,7 @@ const audience = {
 export function createTools(options) {
   // `by` is who the tools act as (agent:<name>). `grants`, when the tools run in a home, answers
   // whether the person's .vault/grants.json lets this agent write under a path.
-  const { vault, by = 'agent:mcp', grants = null } = options;
+  const { vault, by = 'agent:mcp', grants = null, wait = 25_000, poll = 1_000 } = options;
   // Every post's line in the tree, each knowing its label and sublabel.
   const lines = async () => (await vault.tree()).labels.flatMap(folder => [
     ...folder.posts.filter(isShared).map(post => ({ ...post, label: folder.label, sublabel: '' })),
@@ -228,10 +257,40 @@ export function createTools(options) {
   // The value a second call must carry: a name for exactly this request against exactly this post.
   const secret = randomBytes(32);
   const token = plan => `c${createHmac('sha256', secret).update(JSON.stringify(plan)).digest('hex').slice(0, 32)}`;
-  async function twoSteps(args, plan, willHappen, act) {
-    const expected = token(plan);
-    if (args.confirm === undefined) return { done: false, willHappen, confirm: expected, next: 'Show this to the person. If they agree, call again with the same values and this confirm value.' };
-    if (args.confirm !== expected) refuse('The request has changed since it was shown. Call again without confirm to see what would happen now.');
+  const CHANGED = 'The request has changed since it was shown. Call again without confirm to see what would happen now.';
+  const WAITING = 'It waits for the person in ohm, in the Agents panel. Tell them so, then call again with the same values and this confirm value. A yes in this chat does not approve it.';
+  async function twoSteps(args, plan, willHappen, act, { inOhm = true } = {}) {
+    // Only what is already a request waiting in ohm is confirmed here, by a value only this
+    // process can make for exactly this plan.
+    if (!inOhm) {
+      const expected = token(plan);
+      if (args.confirm === undefined) return { done: false, willHappen, confirm: expected, next: 'Show this to the person. If they agree, call again with the same values and this confirm value.' };
+      if (args.confirm !== expected) refuse(CHANGED);
+      return { done: true, ...await act() };
+    }
+    const exact = JSON.parse(JSON.stringify(plan));
+    if (args.confirm === undefined) {
+      const { approval } = await asking(() => vault.askApproval({ agent: by, tool: plan.tool, plan: exact, shown: willHappen }));
+      return { done: false, willHappen, confirm: approval.id, waitingFor: 'the person, in ohm', next: WAITING };
+    }
+    if (typeof args.confirm !== 'string' || !/^a[0-9a-f]{32}$/.test(args.confirm)) refuse(CHANGED);
+    // Wait a while for the person's answer, so an agent that calls again at once usually finds it.
+    const stateOf = async () => (await asking(() => vault.getApproval(args.confirm))).approval;
+    let held = await stateOf();
+    if (held.tool !== plan.tool || held.agent !== by) refuse(CHANGED);
+    for (const until = Date.now() + wait; held.state === 'waiting' && Date.now() < until;) {
+      await new Promise(resolve => setTimeout(resolve, poll));
+      held = await stateOf();
+    }
+    if (held.state === 'waiting') return { done: false, willHappen, confirm: args.confirm, waitingFor: 'the person, in ohm', next: WAITING };
+    if (held.state === 'declined') refuse('The person declined this in ohm. Do not ask again unless they tell you to.');
+    try {
+      await vault.useApproval({ id: args.confirm, agent: by, tool: plan.tool, plan: exact });
+    } catch (problem) {
+      if (problem?.code === 'NotApproved' && held.state === 'approved') refuse(CHANGED);
+      if (problem?.code) refuse(problem.message);
+      throw problem;
+    }
     return { done: true, ...await act() };
   }
 
@@ -336,7 +395,7 @@ export function createTools(options) {
         }
         const asked = await asking(() => vault.requestMove({ block: id, store: preview.store, from, to, version: preview.version, by, ...(reason ? { reason } : {}) }));
         return { requested: true, request: asked.request.id, waitsFor: 'the person, in their cockpit', ...(asked.unchanged ? { alreadyWaiting: true } : {}) };
-      });
+      }, { inOhm: why === null });
     },
 
     async vault_status() {
@@ -442,6 +501,45 @@ export function createTools(options) {
       }, () => asking(() => vault.removeFriend(did)));
     },
 
+    async vault_connections() {
+      const [{ friends }, { people }, { asks }] = await Promise.all([
+        asking(() => vault.listFriends()), asking(() => vault.listFriendOf()), asking(() => vault.listAsked()),
+      ]);
+      return { friends, friendOf: people, asked: asks };
+    },
+
+    async vault_friends_ask(args) {
+      const email = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) refuse('Give their email address.');
+      const message = typeof args.message === 'string' && args.message.trim() ? args.message.trim().slice(0, 500) : undefined;
+      const { asks } = await asking(() => vault.listAsked());
+      const before = asks.find(each => each.email === email);
+      return twoSteps(args, { tool: 'vault_friends_ask', email, message }, {
+        email, ...(message ? { message } : {}),
+        ...(before ? { alreadyAsked: before.state } : {}),
+        warning: before
+          ? 'They were asked before, so no second email is sent. The message is updated.'
+          : 'If they have no invite yet, ohm emails them one with the person\'s name. They see who is asking, and may answer or not.',
+      }, () => asking(() => vault.askFriend(email, message)));
+    },
+
+    async vault_mail_ask(args) {
+      const address = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const list = (value, required) => {
+        if (value === undefined && !required) return [];
+        if (!Array.isArray(value) || (required && !value.length) || value.length > 50) refuse('Give the addresses as a list.');
+        return value.map(each => (typeof each === 'string' && address.test(each.trim()) ? each.trim() : refuse(`"${each}" is not an email address.`)));
+      };
+      const to = list(args.to, true);
+      const cc = list(args.cc, false);
+      if (typeof args.subject !== 'string' || args.subject.length > 500) refuse('Give a subject, at most 500 characters.');
+      if (typeof args.body !== 'string' || !args.body.trim() || args.body.length > 20_000) refuse('Give the body, at most 20,000 characters.');
+      const draft = { to, ...(cc.length ? { cc } : {}), subject: args.subject, body: args.body };
+      return twoSteps(args, { tool: 'vault_mail_ask', ...draft }, {
+        ...draft, sentBy: 'your agent, from your own address, with its own mail tool', warning: 'Once you approve, your agent sends exactly this. ohm does not send it.',
+      }, async () => ({ approved: true, send: draft, next: 'Send exactly this draft now, with your mail tool, from the person\'s own address. Change nothing; a changed draft needs approving again.' }));
+    },
+
     vault_shared_list: ({ owner }) => asking(() => vault.listShared(owner)),
     vault_shared_read: ({ owner, id }) => readSharedFile(() => vault.getShared(owner, id)),
   };
@@ -450,6 +548,7 @@ export function createTools(options) {
     list: OFFERED,
     async call(name, args = {}) {
       if (!Object.hasOwn(calls, name)) refuse(`There is no tool named ${name}`);
+      await asking(() => vault.checkIn({ agent: by, tool: name }));
       return calls[name](args);
     },
   };

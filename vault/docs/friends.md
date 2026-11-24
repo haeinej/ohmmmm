@@ -20,6 +20,14 @@ Only you let people in or change what they see, signed in to ohm. Your agents ca
 
 **Connections** in the rack shows everyone around you, as a list or a graph: friends you let in, people who let you in, and who you asked. Click someone who shares with you to read what they share; it opens to read, never to edit. **Stop sharing** takes someone you let in out.
 
+## Finding friends from your inbox
+
+You probably write to the people you'd share with already. Ask your coding agent to "find friends from my inbox", using the [connections skill](../skills/connections/SKILL.md). It goes through your mail with its own mail tools, such as a Gmail connector, and shows you a short list of the people you write to. Nobody is asked until you pick them. Only the addresses you picked go to ohm: never your mail, its subjects or anyone else's address. Each person you pick gets ohm's one invite and joins Connections as *asked*.
+
+Your agent can also write to a friend for you. It sends from your own address, with your mail tool, and only once you've seen the draft and said yes. ohm never holds your mailbox. Your agent can ask people to be friends, but only you let anyone in.
+
+For this to work, your account must have signed in to ohm at least once, so the people you ask can see who is asking.
+
 ## Before this
 
 Friends added earlier, by DID, see every channel, as before.

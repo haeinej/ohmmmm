@@ -413,7 +413,7 @@ test('what publishing would change is worked out for a member\'s own vault, with
 });
 
 test('every request belongs to one capability, and says what it is, who may ask, and whether it changes anything', () => {
-  assert.deepEqual(CAPABILITIES.map(capability => capability.name), ['Posts', 'Friends', 'Private', 'Visibility', 'Channels', 'Cortex', 'Media', 'Structure', 'Search', 'Mirror', 'Publish', 'Export', 'Content', 'Account', 'Identity']);
+  assert.deepEqual(CAPABILITIES.map(capability => capability.name), ['Posts', 'Friends', 'Private', 'Visibility', 'Channels', 'Cortex', 'Media', 'Structure', 'Search', 'Mirror', 'Publish', 'Export', 'Content', 'Agents', 'Account', 'Identity']);
   const names = CAPABILITIES.flatMap(capability => Object.keys(capability.requests));
   assert.equal(new Set(names).size, names.length, 'a request has one home');
   assert.deepEqual(Object.keys(REQUESTS).sort(), [...names].sort());

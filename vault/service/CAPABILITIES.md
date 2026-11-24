@@ -23,6 +23,7 @@ This page is the whole list. It is written from the same tables the service and 
 | **Publish** | Work out what would have to change in the member's own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only standard.site documents holding an ohm post are touched, with the member's publication made the first time; a record the vault knows nothing about is never removed. | `getPublishPlan`, `getAttachment` | [publish.mjs](src/capabilities/publish.mjs) |
 | **Export** | The whole vault written out as files a person can keep: each post as Markdown, where it sits in a folder. The same files open in Obsidian, and read back as the same posts. | `exportFiles` | [export.mjs](src/capabilities/export.mjs) |
 | **Content** | Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. When the member's PDS cannot be reached, Friends is still served, with the last public copy and `publicStale` (when it was read), or with `publicUnavailable` when there is none. | `listChannels`, `getChannel`, `listBlocks`, `getBlock`, `getMedia`, `view`, `listSites`, `addSite`, `removeSite` | [content.mjs](src/capabilities/content.mjs) |
+| **Agents** | The member's coding agents: each one that used ohm's tools, what it did lately, whether the member paused or disconnected it, and the actions it waits for the member to approve in the cockpit. An agent never approves its own action. | `agentCheckIn`, `askApproval`, `getApproval`, `useApproval`, `listApprovals`, `answerApproval`, `listAgents`, `setAgentState` | [agents.mjs](src/capabilities/agents.mjs) |
 | **Account** | For a member signed in to ohm: who they are, and which AT Protocol account their vault is. One ohm account works in one AT Protocol account, and the other way round. These ride on the ohm session only; a token from a PDS does not reach them. | `get`, `connect`, `disconnect` | [account.mjs](src/capabilities/account.mjs) |
 | **Identity** | The first steps of signing in: finding an account from its handle, and saying who a token from a PDS names. Neither touches a vault. | `findAccount`, `whoAmI` | [identity.mjs](src/capabilities/identity.mjs) |
 
@@ -177,12 +178,12 @@ Stops one DID reading the member's friends layer. What they read before cannot b
 
 ### `com.ohmmmm.vault.askFriend`
 
-Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member's ohm account or by their DID. Asked by email, ohm also emails them an invite once, from its own address with the asker's name, replies going to the asker's email (at most 20 a day for each asker). The member sees the asker's name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.
+A member asks someone to be their friend, by the email of that person's ohm account or by their DID: signed in to ohm, or through their agent with a token from their own PDS, once their ohm account is connected and has signed in here. Asked by email, ohm also emails them an invite once, from its own address with the asker's name, replies going to the asker's email (at most 20 a day for each asker). The member sees the asker's name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.
 
 | | |
 | --- | --- |
 | Reads or changes | Changes (`POST`) |
-| Who may ask | The member, signed in to ohm |
+| Who may ask | The member |
 | Takes | `email`: the email of the person asked<br>`owner`: or: their DID<br>`message`: optional: a line for them |
 | Gives | `asked` |
 
@@ -923,6 +924,98 @@ Stops sending viewer tokens to one of the member's sites. Tokens it already hold
 | Takes | `origin`: the site's https address |
 | Gives | `origin`, `removed`, or `unchanged` when it was not there |
 
+## Agents
+
+The member's coding agents: each one that used ohm's tools, what it did lately, whether the member paused or disconnected it, and the actions it waits for the member to approve in the cockpit. An agent never approves its own action.
+
+### `com.ohmmmm.vault.agentCheckIn`
+
+ohm's agent tools call this before every tool call: the agent is seen, its call is kept among its recent ones, and it is refused when the member paused or disconnected it.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `agent`: agent:<name><br>`tool`: the tool being called |
+| Gives | `state` (active) |
+
+### `com.ohmmmm.vault.askApproval`
+
+An agent's tool asks the member to approve one exact plan. It waits in the cockpit's Agents panel, showing `shown`. The same plan asked again while it waits gives the same approval.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `agent`: agent:<name><br>`tool`: the tool<br>`plan`: the exact plan, as JSON<br>`shown`: what the member is shown, as JSON |
+| Gives | `approval` (id, agent, tool, shown, state, asked), and `unchanged` when it was waiting already |
+
+### `com.ohmmmm.vault.getApproval`
+
+One approval and how it stands: waiting, approved, declined or used.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `id`: the approval's ID |
+| Gives | `approval` |
+
+### `com.ohmmmm.vault.useApproval`
+
+An agent's tool uses an approval to carry out its plan: once, and only when the member approved exactly that plan. Otherwise it is refused with NotApproved, saying why.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `id`: the approval's ID<br>`agent`: agent:<name><br>`tool`: the tool<br>`plan`: the plan, as JSON |
+| Gives | `id`, `used` |
+
+### `com.ohmmmm.vault.listApprovals`
+
+Agents' actions, oldest first: waiting (the default), approved, declined or used.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `state`: optional: waiting, approved, declined or used |
+| Gives | `approvals` |
+
+### `com.ohmmmm.vault.answerApproval`
+
+The member approves or declines an agent's action, in the cockpit. Only the member, signed in to ohm; never an agent.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `id`: the approval's ID<br>`approve`: true or false |
+| Gives | `id`, `state` |
+
+### `com.ohmmmm.vault.listAgents`
+
+Every agent that used ohm's tools, newest seen first: its state, when it was last seen and with which tool, how many of its actions wait, and its last ten calls.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | Nothing |
+| Gives | `agents` (agent, state, firstSeen, lastSeen, lastTool, waiting, recent) |
+
+### `com.ohmmmm.vault.setAgentState`
+
+The member pauses, resumes, disconnects or allows again one agent. Disconnecting also declines what it was waiting for. Only the member, signed in to ohm.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `agent`: agent:<name><br>`state`: active, paused or disconnected |
+| Gives | `agent`, `state` |
+
 ## Account
 
 For a member signed in to ohm: who they are, and which AT Protocol account their vault is. One ohm account works in one AT Protocol account, and the other way round. These ride on the ohm session only; a token from a PDS does not reach them.
@@ -1027,10 +1120,14 @@ A refusal is JSON with an `error`, which is one of the names below, and a `messa
 | `ViewerTokenInvalid` | 401 | The viewer token is not one this service made, is for another member, or has run out |
 | `ViewersUnavailable` | 503 | Viewer tokens, and so Friends reads for sites, are not set up on this service |
 | `NotFriendsOnly` | 409 | Only a friends-only block or post is hidden on its way to private |
-| `Answered` | 409 | The move request has been approved or declined already |
+| `Answered` | 409 | The move request or agent action has been approved or declined already |
 | `NotThisMove` | 409 | The move recorded is not the one the request asked for |
 | `InvalidMove` | 400 | The layer named is not public, friends or private, or the block is in it already |
 | `NotTheirSite` | 400 | The return address is not on one of the member's sites |
+| `AgentPaused` | 409 | The member paused this agent in the cockpit's Agents panel |
+| `AgentDisconnected` | 403 | The member disconnected this agent in the cockpit's Agents panel |
+| `NotApproved` | 409 | The action waits for the member, was declined, was carried out already, or is not the one the member approved |
+| `TooManyWaiting` | 409 | A hundred agent actions wait for the member already |
 | `InternalError` | 500 | Something went wrong in the service itself |
 
 ## The tools an agent has
@@ -1055,13 +1152,16 @@ The tools are in [../mcp/tools.mjs](../mcp/tools.mjs), and reach the service as 
 | `vault_friends_delete` | Changes | `deleteBlock` | Remove a friends-only block for good. Preview, then confirm with the version being removed. |
 | `vault_friends_who` | Reads only | `listFriends` | List the DIDs that can read your friends layer. |
 | `vault_friends_remove` | Changes | `listFriends`, `removeFriend` | Take away a DID’s access to your friends layer. Preview and confirm. Copies they already made remain with them. |
+| `vault_connections` | Reads only | `listFriends`, `listFriendOf`, `listAsked` | The person's Connections: their friends (who reads their friends layer, with name, email and channels), the people who let them in, and everyone they asked by email with whether that person answered yet. Read it before asking someone, so you do not ask a friend again. |
+| `vault_friends_ask` | Changes | `listAsked`, `askFriend` | Ask someone to be the person's friend on ohm, by their email. ohm emails them one invite from "<the person> via ohm", replies going to the person's own email; at most 20 invites a day. They join their Connections as asked, and become a friend only when they let the person in. Preview, then confirm. It never lets anyone read the person's friends layer: only the person approves friends, in ohm. |
+| `vault_mail_ask` | Changes |  | Ask the person to approve an email before you send it with your own mail tool, from their own address. The draft waits in their Agents panel in ohm; call again with confirm, and once they approve, send exactly the approved draft. ohm itself never sends it. |
 | `vault_shared_list` | Reads only | `listShared` | List the friends-only blocks and posts an owner shares with your signed-in DID. |
 | `vault_shared_read` | Reads only | `getShared` | Read a friends-only block or post an owner shares with your signed-in DID. |
 
 Three rules hold for every tool that changes something:
 
 1. Create private blocks on the person's device. Service-backed tools expose only the public and friends layers.
-2. Changing a post, publishing, bringing posts in from the PDS, saving or removing a friends block, and removing a friend each take two calls. The first gives a preview and a `confirm` value for the second call.
+2. Changing a post, publishing, bringing posts in from the PDS, saving or removing a friends block, asking someone to be a friend, approving a mail draft and removing a friend each take two calls. The first puts the action in the cockpit's Agents panel and gives its approval ID as `confirm`; the second carries it out only once the member approved exactly that action there.
 3. A post or friends block is changed from the version that was read. If it has changed since, the tool refuses the write.
 
 ### Requests with no tool
@@ -1072,9 +1172,6 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | --- | --- | --- |
 | `listPosts` | Posts | It is for keeping a copy in step: every post's version, and what changed since. The tools read the structure instead |
 | `addFriend` | Friends | Only the member can widen who can read the friends layer, through their ohm session |
-| `askFriend` | Friends | A person asks, signed in to ohm, from the cockpit or a member's site |
-| `listAsked` | Friends | The cockpit's Connections panel shows it |
-| `listFriendOf` | Friends | The cockpit's Connections panel shows it. An agent reads shared blocks with vault_shared_list |
 | `listFriendRequests` | Friends | The member answers requests in the cockpit. An agent never lets anyone in |
 | `approveFriend` | Friends | Only the member can widen who can read the friends layer, through their ohm session |
 | `declineFriend` | Friends | The member answers requests in the cockpit |
@@ -1126,6 +1223,14 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | `listSites` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
 | `addSite` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
 | `removeSite` | Content | It is for sites: a site's content loader reads it, for whoever is looking at the site. The member's own agent reads their vault through the other tools |
+| `agentCheckIn` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `askApproval` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `getApproval` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `useApproval` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `listApprovals` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `answerApproval` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `listAgents` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
+| `setAgentState` | Agents | Every tool calls agentCheckIn, and every two-step tool askApproval, getApproval and useApproval, on its own. Answering and controlling agents is the member's, in the cockpit's Agents panel |
 | `get` | Account | It rides on an ohm session, which an agent does not have |
 | `connect` | Account | It rides on an ohm session, which an agent does not have |
 | `disconnect` | Account | It rides on an ohm session, which an agent does not have |

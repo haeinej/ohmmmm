@@ -52,8 +52,9 @@ test('someone signed in asks; the member sees who, by name and email, and approv
   const { env, ask, walk, recipe } = await setUp();
   // Not a friend: nothing is shared, the same as if there were nothing.
   await assert.rejects(ask('listShared', { query: { owner: ada }, as: bo }), { code: 'NotFound' });
-  // Asking takes an ohm session from ohm's pages, with an AT Protocol account connected.
-  await assert.rejects(ask('askFriend', { body: { owner: ada }, as: bo }), { code: 'SignInRequired' });
+  // Asking takes an AT Protocol account connected to ohm. An agent's token alone is not enough
+  // until that account has signed in to ohm, so the member asked can see who is asking.
+  await assert.rejects(ask('askFriend', { body: { owner: ada }, as: bo }), { code: 'NotConnected' });
   await assert.rejects(ask('askFriend', { body: { owner: ada }, cookie: 'session=cy' }), { code: 'NotConnected' });
   assert.deepEqual(await ask('askFriend', { body: { owner: ada, message: 'From the walking club.' }, cookie: 'session=bo' }), { asked: true });
   assert.deepEqual(await ask('askFriend', { body: { owner: ada }, cookie: 'session=bo' }), { asked: true });
@@ -164,4 +165,21 @@ test('asking by email sends one invite from ohm with the asker\'s name, replies 
   // Without mail set up, asking works and nothing is sent.
   delete env.MAIL;
   assert.deepEqual(await ask('askFriend', { body: { email: 'quiet@example.test' }, cookie: 'session=bo' }), { asked: true });
+});
+
+test('a member\'s agent asks by email with the member\'s token, named from their ohm account', async () => {
+  const { env, ask } = await setUp();
+  const sent = [];
+  env.MAIL = { send: async message => { sent.push(message) } };
+  env.MAIL_FROM = 'friends@ohmmmm.test';
+  // Bo has signed in to ohm once, so ohm knows the name and email his agent asks with.
+  await ask('listFriendRequests', { cookie: 'session=bo' });
+  await ask('listFriendRequests', { cookie: 'session=ada' });
+  assert.deepEqual(await ask('askFriend', { body: { email: 'ada@example.test', message: 'From my inbox' }, as: bo }), { asked: true });
+  await assert.rejects(ask('askFriend', { body: { email: 'bo@example.test' }, as: bo }), { code: 'InvalidRequest' });
+  const [request] = (await ask('listFriendRequests', { as: ada })).requests;
+  assert.deepEqual([request.did, request.name, request.email, request.message], [bo, 'Bo', 'bo@example.test', 'From my inbox']);
+  assert.deepEqual([sent.length, sent[0].from.name, sent[0].replyTo], [1, 'Bo via ohm', 'bo@example.test']);
+  // Approving stays the member's alone, in ohm.
+  await assert.rejects(ask('approveFriend', { body: { id: request.id }, as: ada }), { code: 'SignInRequired' });
 });
