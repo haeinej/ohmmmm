@@ -22,9 +22,16 @@ This repository is a Claude Code plugin. Its bundled skills are:
 | [start](skills/start/SKILL.md) | The project's purpose and rules |
 | [vault](skills/vault/SKILL.md) | Working in your notes with the vault's tools |
 | [suggest-labels](skills/suggest-labels/SKILL.md) | Deciding your site's sections with you |
+| [design-home](skills/design-home/SKILL.md) | The curator's first job: screening your site, feeds, PDS and folders read-only, reporting them, and applying only what you decide |
 | [migrate-site](skills/migrate-site/SKILL.md) | Moving a website and social posts in without loss |
 | [build-renderer](skills/build-renderer/SKILL.md) | Making your site's pages build from records |
 | [document-work](skills/document-work/SKILL.md) | Turning each completed outcome into distinct agent and human guides |
+
+It also ships one agent:
+
+| Agent | What it does |
+| --- | --- |
+| [curator](agents/curator.md) | Decides your vault's labels and channels with you and keeps them tidy. The only agent that settles structure; other agents flag questions for it as cortex observations marked `needs: curator`. It runs in your coding agent, never on a server |
 
 [How documentation follows your work](skills/document-work/README.md) explains what to expect from the last skill and how to use it. Its instructions, writing guides and contract live together in [skills/document-work/](skills/document-work/).
 
