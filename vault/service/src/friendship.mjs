@@ -9,6 +9,7 @@
 //
 // `db` has the shape of a Cloudflare D1 database.
 import { isChannelPath, readNode } from '../../vault/node.mjs';
+import { DAILY } from './mail.mjs';
 import { Refused } from './store.mjs';
 
 const DID = /^did:[a-z]+:[A-Za-z0-9._:%-]+$/;
@@ -64,13 +65,22 @@ export function friendshipStore(db) {
 
     // Asking by email. The ask is kept for the asker whether or not the email has an ohm account, and
     // the answer is the same either way, so no one can learn which emails are on ohm.
-    async askByEmail({ viewer, email, name, ownEmail, message, didByEmail, now = new Date() }) {
+    async askByEmail({ viewer, email, name, ownEmail, message, didByEmail, mail, now = new Date() }) {
       const typed = typeof email === 'string' ? email.trim().toLowerCase() : '';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed) || typed.length > 320) throw new Refused(400, 'InvalidRequest', 'Give their email address');
       if (ownEmail && typed === ownEmail.toLowerCase()) throw new Refused(400, 'InvalidRequest', 'That is your own email');
       await db.prepare('INSERT INTO friend_asks (viewer, email, message, asked_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (viewer, email) DO UPDATE SET message = excluded.message').bind(viewer, typed, message || null, now.toISOString()).run();
       const owner = await didByEmail(typed);
       if (owner && owner !== viewer) await this.ask(owner, { viewer, name, email: ownEmail, message, now });
+      // One invite email per address, and at most DAILY a day for each asker.
+      if (mail) {
+        const held = await db.prepare('SELECT mailed_at FROM friend_asks WHERE viewer = ?1 AND email = ?2').bind(viewer, typed).first();
+        const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+        const today = (await db.prepare('SELECT COUNT(*) AS sent FROM friend_asks WHERE viewer = ?1 AND mailed_at > ?2').bind(viewer, since).first()).sent;
+        if (!held?.mailed_at && today < DAILY && await mail({ to: typed, asker: name, askerEmail: ownEmail, message })) {
+          await db.prepare('UPDATE friend_asks SET mailed_at = ?3 WHERE viewer = ?1 AND email = ?2').bind(viewer, typed, now.toISOString()).run();
+        }
+      }
       return { asked: true };
     },
 

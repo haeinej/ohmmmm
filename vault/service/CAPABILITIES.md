@@ -177,7 +177,7 @@ Stops one DID reading the member's friends layer. What they read before cannot b
 
 ### `com.ohmmmm.vault.askFriend`
 
-Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member's ohm account or by their DID. The member sees the asker's name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.
+Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member's ohm account or by their DID. Asked by email, ohm also emails them an invite once, from its own address with the asker's name, replies going to the asker's email (at most 20 a day for each asker). The member sees the asker's name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.
 
 | | |
 | --- | --- |

@@ -142,3 +142,26 @@ test('a friend added before names were kept is named from their ohm account', as
   await ask('listFriendRequests', { cookie: 'session=bo' });
   assert.deepEqual((await ask('listFriends', { as: ada })).friends.map(each => [each.did, each.name, each.email]), [[bo, 'Bo', 'bo@example.test']]);
 });
+
+test('asking by email sends one invite from ohm with the asker\'s name, replies to the asker, at most 20 a day', async () => {
+  const { env, ask } = await setUp();
+  const sent = [];
+  env.MAIL = { send: async message => { sent.push(message) } };
+  env.MAIL_FROM = 'friends@ohmmmm.test';
+  await ask('askFriend', { body: { email: 'new@example.test', message: 'Come see the walks' }, cookie: 'session=bo' });
+  assert.equal(sent.length, 1);
+  const [invite] = sent;
+  assert.deepEqual([invite.to, invite.from, invite.replyTo, invite.subject], ['new@example.test', { email: 'friends@ohmmmm.test', name: 'Bo via ohm' }, 'bo@example.test', 'Bo wants to share with you on ohm']);
+  assert.match(invite.text, /Come see the walks/);
+  assert.match(invite.text, /https:\/\/app\.ohmmmm\.test\//);
+  // Asking the same address again sends nothing more.
+  await ask('askFriend', { body: { email: 'new@example.test' }, cookie: 'session=bo' });
+  assert.equal(sent.length, 1);
+  // At most 20 a day for each asker; the asks themselves are still kept.
+  for (let index = 0; index < 25; index++) await ask('askFriend', { body: { email: `person${index}@example.test` }, cookie: 'session=bo' });
+  assert.equal(sent.length, 20);
+  assert.equal((await ask('listAsked', { cookie: 'session=bo' })).asks.length, 26);
+  // Without mail set up, asking works and nothing is sent.
+  delete env.MAIL;
+  assert.deepEqual(await ask('askFriend', { body: { email: 'quiet@example.test' }, cookie: 'session=bo' }), { asked: true });
+});

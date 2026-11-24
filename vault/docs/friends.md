@@ -4,7 +4,7 @@ Your friends see your Friends layer, but only the channels you let them see. Fri
 
 ## How someone becomes a friend
 
-1. **They ask**, signed in to ohm with their AT Protocol account connected (their DID *is* their ohm account): in **Connections → Make friends**, by the email of your ohm account. Their list says *waiting* until you let them in, and ohm never says whether an email is on ohm. If they aren't on ohm yet, the request reaches them when they join.
+1. **They ask**, signed in to ohm with their AT Protocol account connected (their DID *is* their ohm account): in **Connections → Make friends**, by the email of your ohm account. Their list says *waiting* until you let them in, and ohm never says whether an email is on ohm. They also get one email from ohm, with your name on it and your note, linking to ohm. If they reply, it comes to your own email. If they aren't on ohm yet, the request is waiting when they join.
 2. **You see the request** under **Notifications → Agent**, with their name and email from their ohm account, their DID, and their message.
 3. **You choose**: **Every channel**, or only some, such as `walks` but not `kitchen`. A channel covers the channels inside it. Then **Approve**, or **Decline** (they aren't told).
 

@@ -298,5 +298,7 @@ CREATE TABLE IF NOT EXISTS friend_asks (
   email TEXT NOT NULL,
   message TEXT,
   asked_at TEXT NOT NULL,
+  -- When ohm emailed the invite, once (src/mail.mjs).
+  mailed_at TEXT,
   PRIMARY KEY (viewer, email)
 );

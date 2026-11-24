@@ -2,6 +2,7 @@
 // posts are kept with the Posts requests), who their friends are, and what a friend may read.
 // The service can read everything in this layer, so it can show it to those friends; private blocks
 // are never sent here; they are kept as ciphertext by the Private requests (plans/encryption.md).
+import { sendInvite } from '../mail.mjs';
 import { Refused } from '../store.mjs';
 
 export default {
@@ -70,13 +71,19 @@ export default {
     },
     'com.ohmmmm.vault.askFriend': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member\'s ohm account or by their DID. The member sees the asker\'s name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.',
+      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member\'s ohm account or by their DID. Asked by email, ohm also emails them an invite once, from its own address with the asker\'s name, replies going to the asker\'s email (at most 20 a day for each asker). The member sees the asker\'s name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.',
       takes: { email: 'the email of the person asked', owner: 'or: their DID', message: 'optional: a line for them' },
       gives: '`asked`',
-      run: async ({ body, friendships, linked, did, user }) => {
+      run: async ({ body, friendships, linked, did, user, env }) => {
         if (!did) throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first');
         const { owner, email, message } = await body();
-        if (email !== undefined) return friendships.askByEmail({ viewer: did, email, name: user?.name, ownEmail: user?.email, message, didByEmail: linked.didByEmail });
+        if (email !== undefined) {
+          const link = env.OHM_APP_ORIGIN ? new URL('/', env.OHM_APP_ORIGIN).href : null;
+          return friendships.askByEmail({
+            viewer: did, email, name: user?.name, ownEmail: user?.email, message, didByEmail: linked.didByEmail,
+            mail: link ? invite => sendInvite(env, { ...invite, link }) : null,
+          });
+        }
         return friendships.ask(owner, { viewer: did, name: user?.name, email: user?.email, message });
       },
     },
