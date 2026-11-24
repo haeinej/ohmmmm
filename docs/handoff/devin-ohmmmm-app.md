@@ -1,4 +1,4 @@
-# Handout for Devin: ohmmmm app (ohm-ux moved in), agent API gaps, UI SDK
+# Handout for Devin: ohmmmm app (ohm-ux moved in), agent API gaps
 
 Written 2026-11-19 (this copy lives at `docs/handoff/devin-ohmmmm-app.md` in haeinej/ohmmmm). Plans only: nothing below is started. Each work package (WP) is one Devin session that ends in one PR against `main`. Do them in the order given unless a WP says it is independent.
 
@@ -15,7 +15,7 @@ ohm is a personal knowledge system. As of today it is these repositories (GitHub
 | `haeinej/ohm-ui` | `ohm-ui/` | The design system components (ohm registry); look: design.ohmmmm.com |
 | `haeinej/ohm-cortex` | archived (`~/development/_archive/ohm-cortex`) | Do not use; it is `ohmmmm/cortex/` now |
 
-The goal: move ohm-ux into ohmmmm as `app/`, rebuild its UX around what the vault, cortex and account app can actually do, expose to agents every path that should be reachable but is not, and use UI SDK (https://github.com/vercel-labs/ui, docs https://ui-sdk.dev) for agent connectivity in the app.
+The goal: move ohm-ux into ohmmmm as `app/`, rebuild its UX around what the vault, cortex and account app can actually do, expose to agents every path that should be reachable but is not, and connect agents to the app through its own WebMCP tools. UI SDK was considered and dropped (decision 3).
 
 ## Read first (every WP)
 
@@ -59,13 +59,13 @@ The goal: move ohm-ux into ohmmmm as `app/`, rebuild its UX around what the vaul
 - A hosted page **cannot** reach the cortex or the local vault index: `cortex serve` (`cortex/src/http.mjs`) is MCP-over-HTTP at `/mcp`, loopback-only origins, bearer token from `cortex token`, no CORS/OPTIONS; the vault index/journal (`.vault/index.sqlite`, `.vault/journal.jsonl`) has no server at all (`ohm vault …` CLI only).
 - Private blocks are encrypted/decrypted only on the device with `ohm-onboarding/packages/keys` (`sealFile`, `openFile`, `vaultPrivateFiles`, `sessionKeyStore`).
 
-## Owner decisions needed before WP5–WP6 (ask, do not assume)
+## Owner decisions (settled 24 November 2026)
 
-1. **Where the app runs:** (a) hosted at app.ohmmmm.com (vault service + private decrypted on device; cortex and local index invisible), (b) local, served by a new `ohmmmm serve` on localhost reading the home folder (vault folder, index, cortex) and syncing with the service, or (c) one app with two data sources — recommended: (c), hosted by default, local bridge when present.
-2. **ohm-ux repository after the move:** archive it (recommended) or keep as a design-only repo.
-3. **UI SDK is beta** (Vercel beta terms). Adopt for the agent bridge + interactive controls (recommended), keeping base-ui only where UI SDK has no equivalent.
-4. **Yjs/Tiptap collaboration** is installed but unused: drop it (recommended) or plan real-time collaboration.
-5. **Channel identity:** keep channels named by path (words.md) and drop the UX's stable `ChannelRecord.id`, or add ids to `_channel.md`.
+1. **Where the app runs: (c).** Hosted at app.ohmmmm.com by default, with `ohmmmm serve` as the local bridge when it runs. The home folder is the local copy and keeps the originals, images included ([vault/plans/media.md](../../vault/plans/media.md)), so WP4(e) is needed.
+2. **ohm-ux: archived.** `app/` is its only home. The owner archives the GitHub repository.
+3. **UI SDK: dropped.** It stays a reference for how a page exposes WebMCP tools and layers them; none of it is installed. WP5 is written without it.
+4. **Yjs: no real-time collaboration.** Yjs is not unused: `@tiptap/extension-drag-handle` imports `@tiptap/y-tiptap` and `@tiptap/extension-collaboration` at runtime, so it ships while the drag handle does. Keep the drag handle and those packages, and build nothing on them. Version checks and the journal handle concurrent writes.
+5. **Channel identity: stable IDs, and renaming breaks nothing,** as on Are.na ([vault/plans/renames.md](../../vault/plans/renames.md)). `ChannelRecord.id` stays, backed by the `id` in `_channel.md`.
 
 ## Work packages
 
@@ -91,32 +91,17 @@ Replace, with the store and UI copy: Doc `kind: post` for every block → block 
 - (b) Friends tools in `vault/mcp/tools.mjs`, same two-call confirm rules as posts: `vault_friends_list` (listBlocks), `vault_friends_read` (getBlock), `vault_friends_save` (putBlock; two calls, it discloses to friends), `vault_friends_delete` (two calls), `vault_friends_who` (listFriends), `vault_friends_remove` (removeFriend; two calls), `vault_shared_list`/`vault_shared_read` (listShared/getShared as the agent's own DID). **No addFriend tool.** Update the CAPABILITIES "Requests with no tool" table and tests (`vault/test/mcp.test.mjs`, `packaging.test.mjs` tool counts).
 - (c) Local vault MCP, plan step 5 (`vault/plans/vault.md` L142): a stdio MCP over the home folder (`ohm vault mcp` or `ohmmmm mcp`), built on `vault/vault/indexer.mjs` (`openIndex`, `scan`, `inspect`, `search`, `history`, `summary`), `node.mjs`, `add.mjs`, `journal.mjs`. Tools: `vault_local_search`, `vault_local_read` (node + file stats + history), `vault_neighbors` (edges in/out by kind, depth), `vault_capture` (= `addToVault`, `by: agent:<name>`, `status: proposed`), `vault_collect` (add/reorder a block in a channel's `_channel.md` `order`, journaled), `vault_index` (scan report). Read-only ones annotated `readOnlyHint`. Writes go through the journal with `via: 'add'`/new `via` values documented in `journal.mjs`.
 - (d) Extract `words()` from `indexer.mjs` into a browser-safe `vault/vault/words.mjs`; indexer and `vault/vault/cortex.mjs` import it.
-- (e) Only after decision 1 = (b) or (c): `ohmmmm serve` — a localhost bridge exposing the local MCP (c) and the cortex's `/mcp` with an origin allow-list containing the app origin, CORS + OPTIONS, bearer token (reuse `cortex token` pattern), never binding beyond 127.0.0.1 without a token. Document in `ohmmmm/docs/`.
+- (e) Decision 1 is (c), so build it: `ohmmmm serve` — a localhost bridge exposing the local MCP (c) and the cortex's `/mcp` with an origin allow-list containing the app origin, CORS + OPTIONS, bearer token (reuse `cortex token` pattern), never binding beyond 127.0.0.1 without a token. Document in `ohmmmm/docs/`. It also writes media blocks into the home folder and serves `/media/<cid>` ([media plan](../../vault/plans/media.md), step 3).
 - Done when: all tools tested (two-call confirm paths, refusals, no private content ever returned by service-backed tools); CAPABILITIES regenerated; `npm test` green.
 
-### WP5 — UI SDK agent connectivity (app; after WP1, alongside WP6)
-What UI SDK gives (verified from ui-sdk.dev docs): `createAgent({ allow, timeout })` from `@ui-sdk/react/agent` → `snapshot()` (components with ref, kind, label, state, actions), `act({ steps:[{ ref|label, action, args }] })`, `query({ within, text, kind })`, `subscribe(change)`; `registerTools(agent, { allow })` exposes snapshot/act/query over WebMCP (`document.modelContext`; no-op where absent); marks `data-agent-confirm="<sentence>"` (needs a person), `data-agent-hidden`; `definePrimitive({ …, agent: { actions, closed, items, reveals, shown, secret } })` for our own components; `createHistory(agent)` + `undoSource('agent')` (experimental). Change callbacks see `details.source === 'agent'` and can cancel.
-- Facts checked on 2026-11-19 (re-check at start; it moves daily):
-  - **Packages:** `@ui-sdk/core` and `@ui-sdk/react` are at `0.1.0-beta.12`. That's 11 betas in 7 days, with no GitHub releases and one changelog entry. Peer dependencies are `react`/`react-dom >=19`; no runtime dependencies. Pin the exact version.
-  - **Styling:** headless. Parts carry `data-slot` and state attributes (`data-open`, `data-highlighted`, `data-selected`…) and take a `render` prop. Skip the optional `@ui-sdk/core/web.css`, but check the three `<style>` resets it injects into `<head>`.
-  - **55 components cover what we use:** Dialog, Popover, Menu, Select, Combobox, Command (replaces cmdk, Cmd+K in a Dialog), Tabs, Tooltip, Switch, Toggle, Checkbox, Slider, Resizable, Toast, Tree (lazy, virtualizable), Token Input.
-  - **Behaviors only:** `createReorder`/`createTreeReorder`, `createViewport`, `createVirtualizer`.
-  - **No equivalent:** the rich-text editor (keep Tiptap), force layout (keep d3-force), data tables.
-  - **Licence:** the code is Apache-2.0, but open issue vercel-labs/ui#867 asks whether a "Public Beta Agreement" covers the npm packages. The owner should confirm before shipping.
-  - **The skill:** `npx skills@latest add vercel-labs/ui --skill ui-sdk`. A copy matching the installed version ships at `node_modules/@ui-sdk/core/skills/ui-sdk/SKILL.md`, with docs in `node_modules/@ui-sdk/react/docs/`.
-- **Do not mix base-ui and UI SDK overlays.** Both manage modal focus, inert regions and top-layer/portal stacking, and the bridge sees only UI SDK components; base-ui controls are invisible to agents. vercel-labs/ui#525 also makes `--available-height`/`--available-width` (names base-ui uses too) non-inheriting document-wide. Migrate every interactive control in one pass, surface by surface, and delete `@base-ui/react` at the end.
-- **App-level actions are not documented.** The bridge covers component actions only. Route domain actions in this order of preference:
-  1. a UI SDK Button the agent can `press`, guarded by `data-agent-confirm` and `allow`;
-  2. a `definePrimitive` holding domain state with `agent.actions` (for example the editor's `setTitle`/`appendMarkdown`/`insertLink`, or a channel's `move`/`reorder`);
-  3. as a last resort, your own `document.modelContext.registerTool` next to `registerTools`.
-  Watch issues #858–#860 (scoping and disposing the bridge, server-side loops, batch approval).
-- **Tiptap and the graph get no guidance from UI SDK.** For the editor: don't let agents type into contentEditable; expose editor actions through a primitive. For the graph: `createViewport` attaches to HTML elements and overlaps d3-zoom; keep d3-zoom on the SVG, and expose the graph as a primitive with `centre`, `focus` and `filter` actions.
-- **WebMCP needs Chrome 149+.** It's an origin trial (or the flag `chrome://flags/#enable-webmcp-testing`), plus an Edge trial; Firefox and Safari haven't committed. `registerTools` does nothing elsewhere, so the in-page bridge (`window.agent` in development) and the stdio MCP from WP4 stay the portable paths.
-- Install `@ui-sdk/react` + `@ui-sdk/core` (pinned) in `app/`, and add the skill.
-- Create the bridge once in `app/src/agent.ts` before render; `registerTools(agent, { allow })` replaces the hand-written `app/src/webmcp.ts` + `webmcp-shim.ts` for component actions. Keep a small set of **domain tools** (search, open, graph centre, history list/save/session) registered through the same WebMCP helper if UI SDK cannot express them as component actions — verify, and prefer component actions.
-- Map ohm's "people decide what lasts" (ohm-ux AGENTS.md rules 11–12) onto the bridge: `data-agent-confirm` on visibility raises (private→friends is a disclosure; →public publishes), delete, publish, friend removal, master-key/device actions; `allow` refuses any step whose `confirm` the person has not answered; `subscribe` feeds agent changes into the existing bell/AgentStatus; `createHistory` + `undoSource('agent')` gives "undo what the agent did".
-- Replace base-ui controls with UI SDK equivalents styled with ohm tokens (`app/src/ohm/*` must not be edited; app layer is `app/src/theme.css`): Select, Menu/DropdownMenu, Dialog, Popover, Switch, Tabs, Tooltip, Command (vs cmdk). Our own primitives with `agent.actions`: channel tree (move/reorder via `createReorder`), graph viewport (`createViewport`; actions: centre, focus node), path pill, visibility marks. Tiptap stays; expose editor-level actions (setTitle, appendMarkdown, insertLink) as a custom primitive around the editor rather than letting agents type into contentEditable.
-- Done when: `agent.snapshot()` lists every interactive control with meaningful labels; an agent can complete the workspace flows via `act` only; every lasting change either asks the person or is refused; Playwright (or the UI SDK testing kit) checks keyboard, focus, ARIA and agent paths.
+### WP5 — Agent connectivity in the app, without UI SDK (app; after WP1, alongside WP6)
+UI SDK is dropped (decision 3). The app keeps base-ui (through ohm-ui) and its own helper, `app/src/webmcp.ts`, under the rules in `app/AGENTS.md`. Borrow these of UI SDK's ideas, built on what the app already has:
+- **A confirm sentence on lasting actions.** Every control whose action lasts says what it does in one sentence (as UI SDK's `data-agent-confirm` did), and its tool shows the `ApprovalCard` before running (app rules 11–12). This covers visibility raises (private→friends discloses; →public publishes), delete, publish, friend removal, and master-key and device actions.
+- **Who made a change.** Every change the store applies carries `source: 'person' | 'agent'`, so the bell and `AgentStatus` show what an agent changed, and "undo what the agent did" can find it.
+- **A snapshot of the screen.** A read-only tool, `workspace.snapshot`, lists the tools on screen now with their labels and state, so an agent can find its way without reading pixels.
+- **Layering.** A tool exists only while its step is on screen (app rule 4). Domain actions are tools: the editor's setTitle, appendMarkdown and insertLink; the tree's move and reorder; the graph's centre, focus and filter. An agent never types into the editor's contentEditable or drags the SVG.
+- **WebMCP needs Chrome 149+** (an origin trial, or `chrome://flags/#enable-webmcp-testing`), plus an Edge trial; Firefox and Safari have not committed. Elsewhere the page registers nothing, so the stdio MCP from WP4 and `ohmmmm serve` stay the portable paths.
+- Done when: every interactive step has its tool; an agent can complete the workspace flows through tools alone; every lasting change either asks the person or is refused; Playwright checks keyboard, focus, ARIA and the tool paths.
 
 ### WP6 — Redo the UX on what exists (app; after WP2–WP3, decision 1)
 Build only what the backend supports; hide or clearly mark the rest. Screens:
@@ -128,15 +113,16 @@ Build only what the backend supports; hide or clearly mark the rest. Screens:
 - Publish: plan view from `getPublishPlan`, then the member-side apply (`vault/service/public/vault/publish.js` `carryOut`).
 - Graph: blocks-only with channels as areas (already the ohm-ux design), edges from `evidence()` kinds, entities/sources togglable; cortex inference shown only with a local cortex.
 - History: the vault journal (folder: `.vault/journal.jsonl` via local source; private: `listPrivateJournal`/versions) plus cortex sessions/saves when local. Remove what has no backend (field-level revert for non-private, autosave days) or mark "not yet".
+- Images: media blocks that sit beside other blocks and embed inline, per [media plan](../../vault/plans/media.md) step 1. This closes #30, and comes before the editor uses the service adapter.
 - Remove/park what has no backend: inbox/notifications from others, pins/unread/archive, platform badges, connection "why" (unless WP7 adds it).
 - Update `app/flows/*.md` (workspace, history, paths) to match, including the stale lines the audit found (workspace.md L96 vs L43, L142; paths.md "Version history" and A7).
 
 ### WP7 — Backend gaps the UX wants (ohmmmm; owner picks which)
-Each is small and separate: (a) autosave of blocks/channels per day in the vault (collision B); (b) the private overlay for mixed channels (collision C, `encryption.md` L125-130); (c) store a connection's "why" (e.g. `connect: [{ to, why }]` property on blocks, read by `node.mjs`, kept in evidence `at`); (d) before/after `version` on folder journal events (`journal.mjs`) so history can diff and revert; (e) `vault sync` across friends and private stores (`encryption.md` step 5).
+Each is small and separate: (a) autosave of blocks/channels per day in the vault (collision B); (b) the private overlay for mixed channels (collision C, `encryption.md` L125-130); (c) store a connection's "why" (e.g. `connect: [{ to, why }]` property on blocks, read by `node.mjs`, kept in evidence `at`); (d) before/after `version` on folder journal events (`journal.mjs`) so history can diff and revert; (e) `vault sync` across friends and private stores (`encryption.md` step 5); (f) renaming breaks nothing ([renames.md](../../vault/plans/renames.md)); (g) media in the vault and the service ([media.md](../../vault/plans/media.md), steps 2 and 4).
 
 ## Verification (every WP)
 - ohmmmm: `npm test` at root (home + vault + cortex [+ app]); `node vault/scripts/capabilities.mjs --write` leaves no diff; `git grep -n 'undefined' vault/service/CAPABILITIES.md` empty after WP4.
-- app: `npm --prefix app run typecheck && npm --prefix app run build`, its tests, and a manual pass in the browser at http://localhost:5190 (dev) with the WebMCP shim's `getTools()`/`executeTool` and `window.agent.snapshot()`.
+- app: `npm --prefix app run typecheck && npm --prefix app run build`, its tests, and a manual pass in the browser at http://localhost:5190 (dev) with the WebMCP shim's `getTools()`/`executeTool` and the `workspace.snapshot` tool.
 - ohm-onboarding (when touched): `npm run check && npm run boundaries:check && npm run test:integration && npm run ui:check`.
 - Each PR body: what changed, kept-on-purpose names, checks with counts, what is not verified.
 

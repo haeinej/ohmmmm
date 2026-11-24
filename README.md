@@ -71,7 +71,7 @@ Read [AGENTS.md](AGENTS.md) first, then the guide for [vault](vault/AGENTS.md), 
 
 ## Where this came from
 
-This repository joins three projects with their full histories. The original `haeinej/ohm-vault` was renamed `haeinej/ohmmmm` and now lives in `vault/`. The archived `haeinej/ohm-cortex` lives in `cortex/`. The workspace from `haeinej/ohm-ux` lives in `app/`. Use `git log -m --follow -- app/src/App.tsx` to trace a file into its original repository.
+This repository joins three projects with their full histories. The original `haeinej/ohm-vault` was renamed `haeinej/ohmmmm` and now lives in `vault/`. The archived `haeinej/ohm-cortex` lives in `cortex/`. The workspace from `haeinej/ohm-ux` lives in `app/`, and ohm-ux is retired: change the workspace here. Use `git log -m --follow -- app/src/App.tsx` to trace a file into its original repository.
 
 ## Status
 
