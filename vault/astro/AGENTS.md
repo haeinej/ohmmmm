@@ -140,3 +140,6 @@ Update both guides, the types and the example when the contract changes. For
 portable-package verification, `npm pack ./vault/astro`, install its tarball in
 an isolated Astro project and run the same fake-PDS build. Browser appearance
 and deployed PDS and service behavior are separate checks.
+Set `OHM_SITE` to the public website origin when running the public example
+with `OHM_SERVICE`. The build uses that origin for both Astro and service
+canonical URLs.

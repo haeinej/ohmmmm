@@ -20,7 +20,8 @@ async function build(t, records, env = {}) {
   const output = await mkdtemp(join(tmpdir(), 'ohm-astro-'));
   t.after(() => rm(output, { recursive: true, force: true }));
   const child = spawn(process.execPath, ['node_modules/astro/astro.js', 'build', '--outDir', output], {
-    cwd: example, env: { ...process.env, OHM_DID: did, OHM_PDS: pds.origin, OHM_SERVICE: '', ASTRO_TELEMETRY_DISABLED: '1', ...env },
+    cwd: example, env: { ...process.env, OHM_DID: did, OHM_PDS: pds.origin,
+      OHM_SERVICE: '', OHM_SITE: '', ASTRO_TELEMETRY_DISABLED: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -91,11 +92,13 @@ test('Astro builds public from C2 and reads Friends only during live requests', 
   await once(service, 'listening');
   t.after(() => new Promise(resolve => { service.close(resolve); service.closeAllConnections(); }));
   const origin = `http://127.0.0.1:${service.address().port}`;
-  const { code, log, output, pds } = await build(t, [], { OHM_SERVICE: origin });
+  const site = 'https://member.example.com';
+  const { code, log, output, pds } = await build(t, [], { OHM_SERVICE: origin, OHM_SITE: site });
   assert.equal(code, 0, log);
   assert.equal(pds.requests.length, 0);
   const page = await readFile(join(output, 'posts/essays/one/index.html'), 'utf8');
   assert.match(page, /<strong>public<\/strong>/);
+  assert.ok(page.includes(`href="${site}${publicPost.address}"`));
   assert.doesNotMatch(page, /Friends essay/);
 
   const env = { OHM_SERVICE: origin, OHM_DID: did, ASTRO_TELEMETRY_DISABLED: '1' };

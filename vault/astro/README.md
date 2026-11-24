@@ -136,10 +136,11 @@ From the ohmmmm checkout, install its example dependencies and build.
 
 ```sh
 npm ci --prefix vault/astro/example
-OHM_DID=did:web:alice.example.com OHM_SERVICE=https://ohm.example.com OHM_PDS=https://pds.alice.example.com npm --prefix vault/astro/example run build
+OHM_DID=did:web:alice.example.com OHM_SERVICE=https://ohm.example.com OHM_SITE=https://alice.example.com OHM_PDS=https://pds.alice.example.com npm --prefix vault/astro/example run build
 ```
 
-Use your own DID and origins for a real preview. Run `npm --prefix
+Use your own DID and origins for a real preview. When `OHM_SERVICE` is set,
+`OHM_SITE` is required so canonical links point to your site. Run `npm --prefix
 vault/astro/example run dev` with the same environment to serve it locally.
 The generated files live in the example's ignored `dist/` folder. Each build
 reads the current public records. Rebuild after publishing or withdrawing a post.

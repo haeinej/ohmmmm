@@ -7,7 +7,7 @@ const fallback = pdsSource({
   channels: { essays: { label: 'essays' } },
 });
 const source = process.env.OHM_SERVICE
-  ? serviceSource({ did, origin: process.env.OHM_SERVICE, site: 'https://alice.example.com', fallback })
+  ? serviceSource({ did, origin: process.env.OHM_SERVICE, site: process.env.OHM_SITE ?? '', fallback })
   : fallback;
 
 export const collections = {
