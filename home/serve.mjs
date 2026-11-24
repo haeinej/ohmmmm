@@ -57,7 +57,7 @@ import { signIn } from '../vault/scripts/rpc.mjs';
 import { blobCid, FILE_TYPES, isSlug, recordVersion, VaultProblem } from '../vault/vault/core.mjs';
 import { isPostId, setProperty, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
-import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
+import { appendEvents, keepVersion, readEvents } from '../vault/vault/journal.mjs';
 import { CHANNEL_FILE, isChannelPath, newNodeId, nodeFile, readNode, SOURCES } from '../vault/vault/node.mjs';
 import { blockPost, publishedAddresses } from '../vault/vault/publish-block.mjs';
 import { memoryKv, ownStores, pdsStore } from '../vault/vault/stores.mjs';
@@ -434,12 +434,7 @@ async function inVault(vault, path) {
 }
 
 // A version kept once by its address, as the vault's tools keep theirs, so `ohm vault restore` can bring it back.
-async function keep(vault, text) {
-  const address = await versionOf(text);
-  await mkdir(join(vault, HISTORY), { recursive: true });
-  await writeFile(join(vault, HISTORY, address), text, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-  return address;
-}
+const keep = (vault, text) => keepVersion(vault, text);
 
 /**
  * Writes one file as the person, only over the version it was read at: `replaces` is that version,

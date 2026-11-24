@@ -159,9 +159,9 @@ try {
         if (!ref || rest.length > 2 || (to === undefined && values.title === undefined && values.channel === undefined)) {
           throw new Error('Say what to rename and what it becomes: ohm vault rename notes journal, or ohm vault rename rain rain-walk [--title "Rain walk"] [--channel essays]');
         }
-        const { blobCid } = await import('../vault/core.mjs');
         const { applyRename, planRename, readVaultFolder } = await import('../vault/rename.mjs');
-        const { HISTORY, withCollectLock } = await import('../mcp/local.mjs');
+        const { withCollectLock } = await import('../mcp/local.mjs');
+        const { keepVersion } = await import('../vault/journal.mjs');
         await scan({ vault, db });
         const found = inspect(db, ref);
         if (!found || found.root !== 'vault' || !['block', 'channel'].includes(found.node.type)) throw new Error(`Nothing in the vault is a block or channel called "${ref}". Run ohm vault index if it is new.`);
@@ -169,12 +169,7 @@ try {
           ? { channel: found.node.path, to }
           : { block: found.node.path, ...(to === undefined ? {} : { slug: to }), ...(values.title === undefined ? {} : { title: values.title }), ...(values.channel === undefined ? {} : { channel: values.channel }) };
         if (found.node.type === 'channel' && (to === undefined || values.title !== undefined || values.channel !== undefined)) throw new Error('For a channel, give only its new path: ohm vault rename notes journal');
-        const keep = async text => {
-          const address = await blobCid(Buffer.from(text, 'utf8'));
-          await mkdir(resolve(vault, HISTORY), { recursive: true });
-          await writeFile(resolve(vault, HISTORY, address), text, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-          return address;
-        };
+        const keep = text => keepVersion(vault, text);
         const done = await withCollectLock(vault, sqlite.DatabaseSync, async () => {
           const { files, paths } = await readVaultFolder(vault);
           return applyRename({ vault, plan: planRename(files, change, { paths }), by: 'me', keep });

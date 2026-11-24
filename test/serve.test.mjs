@@ -354,12 +354,15 @@ test('the person edits files through the bridge only over the version they read,
   assert.equal(stale.status, 412);
   assert.equal(stale.json.version, walk.version);
   const edited = '---\ntitle: Slow walk\norigin: /Users/mira/notes/walk.md\n---\n\nYanaka in the rain.\n';
+  // A version of it cut off by a crash long ago is not taken for the whole one: it is written again.
+  await writeFile(join(layout.vault, '.vault/history', await blobCid(Buffer.from(edited, 'utf8'))), edited.slice(0, 12));
   const saved = await put('notes/walk.md', edited, { 'If-Match': `"${walk.version}"` });
   assert.equal(saved.status, 200);
   assert.equal(saved.json.version, await blobCid(Buffer.from(edited, 'utf8')));
   assert.equal(saved.headers.etag, `"${saved.json.version}"`);
   assert.equal(await readFile(join(layout.vault, 'notes/walk.md'), 'utf8'), edited);
   assert.equal(await readFile(join(layout.vault, '.vault/history', walk.version), 'utf8'), walk.text, 'the version before is kept');
+  assert.equal(await readFile(join(layout.vault, '.vault/history', saved.json.version), 'utf8'), edited, 'and the version after, whole');
   // The same save tried again, its answer lost: the file says it already, so it is not refused.
   const retried = await put('notes/walk.md', edited, { 'If-Match': `"${walk.version}"` });
   assert.deepEqual([retried.status, retried.json.version, retried.json.unchanged], [200, saved.json.version, true]);

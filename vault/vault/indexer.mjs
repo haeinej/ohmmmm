@@ -10,14 +10,14 @@
 // an unchanged vault scans in the time it takes to list it. A file in a root that keeps only a
 // reference is never opened at all, because opening a Google Drive file that is kept online
 // downloads it.
-import { copyFile, lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readdir, readFile, rename, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { blobCid, FILE_TYPES, kindOf as mediaKind } from './core.mjs';
 import { slugOf } from './file.mjs';
 import { formerNames, nameKey, renamesBetween } from './names.mjs';
 import { evidence, nodeKey, originKind, readVault, SOURCES } from './node.mjs';
-import { appendEvents, downloadedFrom, HISTORY, POST_OPS, readEvents } from './journal.mjs';
+import { appendEvents, downloadedFrom, keepVersion, POST_OPS, readEvents } from './journal.mjs';
 import { CANONICAL, CONFIG, readConfig } from './roots.mjs';
 import { words } from './words.mjs';
 
@@ -225,8 +225,7 @@ async function keepVersions(vault, db, events) {
     if (event.root !== CANONICAL || !['added', 'changed'].includes(event.op) || !event.hash || !event.path.endsWith('.md')) continue;
     const held = text.get(event.root, event.path)?.text;
     if (typeof held !== 'string' || await blobCid(Buffer.from(held, 'utf8')) !== event.hash) continue;
-    await mkdir(join(vault, HISTORY), { recursive: true });
-    await writeFile(join(vault, HISTORY, event.hash), held, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
+    await keepVersion(vault, held);
   }
 }
 

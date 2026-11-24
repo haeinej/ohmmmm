@@ -9,7 +9,7 @@ import { allowed, GRANTS, readGrants } from '../vault/grants.mjs';
 import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
-import { appendEvents, HISTORY, JOURNAL, readEvents } from '../vault/journal.mjs';
+import { appendEvents, HISTORY, JOURNAL, keepVersion, readEvents } from '../vault/journal.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 import { layerOf, LAYERS, readRequests, requestVisibility, THROUGH_PUBLISH } from '../vault/visibility-folder.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
@@ -191,13 +191,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   const agent = by.startsWith('agent:') ? by.slice('agent:'.length) : by;
   const rescan = db => scan({ vault, db });
   // A version kept once, by its address. Two writes of the same text keep one file.
-  const keep = async text => {
-    const address = await addressOf(text);
-    await mkdir(join(vault, HISTORY), { recursive: true });
-    await writeFile(await ordinaryFile(vault, [...HISTORY.split('/'), address]), text, { flag: 'wx' })
-      .catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-    return address;
-  };
+  const keep = text => keepVersion(vault, text, { file: address => ordinaryFile(vault, [...HISTORY.split('/'), address]) });
   const recordChange = async (path, before, after, via = 'collect') => {
     if (before === after) return;
     const kept = via === 'collect' ? {} : {
