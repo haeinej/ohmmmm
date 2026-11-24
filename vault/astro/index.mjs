@@ -3,6 +3,8 @@ import { CONTENT, documentUri } from '../feed/standard.mjs';
 import { normalizeArchivePost, pdsConfig } from '../feed/pds.mjs';
 import { renderArchivePost } from '../feed/render.mjs';
 
+export { ohmLive, serviceSource } from './service.mjs';
+
 /** A public source reads a complete channel snapshot as { id, data, body, rendered } entries. */
 export function pdsSource({ did, origin, channels, get = fetch, maxPages = 200 }) {
   const pds = pdsConfig({ ATPROTO_DID: did, ATPROTO_PDS_ORIGIN: origin });
