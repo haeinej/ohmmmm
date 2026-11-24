@@ -13,6 +13,8 @@ import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, type DeadEnd, type Snapshot } from "@/data/journal"
+import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
+import { keep, makeSizes, measure } from "@/media/cache"
 
 const editable = () => {
   const source: HomeSource<"sync"> | undefined = sampleWorkspace()
@@ -62,7 +64,7 @@ export const SIDE_WIDTH = { min: 220, max: 640, initial: 300 }
 const savedWidth = () => {
   try { const w = Number(localStorage.getItem("ohm-ux:side-width")); return w >= SIDE_WIDTH.min && w <= SIDE_WIDTH.max ? w : SIDE_WIDTH.initial } catch { return SIDE_WIDTH.initial }
 }
-export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft"
+export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft" | "workspace.add-image"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
 
 type State = {
@@ -113,7 +115,7 @@ let state: State = {
   appearance: "system", density: savedDensity(), agentsAllowed: true,
   history: [], at: -1, returnTo: null, reveal: null, lastSide: "repo",
   offered: {
-    "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true,
+    "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true, "workspace.add-image": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
   },
 }
@@ -274,15 +276,20 @@ export function showGraph(center?: string) {
 }
 
 const usedSlugs = new Set([...blocks, ...cortex].map(doc => doc.slug))
-export function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
-  const homeChannel = input.homeChannel?.trim() || "other"
-  validateChannel(homeChannel)
-  const title = input.title?.trim() ?? ""
-  const stem = slugify(title) || "untitled"
+/** A slug no other block has, from a title. */
+function freeSlug(title: string, fallback = "untitled") {
+  const stem = slugify(title) || fallback
   let slug = stem
   for (let suffix = 2; usedSlugs.has(slug); suffix++) {
     slug = `${stem.slice(0, 59 - String(suffix).length)}-${suffix}`
   }
+  return slug
+}
+export function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
+  const homeChannel = input.homeChannel?.trim() || "other"
+  validateChannel(homeChannel)
+  const title = input.title?.trim() ?? ""
+  const slug = freeSlug(title)
   // Everything about the new block is set here, before the one change that records it.
   const doc: Doc = {
     id: newNodeId(), kind: "text", slug, title, homeChannel,
@@ -324,8 +331,60 @@ export function setIcon(id: string, icon: string | undefined) {
   set(refresh())
 }
 function updateBody(doc: Doc, body: string) {
+  // Every save of a body, the editor's flush on leaving included, comes through here.
+  assertDurable(body)
   doc.body = body
-  if (doc.kind !== "post" && doc.kind !== "excerpt") doc.kind = inferKind(body) as Doc["kind"]
+  if (doc.kind === "post" || doc.kind === "excerpt") return
+  // A media block stays one while its body still embeds its file, a caption beside it or not.
+  if (doc.media && embedsIn(body).some(target => /\.[A-Za-z0-9]{1,5}$/.test(target))) { doc.kind = "media"; return }
+  const kind = inferKind(body) as Doc["kind"]
+  // A text whose whole body embeds another block is still a text, not a file.
+  const [only] = embedsIn(body)
+  doc.kind = kind === "file" && only && resolveEmbed(only) ? "text" : kind
+  if (doc.kind !== "media") delete doc.media
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  "image/avif": "avif", "image/gif": "gif", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+}
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+/**
+ * Adds an image as a media block of its own, in a channel: its bytes kept by CID in the browser's
+ * media cache, its block private. An image the vault already holds is not copied: its media block is
+ * collected into the channel, as Are.na connects a block. Returns the media block's id and slug, for
+ * an embed (`![[slug]]`). The editor's drop, paste and picker, and the `workspace.add-image` tool, call this.
+ */
+export async function addImage(input: { name: string; type: string; bytes: Uint8Array; channel: string; alt?: string }) {
+  const ending = IMAGE_TYPES[input.type]
+  if (!ending) throw new DOMException(`An image is one of: ${Object.keys(IMAGE_TYPES).join(", ")}`, "DataError")
+  if (!input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new DOMException("An image is up to 20 MB", "DataError")
+  validateChannel(input.channel)
+  editable()
+  const hash = await keep(input.bytes, input.type)
+  const held = blocks.find(doc => doc.media?.hash === hash)
+  if (held) {
+    if (isBlock(held) && !channelsOf(held).includes(input.channel)) collect(held.id, input.channel)
+    return { id: held.id, slug: held.slug, created: false }
+  }
+  const stem = input.name.replace(/\.[^.]+$/, "").trim() || "image"
+  const slug = freeSlug(stem, "image")
+  // The file sits beside its block in the home folder, so its name is free in that channel.
+  const taken = new Set(blocks.filter(doc => isBlock(doc) && doc.homeChannel === input.channel).map(doc => mediaFile(doc)))
+  let file = `${slug}.${ending}`
+  for (let n = 2; taken.has(file); n++) file = `${slug}-${n}.${ending}`
+  const size = await measure(input.bytes, input.type)
+  const alt = input.alt?.trim() || stem
+  const doc: Doc = {
+    id: newNodeId(), kind: "media", slug, title: stem, homeChannel: input.channel, visibility: "private",
+    updated: new Date().toISOString().slice(0, 10), body: `![[${file}]]`,
+    media: { hash, mime: input.type, ...size, alt },
+  }
+  persist(doc)
+  usedSlugs.add(slug)
+  set(refresh())
+  void makeSizes(hash, input.bytes, input.type)
+  return { id: doc.id, slug, created: true }
 }
 
 /** Saves as you type, for private blocks only. */

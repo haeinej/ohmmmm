@@ -84,12 +84,14 @@ export const docForEvidence = (key: string) => byKey.get(key)
 export const evidenceKey = (id: string) => keys.get(id)
 
 // Connection rows use the selected source to determine endpoints. Keep wording and the member's
-// optional explanation from the projected text.
+// optional explanation from the projected text. An embed, `![[slug]]`, connects as a link in the text
+// does, so a media block lists every block that shows it.
+const joins = (kind: string) => kind === "links" || kind === "embeds"
 export function outgoing(doc: Doc): Outgoing[] {
   const hints = new Map(describeOutgoing(doc).map(out => [out.slug, out]))
   const targets = new Map<string, Outgoing>()
   for (const edge of edges) {
-    if (edge.kind !== "links" || edge.from !== evidenceKey(doc.id) || edge.from === edge.to) continue
+    if (!joins(edge.kind) || edge.from !== evidenceKey(doc.id) || edge.from === edge.to) continue
     const target = docForEvidence(edge.to)
     if (!target) continue
     targets.set(target.slug, {
@@ -101,6 +103,6 @@ export function outgoing(doc: Doc): Outgoing[] {
 }
 
 export function incoming(doc: Doc) {
-  const ids = new Set(edges.filter(edge => edge.kind === "links" && edge.to === evidenceKey(doc.id)).map(edge => edge.from))
+  const ids = new Set(edges.filter(edge => joins(edge.kind) && edge.to === evidenceKey(doc.id)).map(edge => edge.from))
   return blocks.filter(other => other.id !== doc.id && ids.has(evidenceKey(other.id) ?? ""))
 }

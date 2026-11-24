@@ -2,7 +2,18 @@ import { isPostId, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { nodeKey } from "../../../vault/vault/node.mjs"
 import { isBlockKind, type BlockKind } from "./block-kind"
 import { blockOf, type BlockRef, type HomeFile } from "./source"
-import { isBlock, type Doc, type Platform } from "./workspace-model"
+import { isBlock, type Doc, type Media, type Platform } from "./workspace-model"
+
+/** A media block's image, read from its properties: none without a CID and a type. */
+function mediaOf(props: Record<string, unknown>): Media | undefined {
+  if (typeof props.hash !== "string" || typeof props.mime !== "string") return undefined
+  const size = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined
+  return {
+    hash: props.hash, mime: props.mime,
+    ...(size(props.width) && size(props.height) ? { width: size(props.width), height: size(props.height) } : {}),
+    ...(typeof props.alt === "string" && props.alt ? { alt: props.alt } : {}),
+  }
+}
 
 export function fileOf(doc: Doc): HomeFile {
   if (!isBlock(doc)) throw new DOMException("Give a vault block.", "DataError")
@@ -14,6 +25,7 @@ export function fileOf(doc: Doc): HomeFile {
         title: doc.title, slug: doc.slug, channels: doc.channels, visibility: doc.visibility,
         updated: doc.updated, connect: doc.connect?.map(each => each.to), icon: doc.icon, samplePlatform: doc.platform,
         connectionNotes: doc.connect?.filter(each => each.why).map(each => `${each.to} ${each.why}`),
+        alt: doc.media?.alt, hash: doc.media?.hash, mime: doc.media?.mime, width: doc.media?.width, height: doc.media?.height,
       },
       body: doc.body,
     }),
@@ -39,6 +51,7 @@ export function docOf(ref: BlockRef, file: HomeFile): { doc: Doc; key: string; k
       updated: ("post" in node ? typeof props.updated === "string" ? props.updated : node.post.date : node.updated) ?? new Date().toISOString().slice(0, 10),
       icon: typeof props.icon === "string" ? props.icon : undefined,
       platform: typeof props.samplePlatform === "string" ? props.samplePlatform as Platform : undefined,
+      media: mediaOf(props),
     },
   }
 }

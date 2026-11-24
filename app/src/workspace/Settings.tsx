@@ -64,6 +64,7 @@ const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] =
   { name: "workspace.graph", title: "Show graph", does: "Shows the graph of your blocks, or of those mentioning a person", reads: true },
   { name: "workspace.create", title: "New block", does: "Starts a private draft", reads: false },
   { name: "workspace.save-draft", title: "Save draft", does: "Saves the open draft as private", reads: false },
+  { name: "workspace.add-image", title: "Image", does: "Adds an image to the open private block, as a media block it embeds", reads: false },
   { name: "history.list", title: "History", does: "Reads who changed what, and when", reads: true },
   { name: "history.save", title: "Save", does: "Names this point in history; changes nothing", reads: false },
   { name: "history.session", title: "Finish task", does: "Records what an agent did and its dead ends", reads: false },

@@ -29,6 +29,12 @@
 .ohm-prose hr { border: 0; border-top: 1px solid var(--ohm-line); margin: 1.4em 0; }
 .ohm-prose img { max-width: 100%; border-radius: var(--ohm-radius-item); margin: .5em 0; }
 .ohm-prose img.ProseMirror-selectednode { outline: 2px solid var(--ohm-forest); outline-offset: 2px; }
+/* Embeds, ![[…]]: a media block's image, or a card for another block. The image keeps its shape while it loads. */
+.ohm-prose .ohm-embed { margin: .5em 0; }
+.ohm-prose .ohm-embed img { display: block; height: auto; background: var(--ohm-wash); margin: 0; }
+.ohm-prose .ohm-embed.ProseMirror-selectednode img { outline: 2px solid var(--ohm-forest); outline-offset: 2px; }
+.ohm-prose .ohm-embed-card { display: block; width: 100%; text-align: start; padding: .7em 1em; border-radius: var(--ohm-radius-item); background: var(--ohm-wash); color: var(--ohm-forest); }
+.ohm-prose .ohm-embed.is-missing { padding: .7em 1em; border-radius: var(--ohm-radius-item); background: var(--ohm-wash); color: var(--ohm-muted); font-size: var(--ohm-type-small-size, .875em); }
 .ohm-prose mark { background: color-mix(in oklab, var(--ohm-green-light) 35%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .ohm-prose a { color: var(--ohm-forest); text-decoration: underline; text-underline-offset: 3px; }
 

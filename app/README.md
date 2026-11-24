@@ -15,10 +15,10 @@ A light, Obsidian-like workspace, the first flow ([flows/workspace.md](flows/wor
 - A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), **inbox**, notifications, and you.
 - A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. The graph puts you in the middle, Obsidian-style, with cortex items (green diamonds) close around you and vault blocks (grey dots) further out, clustered by channel or category, and grey lines for links, connections and what the cortex drew from the vault. It behaves like Obsidian's: springy, with hover highlighting and drag.
 - A **main panel** card where blocks and cortex files open in the editor:
-  - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md`, or onto a channel to move it there.
+  - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md` (or a `.zip` with its images), or onto a channel to move it there.
   - **Editing:** a `/` menu, a floating selection toolbar, and block handles with menus.
   - **Tables:** row and column handles.
-  - **Dropping:** images go into the open block and Markdown files open as new blocks.
+  - **Dropping:** an image becomes a media block of its own, as on Are.na, and the open block embeds it (`![[slug]]`). Markdown files open as new blocks.
 
   Inbox items and settings open here too.
 - **Search** as a sheet over the workspace (⌘K). It goes through the `workspace.search` WebMCP tool's handler, and uses the same sample home as the editor and graph.
