@@ -12,7 +12,7 @@ This repository holds the vault, the cortex, and the app that brings them togeth
 
 | Folder | What it is |
 | --- | --- |
-| [`vault/`](vault/README.md) | The vault: blocks, channels, entities and sources as Markdown files; the `ohm` command; the vault service (Cloudflare Worker and D1); publishing to your PDS as `com.ohmmmm.post`; the Claude Code plugin |
+| [`vault/`](vault/README.md) | The vault: blocks, channels, entities and sources as Markdown files; the `ohm` command; the vault service (Cloudflare Worker and D1); publishing to your PDS as `com.ohmmmm.post`; the Claude Code plugin, with its skills and the [curator](vault/agents/curator.md) agent |
 | [`cortex/`](cortex/README.md) | The cortex: a folder an agent keeps about the person it works for; the `cortex` command, its MCP server and hooks |
 | [`app/`](app/README.md) | The workspace app for exploring and editing a synthetic example home |
 | [`home/`](home/home.mjs) | Naming, finding and making a home, `ohmmmm.<handle>` |
@@ -42,9 +42,13 @@ npx github:haeinej/ohmmmm init alice.example.com   # makes ~/ohmmmm.alice.exampl
 cd ~/ohmmmm.alice.example.com
 npx github:haeinej/ohmmmm vault index               # the vault finds ./vault by itself
 npx github:haeinej/ohmmmm cortex status             # the cortex finds ./cortex, and reads ./vault
+npx github:haeinej/ohmmmm serve                     # the bridge for the app and local agents: open the link it prints
+npx github:haeinej/ohmmmm pair                      # a link that pairs one more browser
+npx github:haeinej/ohmmmm browsers                  # the paired browsers; browsers forget <id> shuts one out
+npx github:haeinej/ohmmmm agents add claude-code    # a key of its own for an agent, shown once
 ```
 
-`npx github:haeinej/ohmmmm` runs `bin/ohmmmm.mjs`: `init` and `where` are its own, `cortex …` goes to the cortex, and every other command to the vault's `ohm` (`vault`, `publish`, `sync`, `mcp`…), so commands written for ohm-vault still work. From a checkout, use `node bin/ohmmmm.mjs`, or `node vault/bin/ohm.mjs` and `node cortex/bin/cortex.mjs` directly.
+`npx github:haeinej/ohmmmm` runs `bin/ohmmmm.mjs`: `init` and `where` are its own, `serve` starts the home's bridge on this machine, `pair` pairs another browser with it, and `agents` gives each agent its own key ([docs/serve.md](docs/serve.md)), `cortex …` goes to the cortex, and every other command to the vault's `ohm` (`vault`, `publish`, `sync`, `mcp`…), so commands written for ohm-vault still work. From a checkout, use `node bin/ohmmmm.mjs`, or `node vault/bin/ohm.mjs` and `node cortex/bin/cortex.mjs` directly.
 
 Inside a home, or with `OHMMMM_HOME` set, the vault and the cortex each find their own folder, and a cortex reads its sibling vault through the vault's reader unless `.cortex/vault.json` names another. Either folder still works on its own.
 
@@ -71,9 +75,9 @@ Read [AGENTS.md](AGENTS.md) first, then the guide for [vault](vault/AGENTS.md), 
 
 ## Where this came from
 
-This repository joins three projects with their full histories. The original `haeinej/ohm-vault` was renamed `haeinej/ohmmmm` and now lives in `vault/`. The archived `haeinej/ohm-cortex` lives in `cortex/`. The workspace from `haeinej/ohm-ux` lives in `app/`. Use `git log -m --follow -- app/src/App.tsx` to trace a file into its original repository.
+This repository joins three projects with their full histories. The original `haeinej/ohm-vault` was renamed `haeinej/ohmmmm` and now lives in `vault/`. The archived `haeinej/ohm-cortex` lives in `cortex/`. The workspace from `haeinej/ohm-ux` lives in `app/`, and ohm-ux is retired: change the workspace here. Use `git log -m --follow -- app/src/App.tsx` to trace a file into its original repository.
 
 ## Status
 
 - Built and tested locally: the home, the shared contract, the vault and its service, the friends layer, the private store, and the cortex.
-- The [app](app/) still runs on sample data. The private store awaits deployment, migration and integration with the account app.
+- The [app](app/) runs on sample data, or, paired with `ohmmmm serve`, on the person's own home: their vault and their cortex ([docs/serve.md](docs/serve.md)). The private store awaits deployment, migration and integration with the account app.

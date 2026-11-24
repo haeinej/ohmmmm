@@ -2,7 +2,18 @@ import { isPostId, setProperty, splitFile, writeNoteFile } from "../../../vault/
 import { nodeKey } from "../../../vault/vault/node.mjs"
 import { isBlockKind, type BlockKind } from "./block-kind"
 import { blockOf, type BlockRef, type HomeFile } from "./source"
-import { isBlock, type Doc, type Platform } from "./workspace-model"
+import { isBlock, type Doc, type Media, type Platform } from "./workspace-model"
+
+/** A media block's image, read from its properties: none without a CID and a type. */
+function mediaOf(props: Record<string, unknown>): Media | undefined {
+  if (typeof props.hash !== "string" || typeof props.mime !== "string") return undefined
+  const size = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined
+  return {
+    hash: props.hash, mime: props.mime,
+    ...(size(props.width) && size(props.height) ? { width: size(props.width), height: size(props.height) } : {}),
+    ...(typeof props.alt === "string" && props.alt ? { alt: props.alt } : {}),
+  }
+}
 
 /** The properties the workspace edits; every other property a file holds is kept as it is. */
 function managed(doc: Doc & { homeChannel: string }): Record<string, unknown> {
@@ -11,6 +22,8 @@ function managed(doc: Doc & { homeChannel: string }): Record<string, unknown> {
     title: doc.title, slug: doc.slug, channels: doc.channels, visibility: doc.visibility,
     by: doc.by, status: doc.status, updated: doc.updated, connect: doc.connect?.map(each => each.to), icon: doc.icon,
     connectionNotes: doc.connect?.filter(each => each.why).map(each => `${each.to} ${each.why}`),
+    // Only a block that holds an image says so: a media record's own `hash` (its origin's) is left as it is.
+    ...(doc.media ? { alt: doc.media.alt, hash: doc.media.hash, mime: doc.media.mime, width: doc.media.width, height: doc.media.height } : {}),
   }
 }
 
@@ -57,6 +70,7 @@ export function docOf(ref: BlockRef, file: HomeFile): { doc: Doc; key: string; k
       ...(typeof marks.by === "string" ? { by: marks.by } : {}),
       icon: typeof props.icon === "string" ? props.icon : undefined,
       platform: platformOf("post" in node ? (node.post as { source?: { platform?: unknown } }).source?.platform : undefined),
+      media: mediaOf(props),
     },
   }
 }

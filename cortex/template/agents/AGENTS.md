@@ -41,6 +41,7 @@ An observation is your memory of working with them. The next agent reads it and 
 | Something you relied on is wrong, missing or out of date (a renamed field, a stale skill, a note that no longer holds) | Write an observation about it that says so plainly, with what you found instead. Do not only work around it |
 | They correct you | Write an observation of the correction. A correction counts for more than anything you noticed |
 | An observation of yours turns out wrong | Rewrite it, or remove it with the reason |
+| A block seems to want another label or channel, a move, or a merge with another | Write an observation about it with `needs: curator`. Do not relabel, move or merge it yourself: the curator settles structure with them |
 | An observation the vault wrote says a block moved or went | Read the observations it names, and rewrite yours that need it |
 | They have done one task the same way three times, or said "always do it like this" | Propose a skill |
 | The work needs something you cannot do | Ask for a tool |

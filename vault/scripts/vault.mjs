@@ -17,6 +17,9 @@
 //   vault grant AGENT write|link SCOPE       let an agent change files under a channel (* = everywhere)
 //   vault revoke AGENT [write|link [SCOPE]]  take a grant back; with no right, everything for that agent
 //   vault restore PATH ADDRESS               put a file back to a version kept in .vault/history/
+//   vault rename REF [TO] [--title T] [--channel C]
+//                                            rename or move a channel (TO: its new path) or a block
+//                                            (TO: its new slug), and rewrite what used the old name
 //   vault lint   [--vault DIR] [--limit N]   candidates for a semantic check, for an agent to judge
 //
 // --vault defaults to OHM_VAULT_FOLDER, then the vault of the home this runs in
@@ -30,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { defaultVault } from '../../home/home.mjs';
 
-const ACTIONS = ['init', 'add', 'index', 'status', 'inspect', 'search', 'hook', 'mcp', 'grants', 'grant', 'revoke', 'restore', 'lint'];
+const ACTIONS = ['init', 'add', 'index', 'status', 'inspect', 'search', 'hook', 'mcp', 'grants', 'grant', 'revoke', 'restore', 'rename', 'lint'];
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   strict: false,
@@ -151,6 +154,33 @@ try {
         }
         const report = await scan({ vault, db });
         print({ path, restored: address, unchanged: before === kept, problems: readNode(path, kept)?.problems ?? [], index: { nodes: report.nodes } });
+      } else if (action === 'rename') {
+        const [ref, to] = rest;
+        if (!ref || rest.length > 2 || (to === undefined && values.title === undefined && values.channel === undefined)) {
+          throw new Error('Say what to rename and what it becomes: ohm vault rename notes journal, or ohm vault rename rain rain-walk [--title "Rain walk"] [--channel essays]');
+        }
+        const { blobCid } = await import('../vault/core.mjs');
+        const { applyRename, planRename, readVaultFolder } = await import('../vault/rename.mjs');
+        const { HISTORY, withCollectLock } = await import('../mcp/local.mjs');
+        await scan({ vault, db });
+        const found = inspect(db, ref);
+        if (!found || found.root !== 'vault' || !['block', 'channel'].includes(found.node.type)) throw new Error(`Nothing in the vault is a block or channel called "${ref}". Run ohm vault index if it is new.`);
+        const change = found.node.type === 'channel'
+          ? { channel: found.node.path, to }
+          : { block: found.node.path, ...(to === undefined ? {} : { slug: to }), ...(values.title === undefined ? {} : { title: values.title }), ...(values.channel === undefined ? {} : { channel: values.channel }) };
+        if (found.node.type === 'channel' && (to === undefined || values.title !== undefined || values.channel !== undefined)) throw new Error('For a channel, give only its new path: ohm vault rename notes journal');
+        const keep = async text => {
+          const address = await blobCid(Buffer.from(text, 'utf8'));
+          await mkdir(resolve(vault, HISTORY), { recursive: true });
+          await writeFile(resolve(vault, HISTORY, address), text, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
+          return address;
+        };
+        const done = await withCollectLock(vault, sqlite.DatabaseSync, async () => {
+          const { files, paths } = await readVaultFolder(vault);
+          return applyRename({ vault, plan: planRename(files, change, { paths }), by: 'me', keep });
+        });
+        const report = await scan({ vault, db });
+        print({ ...done, index: { nodes: report.nodes, problems: report.problems } });
       } else if (action === 'lint') {
         const { lint } = await import('../vault/lint.mjs');
         const limit = values.limit === undefined ? 30 : Number(values.limit);

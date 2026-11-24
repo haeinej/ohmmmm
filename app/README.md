@@ -15,16 +15,18 @@ A light, Obsidian-like workspace over the signed-in member's own home, the first
 - A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), notifications, and you.
 - A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. In the graph a node is a block and an edge is a connect ([words](../docs/words.md#in-the-graph)): you are in the middle, blocks are coloured by their label and sized by their backlinks, and a connection an agent only observed is dashed and drawn apart. The cortex is a toggle, off by default. It behaves like Obsidian's: springy, with hover highlighting and drag.
 - A **main panel** card where blocks and cortex files open in the editor:
-  - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md`, or onto a channel to move it there.
+  - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md` (or a `.zip` with its images), or onto a channel to move it there.
   - **Editing:** a `/` menu, a floating selection toolbar, and block handles with menus.
   - **Tables:** row and column handles.
-  - **Dropping:** images go into the open block and Markdown files open as new blocks.
+  - **Dropping:** an image becomes a media block of its own, as on Are.na, and the open block embeds it (`![[slug]]`). Markdown files open as new blocks.
 
   Settings open here too.
 - **No inbox.** Your coding agent writes blocks straight into the channels you granted it. Each one says it is the agent's (`by: agent:<name>`) and starts private, so it shows in the tree like any block you wrote, and only you show it to more people.
 - **Search** as a sheet over the workspace (⌘K). It goes through the `workspace.search` WebMCP tool's handler, and searches the same home as the editor and graph.
 
 Channels are files (`_channel.md`) on the service, each with its own version. Renaming or moving one moves it with everything filed in it, at the service, then refiles the sealed blocks on this device; a channel with published posts in it moves through Publish instead.
+
+Out of the box the data is synthetic: a sample vault and cortex, restored on every reload. To work on your own home instead, run `ohmmmm serve` inside it and open the link it prints: the app then reads your vault's files and your cortex, and writes your changes back to them ([docs/serve.md](../docs/serve.md)).
 
 New blocks start private: sealed on this device and sent as ciphertext, so writing needs a device that has unlocked the account's keys. Shared blocks (friends) and published posts are read and kept by the service. The cortex is sealed too, under its own context, and opens only on an unlocked device.
 

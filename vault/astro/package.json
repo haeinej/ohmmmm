@@ -1,0 +1,16 @@
+{
+  "name": "@ohmmmm/astro",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The ohm content loader for Astro",
+  "exports": { ".": { "types": "./dist/astro/index.d.mts", "import": "./dist/astro/index.mjs" } },
+  "files": ["dist", "README.md", "AGENTS.md"],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=22.19" },
+  "peerDependencies": { "astro": "^5.0.0" },
+  "dependencies": { "markdown-it": "15.0.3", "markdown-it-footnote": "4.0.0" }
+}

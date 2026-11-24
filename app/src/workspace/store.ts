@@ -3,7 +3,7 @@
 // workspace shows it once the source has answered.
 import { useSyncExternalStore } from "react"
 import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
-  inOrder, isBlock, journalOf, landBlock, landChannel, landCortex, heldCortex, owner, blocks, selectSource,
+  inOrder, isBlock, isCortexKind, journalOf, landBlock, landChannel, landCortex, heldCortex, dropCortex, owner, blocks, selectSource,
   type Audience, type Doc, type Visibility,
 } from "@/data/workspace-data"
 import { fileOf } from "@/data/block-document"
@@ -19,6 +19,9 @@ import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
+import type { CortexWaiting } from "@/data/workspace-model"
+import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
+import { keep, makeSizes, measure } from "@/media/cache"
 
 const live = () => {
   const source = getSource()
@@ -48,7 +51,7 @@ export function report<T>(work: Promise<T>) {
 }
 
 /** Saves one block or cortex file as it is now in `doc`. Runs inside `serial`. */
-async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) {
+async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3], why?: string) {
   const source = live()
   if (!isBlock(doc)) {
     const held = heldCortex(doc.id)
@@ -59,7 +62,7 @@ async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]
     const line = {
       type: "change", owner: "cortex", node: doc.id, op: change?.op ?? (held ? "edit" : "create"), actor: journal.actor(),
       at: new Date().toISOString(), fields: [], before, after, summary: held ? "Edited it" : "Made it",
-      ...(change?.reason ? { reason: change.reason } : {}), seq: 0, id: `${Date.now().toString(36)}-${doc.id.slice(0, 6)}`,
+      ...(change?.reason ?? why ? { reason: change?.reason ?? why } : {}), seq: 0, id: `${Date.now().toString(36)}-${doc.id.slice(0, 6)}`,
     }
     const { version } = await source.cortex.save(doc.id, file, held?.version ?? null, { line, snapshots: { [after]: snap(doc) } })
     landCortex({ id: doc.id, ...file, version })
@@ -111,7 +114,9 @@ export const SIDE_WIDTH = { min: 220, max: 640, initial: 300 }
 const savedWidth = () => {
   try { const w = Number(localStorage.getItem("ohm-ux:side-width")); return w >= SIDE_WIDTH.min && w <= SIDE_WIDTH.max ? w : SIDE_WIDTH.initial } catch { return SIDE_WIDTH.initial }
 }
-export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft"
+export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft" | "workspace.add-image"
+  | "visibility.preview" | "visibility.move"
+  | "cortex.observe"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
 
 type State = {
@@ -164,7 +169,9 @@ let state: State = {
   appearance: "system", density: savedDensity(), agentsAllowed: true,
   history: [], at: -1, returnTo: null, reveal: null, lastSide: "repo",
   offered: {
-    "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true,
+    "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true, "workspace.add-image": true,
+    "visibility.preview": true, "visibility.move": true,
+    "cortex.observe": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
   },
 }
@@ -227,6 +234,9 @@ export const reload = () => serial(async () => {
  * service here, the workspace shows sign-in. The private layer and the cortex open once this device
  * has unlocked the account's keys (`privateSession`, from the account app's packages/keys).
  */
+/** The source changed what it holds by itself (the home's bridge answered): read it again, keeping the view. */
+export const sourceChanged = () => { const source = getSource(); return source ? report(setSource(source, { keepView: true })) : Promise.resolve() }
+
 export async function connectHome<Master, Sealed>(options: Pick<ServiceOptions<Master, Sealed>, "privateSession" | "fetch"> = {}) {
   const send = options.fetch ?? fetch
   try {
@@ -314,6 +324,10 @@ export function previewMove(id: string, to: Visibility) {
  */
 export function setVisibility(id: string, visibility: Visibility, { request, reason }: { request?: string; reason?: string } = {}) {
   const preview = previewMove(id, visibility)
+  // The home on this computer publishes only through its own Publish dialog, which the person runs.
+  if (preview.via === "publish" && "planPublish" in (getSource() ?? {})) {
+    return Promise.reject(new DOMException("Showing a block to everyone, or taking a public one back, goes through Publish: choose Everyone on the block, and approve the plan.", "NotSupportedError"))
+  }
   if (preview.needs?.includes("title")) return Promise.reject(new DOMException("Give it a title before it is published.", "DataError"))
   return serial(async () => {
     const held = blockVersion(id)
@@ -496,15 +510,20 @@ export function showGraph(center?: string) {
 }
 
 const usedSlugs = new Set<string>()
-export async function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
-  const homeChannel = input.homeChannel?.trim() || "other"
-  validateChannel(homeChannel)
-  const title = input.title?.trim() ?? ""
-  const stem = slugify(title) || "untitled"
+/** A slug no other block has, from a title. */
+function freeSlug(title: string, fallback = "untitled") {
+  const stem = slugify(title) || fallback
   let slug = stem
   for (let suffix = 2; usedSlugs.has(slug); suffix++) {
     slug = `${stem.slice(0, 59 - String(suffix).length)}-${suffix}`
   }
+  return slug
+}
+export async function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
+  const homeChannel = input.homeChannel?.trim() || "other"
+  validateChannel(homeChannel)
+  const title = input.title?.trim() ?? ""
+  const slug = freeSlug(title)
   // Everything about the new block is set here, before the one change that records it.
   // A new block is private: sealed on this device under an opaque ID, carrying its own vault ID.
   const doc: Doc = {
@@ -544,8 +563,63 @@ export function setIcon(id: string, icon: string | undefined) {
   return update(id, doc => { doc.icon = icon; return true })
 }
 function updateBody(doc: Doc, body: string) {
+  // Every save of a body, the editor's flush on leaving included, comes through here.
+  assertDurable(body)
   doc.body = body
-  if (doc.kind !== "post" && doc.kind !== "excerpt") doc.kind = inferKind(body) as Doc["kind"]
+  if (doc.kind === "post" || doc.kind === "excerpt") return
+  // A media block stays one while its body still embeds its file, a caption beside it or not.
+  if (doc.media && embedsIn(body).some(target => /\.[A-Za-z0-9]{1,5}$/.test(target))) { doc.kind = "media"; return }
+  const kind = inferKind(body) as Doc["kind"]
+  // A text whose whole body embeds another block is still a text, not a file.
+  const [only] = embedsIn(body)
+  doc.kind = kind === "file" && only && resolveEmbed(only) ? "text" : kind
+  if (doc.kind !== "media") delete doc.media
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  "image/avif": "avif", "image/gif": "gif", "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+}
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+/**
+ * Adds an image as a media block of its own, in a channel: its bytes kept by CID in the browser's
+ * media cache and sent to the home's media store, its block private. An image the vault already
+ * holds is not copied: its media block is collected into the channel, as Are.na connects a block.
+ * Returns the media block's id and slug, for an embed (`![[slug]]`). The editor's drop, paste and
+ * picker, and the `workspace.add-image` tool, call this. Adding the same image twice is one block.
+ */
+export async function addImage(input: { name: string; type: string; bytes: Uint8Array; channel: string; alt?: string }) {
+  const ending = IMAGE_TYPES[input.type]
+  if (!ending) throw new DOMException(`An image is one of: ${Object.keys(IMAGE_TYPES).join(", ")}`, "DataError")
+  if (!input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new DOMException("An image is up to 20 MB", "DataError")
+  validateChannel(input.channel)
+  const source = live()
+  const hash = await keep(input.bytes, input.type)
+  const held = blocks.find(doc => doc.media?.hash === hash)
+  if (held) {
+    if (isBlock(held) && !channelsOf(held).includes(input.channel)) await collect(held.id, input.channel)
+    return { id: held.id, slug: held.slug, created: false }
+  }
+  // The bytes first: a block is never saved pointing at bytes the home does not have.
+  await source.media.put(input.bytes.slice() as Uint8Array<ArrayBuffer>, input.type)
+  const stem = input.name.replace(/\.[^.]+$/, "").trim() || "image"
+  const slug = freeSlug(stem, "image")
+  // The file sits beside its block in the home folder, so its name is free in that channel.
+  const taken = new Set(blocks.filter(doc => isBlock(doc) && doc.homeChannel === input.channel).map(doc => mediaFile(doc)))
+  let file = `${slug}.${ending}`
+  for (let n = 2; taken.has(file); n++) file = `${slug}-${n}.${ending}`
+  const size = await measure(input.bytes, input.type)
+  const alt = input.alt?.trim() || stem
+  const doc: Doc = {
+    id: newOpaqueId(), vaultId: newNodeId(), kind: "media", slug, title: stem, homeChannel: input.channel, visibility: "private",
+    updated: today(), body: `![[${file}]]`,
+    media: { hash, mime: input.type, ...size, alt },
+  }
+  usedSlugs.add(slug)
+  try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
+  set(bump())
+  void makeSizes(hash, input.bytes, input.type)
+  return { id: doc.id, slug, created: true }
 }
 
 /** Saves as you type, for private blocks only. */
@@ -643,7 +717,7 @@ function relocateChannel(from: string, to: string) {
   return serial(async () => {
     try {
       const moved = await live().channels.move(from, to, heldChannel(from)?.version ?? null)
-      await refileSealed(from, to, true)
+      if (!moved.everything) await refileSealed(from, to, true)
       return moved
     } finally {
       // Whatever happened, show the home as the service now holds it.
@@ -747,6 +821,99 @@ export function disconnect(id: string, toSlug: string) {
     doc.connect = doc.connect.filter(c => c.to !== toSlug)
     return true
   })
+}
+
+// ─── The cortex: what the person changes in it (cortex/docs/model.md, "Who may change what") ───
+
+const cortexDoc = (id: string) => {
+  const doc = byId(id)
+  if (!doc || isBlock(doc) || !isCortexKind(doc.kind)) throw new DOMException("There is no such part of your cortex.", "NotFoundError")
+  return doc
+}
+
+/** The person edits the text of a cortex part: the profile, an observation, a skill or a tool. Saved as they type. */
+export function editCortex(id: string, body: string) {
+  cortexDoc(id)
+  return update(id, doc => {
+    if (doc.body === body) return undefined
+    doc.body = body
+    doc.updated = today()
+    return true
+  })
+}
+
+const OBSERVATION_LIMIT = 2000
+/**
+ * Writes an observation: the person's own, or an agent's in the page once the person approved it
+ * (the cortex.observe tool; `why` is its reason, journaled with it). `about` is what it is about:
+ * block IDs, or channels as channel:<path>. Returns its id and title.
+ */
+export async function writeObservation(input: { text: string; about?: string[] }, why?: string) {
+  const text = input.text.trim()
+  if (!text || [...text].length > OBSERVATION_LIMIT) throw new DOMException(`An observation is what was seen, at most ${OBSERVATION_LIMIT} characters`, "DataError")
+  const about = [...new Set(input.about ?? [])]
+  if (about.length > 20 || about.some(item => item.startsWith("channel:") ? !channelRecords.some(c => `channel:${c.path}` === item) && !blocks.some(b => channelsOf(b).includes(item.slice(8))) : !isBlock(byId(item)))) {
+    throw new DOMException("about is up to 20 blocks in this home, by id, or channels as channel:<path>", "DataError")
+  }
+  const who = journalOf().actor()
+  const doc: Doc = {
+    id: newOpaqueId(), kind: "observation", title: text.split("\n")[0].slice(0, 80), slug: `observation-${newNodeId()}`, body: text,
+    visibility: "private", updated: today(), by: who.kind === "agent" ? who.name : "you", ...(about.length ? { about } : {}),
+  }
+  usedSlugs.add(doc.slug)
+  try { await serial(() => persist(doc, undefined, why)) } catch (problem) { usedSlugs.delete(doc.slug); throw problem }
+  set(bump())
+  const made = byId(doc.id) ?? doc
+  return { id: made.id, title: made.title, about }
+}
+
+/** Pins an observation, so every agent session is handed it, or unpins it. Only the person does this. */
+export function pinObservation(id: string, pin: boolean) {
+  if (cortexDoc(id).kind !== "observation") return Promise.reject(new DOMException("Only an observation is pinned", "DataError"))
+  return update(id, doc => {
+    if (!!doc.pin === pin) return undefined
+    if (pin) doc.pin = true; else delete doc.pin
+    return true
+  })
+}
+
+/** Switches a tool on, so agents may use it, or off. Only the person does this. */
+export function switchTool(id: string, on: boolean) {
+  if (cortexDoc(id).kind !== "tool") return Promise.reject(new DOMException("Only a tool is switched on or off", "DataError"))
+  return update(id, doc => {
+    if (!!doc.on === on) return undefined
+    doc.on = on
+    return true
+  })
+}
+
+/** Forgets an observation, or removes a skill. The cortex keeps it, so it can be restored. */
+export function forgetCortex(id: string) {
+  const kind = cortexDoc(id).kind
+  if (kind !== "observation" && kind !== "skill") return Promise.reject(new DOMException("Only an observation or a skill is removed", "DataError"))
+  return serial(async () => {
+    const held = heldCortex(id)
+    if (held) await live().cortex.remove(id, held.version)
+    dropCortex(id)
+    journalOf().syncJournal()
+    for (const s of Object.values(marks)) s.delete(id)
+    const wasOpen = state.view.kind === "doc" && state.view.id === id
+    set({ ...bump(), history: state.history.filter(h => h !== id), ...(wasOpen ? { view: { kind: "empty" } as View } : {}) })
+  })
+}
+
+/** What agents proposed and asked for, waiting for the person: kept by the home on this computer. */
+const NOTHING_WAITING: CortexWaiting = { profile: [], skills: [], tools: [] }
+type Proposals = { cortexWaiting(): CortexWaiting; answerCortex(kind: "profile" | "skill", id: string, yes: boolean): Promise<void> }
+const proposals = () => { const source = getSource(); return source && "answerCortex" in source ? source as unknown as Proposals : null }
+export const cortexWaiting = () => proposals()?.cortexWaiting() ?? NOTHING_WAITING
+
+/** The person's answer: a profile line accepted or declined, a skill approved or declined. The home is read again after. */
+export async function answerCortex(kind: "profile" | "skill", id: string, yes: boolean) {
+  const held = proposals()
+  if (!held) throw new DOMException("Proposals are answered in your home on this computer.", "NotSupportedError")
+  await serial(() => held.answerCortex(kind, id, yes))
+  await setSource(live(), { keepView: true })
 }
 
 /** Opens a Markdown or text file as a new private block. */

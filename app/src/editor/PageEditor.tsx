@@ -28,14 +28,17 @@ import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { isBlock, locationOf, bySlug, channelRecords, channelsOf, blocks, titleOf, type Doc } from "@/data/workspace-data"
+import { isBlock, isCortexKind, locationOf, bySlug, channelRecords, channelsOf, blocks, titleOf, type Doc } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
-import { DOC_DRAG, dragOutAsMarkdown, openDropped, saveAsMarkdown } from "@/workspace/drop"
-import { autosave, bodyRevision, canGo, go, marks, me, moveBlock, open, openFile, report, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
+import { DOC_DRAG, dragOut, openDropped, saveExport } from "@/workspace/drop"
+import { addImage, autosave, bodyRevision, editCortex, canGo, go, marks, MAX_IMAGE_BYTES, me, moveBlock, open, openFile, report, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
+import { exportBlock, exportNow, preload } from "@/media/export"
+import { unescapeEmbeds } from "@/media/embeds"
 import { InlineRename, requestDelete } from "@/workspace/PageActions"
 import { withAgent } from "@/workspace/tools"
-import { insertImage, insertImageFiles, insertTable, insertText } from "./commands"
+import { hasImages, insertImage, insertImageFiles, insertTable, insertText } from "./commands"
+import { Embed } from "./embed"
 import { ActiveCell, References, SlashCommand } from "./extensions"
 import { IconPicker } from "./IconPicker"
 import { PlusMenu, SlashMenu } from "./InsertMenu"
@@ -44,7 +47,20 @@ import { LastEdited, TableControls } from "./TableControls"
 import { LinkPreview } from "./LinkPreview"
 import { ConnectionsButton } from "./ConnectionsCard"
 import { HistoryButton } from "@/history/History"
+import { CortexActions, ObserveButton } from "./CortexActions"
+import { observationTitle } from "@/data/local-cortex"
 import "./editor.css"
+
+/**
+ * Images at web addresses still show. One at a temporary browser address (`blob:` or `data:`) is
+ * never taken in from pasted HTML: an image is added as a media block instead (vault/plans/media.md).
+ */
+const WebImage = Image.extend({
+  parseHTML() {
+    return [{ tag: "img[src]", getAttrs: el => /^(?:https?:)?\/\//i.test((el as HTMLElement).getAttribute("src") ?? "") ? null : false }]
+  },
+})
+const IMAGE_TYPES = ["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"]
 
 /** Bodies written before the editor start with "# Title"; the title has its own field now. */
 const withoutTitle = (body: string, title: string) => body.replace(new RegExp(`^#\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n*`), "")
@@ -53,7 +69,7 @@ const withoutTitle = (body: string, title: string) => body.replace(new RegExp(`^
 const unescapeLinks = (md: string) =>
   md.replace(/\\?\[\\?\[([a-z0-9-]+)(?:\\?\|((?:[^\]\n\\]|\\.)+?))?\\?\]\\?\]/gi,
     (_, slug: string, words?: string) => (words ? `[[${slug}|${words.replace(/\\(.)/g, "$1")}]]` : `[[${slug}]]`))
-const toMarkdown = (e: Editor) => unescapeLinks(e.getMarkdown())
+const toMarkdown = (e: Editor) => unescapeLinks(unescapeEmbeds(e.getMarkdown()))
 
 const pill = "flex items-center gap-0.5 rounded-full bg-muted p-0.5"
 const pillButton = "size-8 rounded-full text-muted-foreground hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground"
@@ -100,6 +116,8 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
   }, [doc.updated, doc.homeChannel, doc.channels]) // eslint-disable-line react-hooks/exhaustive-deps
   const here = locationOf(doc)
   const md = () => `# ${titleOf(doc)}\n\n${markdown()}`
+  // A drag must hand over its file at once, so the images this block shows are loaded ahead of it.
+  useEffect(() => { void preload(doc) }, [doc.id, doc.body]) // eslint-disable-line react-hooks/exhaustive-deps
   const rename = () => { if (post) { setMenu(false); setRenaming(true) } }
   const key = (e: React.KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -110,7 +128,7 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
   }
   return (
     <div draggable={!renaming} aria-label={`${path.join(" / ")}. Drag out to save as Markdown`}
-      onDragStart={e => dragOutAsMarkdown(e.dataTransfer, doc.id, doc.title, md())}
+      onDragStart={e => { const text = md(); dragOut(e.dataTransfer, doc.id, text, exportNow(doc, text)) }}
       className={cn(pill, "h-9 min-w-0 max-w-[min(480px,58vw)] cursor-grab gap-1.5 ps-3 pe-0.5 text-small text-muted-foreground active:cursor-grabbing")}>
       <Icon icon={FileTextIcon} size="sm" className="flex-none" />
       <span className="flex min-w-0 items-center gap-1">
@@ -156,7 +174,7 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
           <DropdownMenuItem disabled={!post} onClick={rename}>Rename<DropdownMenuShortcut>R</DropdownMenuShortcut></DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onPickFile}>Open file…</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => saveAsMarkdown(doc.title, md())}>Save as Markdown</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => { void exportBlock(doc, md()).then(saveExport) }}>Save as Markdown</DropdownMenuItem>
           {post && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Move to</DropdownMenuSubTrigger>
@@ -222,10 +240,13 @@ function BlockMenu({ editor, block, updated, onClose }: { editor: Editor; block:
 
 export function PageEditor({ doc }: { doc: Doc }) {
   const { agentsAllowed, offered } = useWorkspace()
-  const editable = isBlock(doc) && doc.visibility === "private"
+  // A private block is edited here; so is every part of your cortex, which only you see.
+  const privateBlock = isBlock(doc) && doc.visibility === "private"
+  const cortexPart = !isBlock(doc) && isCortexKind(doc.kind)
+  const editable = privateBlock || cortexPart
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   // The vault trims the saved title. Keep spaces in the input while the saved title matches.
-  const title = editable && titleDraft?.trim() === doc.title ? titleDraft : doc.title
+  const title = privateBlock && titleDraft?.trim() === doc.title ? titleDraft : doc.title
   const [plusOpen, setPlusOpen] = useState(false)
   const [iconOpen, setIconOpen] = useState(false)
   const [block, setBlock] = useState<{ node: PMNode; pos: number } | null>(null)
@@ -239,12 +260,19 @@ export function PageEditor({ doc }: { doc: Doc }) {
   const save = useRef<ReturnType<typeof setTimeout> | null>(null)
   const unsaved = useRef<string | null>(null)
   const base = useRef(bodyRevision(doc))
+  /** Drops typing not yet saved, once an agent's save has taken it in. */
+  function dropPending() {
+    if (save.current) clearTimeout(save.current)
+    save.current = null
+    unsaved.current = null
+  }
   function flushBody() {
     if (save.current) clearTimeout(save.current)
     save.current = null
     const body = unsaved.current
     unsaved.current = null
-    if (body !== null && bodyRevision(doc) === base.current) void report(autosave(doc.id, { body }))
+    if (body === null || bodyRevision(doc) !== base.current) return
+    void report(cortexPart ? editCortex(doc.id, body) : autosave(doc.id, { body }))
   }
 
   const editor = useEditor({
@@ -258,7 +286,8 @@ export function PageEditor({ doc }: { doc: Doc }) {
       }),
       TaskList, TaskItem.configure({ nested: true }),
       TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
-      Image, Highlight, SlashCommand, ActiveCell, Markdown,
+      WebImage, Highlight, SlashCommand, ActiveCell, Markdown,
+      Embed.configure({ onOpen: id => open(id), channel: () => doc.homeChannel }),
       References(ref => {
         if (ref.slug) { const d = bySlug(ref.slug); if (d) open(d.id) }
         if (ref.handle) showGraph(ref.handle)
@@ -273,12 +302,12 @@ export function PageEditor({ doc }: { doc: Doc }) {
         const dt = (event as DragEvent).dataTransfer
         if (!dt) return false
         const files = [...dt.files]
-        if (files.some(f => f.type.startsWith("image/"))) {
-          if (!view.editable) return false
+        if (hasImages(files)) {
+          if (!view.editable || !doc.homeChannel) return false
           event.preventDefault()
           const at = view.posAtCoords({ left: (event as DragEvent).clientX, top: (event as DragEvent).clientY })
           const $pos = at ? view.state.doc.resolve(at.pos) : null
-          insertImageFiles(editorRef.current!, files, $pos && $pos.depth > 0 ? $pos.after(1) : undefined)
+          void insertImageFiles(editorRef.current!, files, doc.homeChannel, $pos && $pos.depth > 0 ? $pos.after(1) : undefined)
           return true
         }
         if (dt.types.includes(DOC_DRAG) || files.length) {
@@ -288,9 +317,11 @@ export function PageEditor({ doc }: { doc: Doc }) {
         }
         return false
       },
-      handlePaste: (_view, event) => {
+      handlePaste: (view, event) => {
         const files = [...(event.clipboardData?.files ?? [])]
-        return files.length > 0 && insertImageFiles(editorRef.current!, files)
+        if (!hasImages(files) || !view.editable || !doc.homeChannel) return false
+        void insertImageFiles(editorRef.current!, files, doc.homeChannel)
+        return true
       },
     },
     onUpdate: ({ editor: e }) => {
@@ -314,7 +345,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
   }, [])
 
   // The block's one primary action is saving, and it is also a tool while a private block is open.
-  const offer = editable && agentsAllowed && offered["workspace.save-draft"]
+  const offer = privateBlock && agentsAllowed && offered["workspace.save-draft"]
   useEffect(() => {
     if (!offer || !editor) return
     const ac = new AbortController()
@@ -332,6 +363,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
         // Not as you typing: the agent's text is saved once, as its change, not again as your autosave.
         if (input.body !== undefined) editor.commands.setContent(input.body, { contentType: "markdown", emitUpdate: false })
         const out = await saveDraft({ title: input.title ?? titleRef.current?.value ?? doc.title, body: toMarkdown(editor) })
+        dropPending()
         notify({ message: "Saved as private", tone: "info" })
         return out
       }),
@@ -339,10 +371,48 @@ export function PageEditor({ doc }: { doc: Doc }) {
     return () => ac.abort()
   }, [offer, editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The toolbar's Image is also a tool: an agent gives the bytes, and the same handler makes the media block.
+  const offerImage = privateBlock && agentsAllowed && offered["workspace.add-image"]
+  useEffect(() => {
+    if (!offerImage || !editor || !doc.homeChannel) return
+    const channel = doc.homeChannel
+    const ac = new AbortController()
+    registerStepTool<{ name: string; type: string; data: string; alt?: string }, { id: string; slug: string; created: boolean; next: string }>({
+      name: "workspace.add-image",
+      title: "Image",
+      description: "Adds an image to the open private block. It becomes a private media block in the block's channel, or the one the vault already has for the same image, and the block embeds it at its end. Give the image as base64. Returns the media block's id and slug.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 200 },
+          type: { enum: IMAGE_TYPES },
+          data: { type: "string", minLength: 1, maxLength: Math.ceil(MAX_IMAGE_BYTES / 3) * 4 },
+          alt: { type: "string", maxLength: 1000 },
+        },
+        required: ["name", "type", "data"],
+        additionalProperties: false,
+      },
+      outputSchema: { type: "object", properties: { id: { type: "string" }, slug: { type: "string" }, created: { type: "boolean" }, next: { const: "workspace.save-draft" } } },
+      run: withAgent("Adding image", async input => {
+        let bytes: Uint8Array
+        try { bytes = Uint8Array.from(atob(input.data), c => c.charCodeAt(0)) }
+        catch { throw new DOMException("data is not base64", "DataError") }
+        const added = await addImage({ name: input.name, type: input.type, bytes, channel, alt: input.alt })
+        // As with Save draft: the agent's change is saved once, as its own, not again as your autosave.
+        const body = `${toMarkdown(editor).trimEnd()}\n\n![[${added.slug}]]\n`
+        editor.commands.setContent(body, { contentType: "markdown", emitUpdate: false })
+        await saveDraft({ body: toMarkdown(editor) })
+        dropPending()
+        return { ...added, next: "workspace.save-draft" }
+      }),
+    }, ac.signal).catch(console.error)
+    return () => ac.abort()
+  }, [offerImage, editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!editor) return null
   const updated = lastEdited(doc)
   const dragKind = (dt: DataTransfer) =>
-    [...dt.items].some(i => i.kind === "file" && i.type.startsWith("image/")) ? (editable ? "image" : null)
+    [...dt.items].some(i => i.kind === "file" && i.type.startsWith("image/")) ? (privateBlock ? "image" : null)
       : dt.types.includes(DOC_DRAG) || dt.types.includes("Files") ? "open" : null
 
   return (
@@ -354,7 +424,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
         setDropping(null)
         if (e.defaultPrevented) return
         e.preventDefault()
-        if (dragKind(e.dataTransfer) === "image") insertImageFiles(editor, [...e.dataTransfer.files])
+        if (dragKind(e.dataTransfer) === "image" && doc.homeChannel) void insertImageFiles(editor, [...e.dataTransfer.files], doc.homeChannel)
         else void openDropped(e.dataTransfer)
       }}>
       {/* Toolbar: the block's path, then inserts; history, comments, you and sharing on the right. */}
@@ -365,7 +435,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
             <ToolButton label="Forward (⌘])" icon={ArrowRightIcon} disabled={!canGo(1)} onClick={() => go(1)} />
           </div>
           <PathPill doc={doc} markdown={() => toMarkdown(editor)} onPickFile={() => fileInput.current?.click()} />
-          {editable && (
+          {privateBlock && (
             <div className={pill}>
               <ToolButton label="Text" icon={TypeIcon} onClick={() => insertText(editor)} />
               <ToolButton label="Image" icon={ImageIcon} onClick={() => insertImage(editor)} />
@@ -380,6 +450,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
               </Popover>
             </div>
           )}
+          {cortexPart && <CortexActions doc={doc} />}
           {!editable && (
             <span className="flex min-w-0 items-center gap-1.5 ps-1 text-small whitespace-nowrap text-muted-foreground"
               title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}>
@@ -393,6 +464,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
           {isBlock(doc) && (
             <div className={pill}>
               <ConnectionsButton doc={doc} editable={editable} variant="toolbar" side="bottom" />
+              <ObserveButton doc={doc} className={pillButton} />
             </div>
           )}
           <div className={pill}>
@@ -412,13 +484,14 @@ export function PageEditor({ doc }: { doc: Doc }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">
           {doc.icon && (
-            <button type="button" aria-label="Change icon" disabled={!editable} onClick={() => setIconOpen(true)}
+            <button type="button" aria-label="Change icon" disabled={!privateBlock} onClick={() => setIconOpen(true)}
               className="mb-3 -ms-1 rounded-md p-1 text-[44px] leading-none transition-transform duration-(--ohm-duration-press) ease-(--ohm-ease-out) animate-in fade-in-0 zoom-in-90 hover:bg-muted active:scale-95">
               {doc.icon}
             </button>
           )}
-          <div className="group/title relative">
-            {editable && (
+          {/* An observation has no title of its own: its first line is its title, so it is shown once, in the text. */}
+          {!(doc.kind === "observation" && observationTitle(doc.body) === doc.title) && <div className="group/title relative">
+            {privateBlock && (
               <Popover open={iconOpen} onOpenChange={setIconOpen}>
                 <PopoverTrigger render={
                   <button type="button" aria-label={doc.icon ? "Change icon" : "Add icon"}
@@ -432,7 +505,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                 </PopoverContent>
               </Popover>
             )}
-            <textarea ref={titleRef} rows={1} value={title} readOnly={!editable} placeholder="Untitled block" aria-label="Title"
+            <textarea ref={titleRef} rows={1} value={title} readOnly={!privateBlock} placeholder="Untitled block" aria-label="Title"
               onChange={e => {
                 const next = e.target.value
                 setTitleDraft(next)
@@ -448,7 +521,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                 }
               }}
               className="block w-full resize-none overflow-hidden bg-transparent text-h2 font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60" />
-          </div>
+          </div>}
 
           <div ref={setCanvas} className="relative mt-6">
             {editable && (
@@ -483,11 +556,11 @@ export function PageEditor({ doc }: { doc: Doc }) {
       )}
 
       <input ref={imageInput} type="file" accept="image/*" multiple hidden
-        onChange={e => { insertImageFiles(editor, [...(e.target.files ?? [])]); e.target.value = "" }} />
+        onChange={e => { if (doc.homeChannel) void insertImageFiles(editor, [...(e.target.files ?? [])], doc.homeChannel); e.target.value = "" }} />
       <input ref={fileInput} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden
         onChange={async e => { const f = e.target.files?.[0]; if (f) void report(openFile(f.name, await f.text())); e.target.value = "" }} />
 
-      {editable && <SelectionToolbar editor={editor} docId={doc.id} />}
+      {privateBlock && <SelectionToolbar editor={editor} docId={doc.id} />}
       <SlashMenu />
     </div>
   )

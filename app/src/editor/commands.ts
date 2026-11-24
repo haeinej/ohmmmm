@@ -7,6 +7,7 @@ import {
   TypeIcon, VideoIcon,
 } from "lucide-react"
 import { notify } from "@/components/ui/notice"
+import { addImage } from "@/workspace/store"
 
 export type BlockType = { id: string; label: string; icon: LucideIcon; shortcut?: string; isActive: (e: Editor) => boolean; run: (e: Editor) => void }
 
@@ -42,12 +43,27 @@ export const insertImage = (e: Editor, range?: Range) => {
   if (range) at(e, range).run()
   window.dispatchEvent(new CustomEvent("ohm:pick-image"))
 }
-/** Puts image files into the editor at a position, or after the current block. */
-export function insertImageFiles(e: Editor, files: File[], pos?: number) {
-  const images = files.filter(f => f.type.startsWith("image/"))
-  if (!images.length) return false
-  const nodes = images.map(f => ({ type: "image", attrs: { src: URL.createObjectURL(f), alt: f.name.replace(/\.[^.]+$/, "") } }))
-  e.chain().focus().insertContentAt(pos ?? afterBlock(e), nodes).run()
+/** Whether any of these files is an image the editor takes. */
+export const hasImages = (files: File[]) => files.some(f => f.type.startsWith("image/"))
+/**
+ * Puts image files into the editor at a position, or after the current block. Each becomes a media
+ * block of its own in `channel` (or the one the vault already has for the same bytes), and the editor
+ * embeds it, `![[slug]]`. Nothing here gives the block a browser address (vault/plans/media.md).
+ */
+export async function insertImageFiles(e: Editor, files: File[], channel: string, pos?: number) {
+  const added: Awaited<ReturnType<typeof addImage>>[] = []
+  for (const f of files.filter(f => f.type.startsWith("image/"))) {
+    try {
+      added.push(await addImage({ name: f.name, type: f.type, bytes: new Uint8Array(await f.arrayBuffer()), channel }))
+    } catch (error) {
+      notify({ message: error instanceof Error ? error.message : `“${f.name}” could not be added` })
+    }
+  }
+  if (!added.length || e.isDestroyed) return false
+  const at = Math.min(pos ?? afterBlock(e), e.state.doc.content.size)
+  e.chain().focus().insertContentAt(at, added.map(each => ({ type: "embed", attrs: { src: each.slug } }))).run()
+  const known = added.filter(each => !each.created)
+  if (known.length) notify({ message: known.length === 1 ? "That image is already in your vault, so this shows the same media block" : `${known.length} of these images are already in your vault, so this shows their media blocks`, tone: "info" })
   return true
 }
 export const insertTable = (e: Editor, range?: Range) => {
