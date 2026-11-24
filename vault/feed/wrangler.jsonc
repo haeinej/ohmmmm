@@ -9,7 +9,8 @@
     { "pattern": "example.com/notes/*", "zone_name": "example.com" },
     { "pattern": "example.com/notes.json*", "zone_name": "example.com" },
     { "pattern": "example.com/posts", "zone_name": "example.com" },
-    { "pattern": "example.com/posts/*", "zone_name": "example.com" }
+    { "pattern": "example.com/posts/*", "zone_name": "example.com" },
+    { "pattern": "example.com/.well-known/site.standard.publication", "zone_name": "example.com" }
   ],
   "assets": {
     "directory": "../site",

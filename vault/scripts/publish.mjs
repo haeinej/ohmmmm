@@ -211,7 +211,7 @@ async function publish(folder) {
   const hasOwnStore = visibility !== 'public' || (config.kv_namespaces ?? []).some(space => space.binding === 'NOTES' && space.id);
   let token;
   const vault = createVault({ stores: {
-    public: pdsStore({ did, origin, collection, token: async () => (token ??= await signIn(origin, did)) }),
+    public: pdsStore({ did, origin, collection, site, token: async () => (token ??= await signIn(origin, did)) }),
     ...ownStores(hasOwnStore ? wranglerKv(configFile) : memoryKv()),
   } });
   const files = new Map();

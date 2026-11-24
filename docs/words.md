@@ -9,7 +9,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 
 ## In the vault
 
-- **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post** (`com.ohmmmm.post`).
+- **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post**: a standard.site document (`site.standard.document`) in the member's repository, with the post itself inside as `com.ohmmmm.post` content. The member's website is its **publication** (`site.standard.publication`).
 - **Channel:** an ordered collection of blocks; a block can be in many. Named by its path, such as `essays` or `notes/reading`.
 - **Entity**, **source:** a person, place or thing a block is about; where a block came from.
 - **Connection:** a link the content shows: a channel contains a block, a block links to, embeds or mentions something, a block is from a source. Cortex calls the same thing **evidence** when it reads it; the vault draws it, a model never does.
