@@ -80,9 +80,9 @@ test('the agenda counts what waits for the member, from what the service may rea
   const id = () => newPostId(Date.parse('2026-11-23T00:00:00Z') + made++, 5);
   const now = new Date('2026-11-23T00:00:00Z');
   const block = (path, more) => ({ id: id(), path, text: `---\nkind: text\nvisibility: friends\n${more}---\n\nx\n` });
-  await blocks.write(me, block('inbox/old.md', 'by: agent:helper\nstatus: proposed\ncreated: 2026-11-01\n'));
-  await blocks.write(me, block('inbox/new.md', 'by: agent:helper\nstatus: proposed\ncreated: 2026-11-22\n'));
+  // A block an agent wrote is not counted: there is no inbox, so nothing waits to be kept.
+  await blocks.write(me, block('notes/old.md', 'by: agent:helper\nstatus: proposed\ncreated: 2026-11-01\n'));
   await blocks.write(me, { id: id(), path: 'photographs/seoul/street.md', text: '---\nkind: media\nvisibility: friends\norigin: ~/site/photo archive/Seoul/street.jpg\n---\n' });
   await postStore(db).write(me, { id: id(), slug: 'why', label: 'other', sublabel: '', visibility: 'public', title: 'Why', body: 'Words.', properties: {} });
-  assert.deepEqual(await channels.agenda(me, { now }), { unlabelled: 1, proposed: 2, waiting: 1, mediaWithoutAlt: 1, counted: 'public and friends-only' });
+  assert.deepEqual(await channels.agenda(me), { unlabelled: 1, mediaWithoutAlt: 1, counted: 'public and friends-only' });
 });

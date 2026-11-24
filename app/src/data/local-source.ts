@@ -22,7 +22,6 @@ export const localSource: HomeSource = {
   readShared: unavailable,
   publishPlan: unavailable,
   channels: { list: unavailable, read: unavailable, save: unavailable, move: unavailable, remove: unavailable },
-  inbox: { keep: unavailable, decline: unavailable },
   cortex: {
     list: unavailable, read: unavailable, save: unavailable, saveMany: unavailable, remove: unavailable,
     history: unavailable, readVersion: unavailable, journal: unavailable,

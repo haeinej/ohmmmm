@@ -45,7 +45,6 @@ export const REFUSALS = {
   PathTaken: [409, 'Another block in the friends layer, or another channel, is already at that path'],
   NotEmpty: [409, 'A block or post is filed in the channel, or a channel is inside it. Move them first'],
   HasPosts: [409, 'Published posts are filed in the channel. Their addresses come from their label, which changes through Publish'],
-  NotProposed: [409, 'The block is not waiting in the inbox as an agent\'s proposal'],
   OlderKey: [409, 'The private block is sealed under an older master key than the member is rotating, or rotated, to'],
   NoRotation: [409, 'No rotation to that generation is under way'],
   RotationAhead: [409, 'The member already rotated to a later master key than the one asked for'],

@@ -3,8 +3,8 @@ import test from "node:test"
 import { newNodeId } from "../../vault/vault/node.mjs"
 import { createServiceSource, type ServiceOptions } from "../src/data/service-source"
 import { CORTEX_CONTEXT, mediaName, type BlockRef } from "../src/data/source"
-import { blocks, byId, channelByPath, homeStatus, inbox } from "../src/data/workspace-data"
-import { createChannel, declineProposal, deleteChannel, keepProposal, setSource, setVisibility } from "../src/workspace/store"
+import { blocks, byId, channelByPath, homeStatus } from "../src/data/workspace-data"
+import { createChannel, deleteChannel, setSource, setVisibility } from "../src/workspace/store"
 import { createFixtureSource, fixtureIds } from "./fixtures/fixture-source"
 
 const did = "did:web:member.example.test"
@@ -52,47 +52,10 @@ test("channels are read, saved, moved and removed as _channel.md files with thei
   ])
 })
 
-test("readable proposals are kept and declined at the service, sealed ones on the device", async () => {
-  const id = newNodeId()
-  const { calls, options } = mockService(({ method }) => {
-    if (method === "vault.keepProposed") return Response.json({ id, channel: "reading", version: "k1" })
-    if (method === "vault.declineProposed") return Response.json({ id, removed: true })
-    if (method === "vault.putPrivateBlock") return Response.json({ version: "p2" })
-    if (method === "vault.deletePrivateBlock") return Response.json({ removed: true })
-    throw new Error(`Unexpected method ${method}`)
-  })
-  const sealedId = "fixture-opaque-proposal"
-  const proposal = { path: "inbox/alder.md", text: "---\nkind: text\nstatus: proposed\nby: agent:claude-code\n---\n\nAlder." }
-  let saved: unknown
-  const privateSession: ServiceOptions<string, string>["privateSession"] = {
-    unlocked: () => ({ did, master: "keyring" }),
-    keys: {
-      async sealFile(_master, _did, _id, plain) { saved = JSON.parse(new TextDecoder().decode(plain)); return "sealed" },
-      async openFile() { return new TextEncoder().encode(JSON.stringify(proposal)) },
-      vaultPrivateFiles: ({ fetch, baseUrl }) => ({
-        list: async () => [],
-        get: async () => ({ id: sealedId, sealed: "sealed", version: "p1" }),
-        replace: async ({ id: key, sealed, replaces }) => (await fetch(new URL("xrpc/com.ohmmmm.vault.putPrivateBlock", baseUrl), {
-          method: "POST", body: JSON.stringify({ block: { id: key, ciphertext: sealed }, replaces }),
-        })).json(),
-      }),
-    },
-  }
-  const source = createServiceSource({ ...options, privateSession })
-  const readable: BlockRef = { id, layer: "friends", store: "block" }
-  assert.deepEqual(await source.inbox.keep(readable, "reading", "v1"), { ref: readable, version: "k1" })
-  await source.inbox.decline(readable, "v2")
-  const sealed: BlockRef = { id: sealedId, layer: "private", store: "sealed" }
-  assert.equal((await source.inbox.keep(sealed, "reading", "p1")).version, "p2")
-  assert.deepEqual(saved, { path: "reading/alder.md", text: "---\nkind: text\nby: agent:claude-code\n---\n\nAlder." })
-  await assert.rejects(source.inbox.keep(sealed, "reading", "stale"), { code: "Changed" })
-  await source.inbox.decline(sealed, "p1")
-  assert.deepEqual(calls.map(call => [call.method, call.body]), [
-    ["vault.keepProposed", { id, channel: "reading", replaces: "v1" }],
-    ["vault.declineProposed", { id, replaces: "v2" }],
-    ["vault.putPrivateBlock", { block: { id: sealedId, ciphertext: "sealed" }, replaces: "p1" }],
-    ["vault.deletePrivateBlock", { id: sealedId, replaces: "p1" }],
-  ])
+test("the service source has no inbox: no keep or decline requests", () => {
+  const { options } = mockService(({ method }) => { throw new Error(`Unexpected method ${method}`) })
+  const source = createServiceSource(options) as unknown as Record<string, unknown>
+  assert.equal(source.inbox, undefined)
 })
 
 test("the cortex refuses until the keys can seal under its own context, then seals every file and journal entry under it", async () => {
@@ -134,7 +97,7 @@ test("media bytes go to the cache raw under their content address; the agenda is
     if (method === "media.putMedia") return Response.json({ name, size: bytes.byteLength })
     if (method === "media.hasMedia") return Response.json({ present: [name] })
     if (method === "media.getRendition") return new Response("smaller", { headers: { "Content-Type": "image/webp" } })
-    if (method === "vault.getAgenda") return Response.json({ unlabelled: 2, proposed: 1, waiting: 0, mediaWithoutAlt: 3, counted: "public and friends-only" })
+    if (method === "vault.getAgenda") return Response.json({ unlabelled: 2, mediaWithoutAlt: 3, counted: "public and friends-only" })
     throw new Error(`Unexpected method ${method}`)
   })
   const source = createServiceSource(options)
@@ -146,7 +109,7 @@ test("media bytes go to the cache raw under their content address; the agenda is
   assert.deepEqual(calls[2].query, { name, width: "480" })
 })
 
-test("signed out shows nothing of anyone's home; the inbox keeps and declines through the source", async () => {
+test("signed out shows nothing of anyone's home; an agent's block is an ordinary block, private and marked as the agent's", async () => {
   await setSource(null)
   assert.equal(homeStatus(), "signed-out")
   assert.equal(blocks.length, 0)
@@ -155,32 +118,15 @@ test("signed out shows nothing of anyone's home; the inbox keeps and declines th
   await setSource(fixture)
   try {
     assert.equal(homeStatus(), "ready")
-    assert.deepEqual(inbox.map(item => item.id), [fixtureIds.proposal])
-    assert.equal(blocks.some(doc => doc.id === fixtureIds.proposal), false)
-    await assert.rejects(keepProposal(fixtureIds.proposal, "inbox"), { name: "DataError" })
-    await keepProposal(fixtureIds.proposal, "reading")
-    assert.equal(byId(fixtureIds.proposal)?.homeChannel, "reading")
-    assert.equal(byId(fixtureIds.proposal)?.status, undefined)
-    assert.deepEqual(inbox, [])
-    await assert.rejects(declineProposal(fixtureIds.proposal), { name: "NotFoundError" })
+    const agents = byId(fixtureIds.byAgent)
+    assert.equal(blocks.some(doc => doc.id === fixtureIds.byAgent), true)
+    assert.deepEqual([agents?.homeChannel, agents?.by, agents?.visibility, agents?.status], ["reading", "agent:claude-code", "private", undefined])
     // Public is reached only through Publish.
     await assert.rejects(setVisibility(fixtureIds.address, "public"), { name: "NotSupportedError" })
     const path = await createChannel()
     assert.ok(channelByPath(path)?.version)
     await deleteChannel(path)
     assert.equal(channelByPath(path), undefined)
-  } finally {
-    await setSource(null)
-  }
-})
-
-test("declining a proposal removes it at the source", async () => {
-  const fixture = createFixtureSource()
-  await setSource(fixture)
-  try {
-    await declineProposal(fixtureIds.proposal)
-    assert.deepEqual(inbox, [])
-    assert.equal(fixture.listBlocks().some(head => head.id === fixtureIds.proposal), false)
   } finally {
     await setSource(null)
   }
@@ -203,11 +149,11 @@ test("saving keeps every property the workspace doesn't edit, for blocks and cor
   assert.equal(changed.path, "observations/dusk.md")
 })
 
-test("ordering, moving channels and keeping proposals stay inside what the screen and the layers allow", async () => {
+test("ordering and moving channels stay inside what the screen and the layers allow", async () => {
   const fixture = createFixtureSource()
   await setSource(fixture)
   try {
-    const { moveBlock, keepProposal: keep } = await import("../src/workspace/store")
+    const { moveBlock } = await import("../src/workspace/store")
     // Only readable slugs go into a channel's readable order; a private block's place is not written there.
     const result = await moveBlock(fixtureIds.monday, "writing/journal", "writing/journal", { before: fixtureIds.garden })
     assert.equal(result.ordered, false)
@@ -216,9 +162,6 @@ test("ordering, moving channels and keeping proposals stay inside what the scree
     assert.match(order, /order:/)
     const privateSlugs = blocks.filter(doc => doc.visibility === "private").map(doc => doc.slug)
     for (const slug of privateSlugs) assert.ok(!order.includes(slug), slug)
-    // The tool takes only what the screen offers: an existing channel outside the inbox.
-    await assert.rejects(keep(fixtureIds.proposal, "inbox/later"), { name: "DataError" })
-    await assert.rejects(keep(fixtureIds.proposal, "nowhere"), { name: "DataError" })
   } finally {
     await setSource(null)
   }

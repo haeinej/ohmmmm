@@ -1,5 +1,5 @@
 // A HomeSource over synthetic data, for tests only. It keeps the service's rules that the workspace
-// leans on (versions, compare-and-set, channels as files, the inbox, the sealed cortex as files)
+// leans on (versions, compare-and-set, channels as files, the sealed cortex as files)
 // in memory. The app never imports it: its runtime source is the vault service.
 import { setProperty, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, readNode, readVault } from "../../../vault/vault/node.mjs"
@@ -7,7 +7,7 @@ import { docOf, fileOf } from "../../src/data/block-document"
 import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
-  emptyPlan, INBOX, mediaName, visibilityMove,
+  emptyPlan, mediaName, visibilityMove,
   type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type HomeFile, type HomeSource, type Layer, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
@@ -25,8 +25,8 @@ const versionOf = (value: unknown) => {
 const storeOf = (doc: Doc): BlockRef["store"] => doc.visibility === "private" ? "sealed" : doc.kind === "post" ? "post" : "block"
 
 export function createFixtureSource() {
-  const { blocks: vaultBlocks, cortex: cortexDocs, owner, entities, inbox, fixtureIds } = structuredClone({ ...fixtures })
-  const blocks = [...vaultBlocks, ...inbox]
+  const { blocks: vaultBlocks, cortex: cortexDocs, owner, entities, byAgent, fixtureIds } = structuredClone({ ...fixtures })
+  const blocks = [...vaultBlocks, ...byAgent]
   const channels = new Map<string, string>()
   const cortexFiles = new Map<string, HomeFile>(cortexDocs.map(doc => [doc.id, cortexFileOf(doc)]))
   const media = new Map<string, Uint8Array>()
@@ -44,7 +44,6 @@ export function createFixtureSource() {
   }
   for (const doc of blocks) for (const path of channelsOf(doc)) ensureChannel(path, doc.updated)
   for (const path of ["reading", "projects/someday"]) ensureChannel(path, "2026-11-18")
-  channels.set(INBOX, writeNoteFile({ properties: { kind: "inbox" } }))
 
   function find(ref: BlockRef, version?: string) {
     const doc = blocks.find(each => each.id === ref.id && each.visibility === ref.layer)
@@ -149,7 +148,6 @@ export function createFixtureSource() {
         return { version: channelHead(path).version }
       },
       async move(from: string, to: string, replaces: string | null) {
-        if (from === INBOX || to === INBOX) throw new DOMException("The inbox stays where it is", "DataError")
         if ((channels.has(from) ? channelHead(from).version : null) !== replaces) throw stale()
         if (channels.has(to)) throw new DOMException(`There is already a channel at ${to}`, "InvalidStateError")
         const under = (path: string) => path === from || path.startsWith(`${from}/`)
@@ -173,21 +171,6 @@ export function createFixtureSource() {
           throw new DOMException("A block or channel is filed in it", "InvalidStateError")
         }
         channels.delete(path)
-      },
-    },
-    inbox: {
-      async keep(ref: BlockRef, channel: string, replaces: string) {
-        const doc = find(ref, replaces)
-        if (doc.status !== "proposed") throw new DOMException("This block is not waiting in the inbox", "InvalidStateError")
-        ensureChannel(channel, "2026-11-23")
-        doc.homeChannel = channel
-        delete doc.status
-        return { ref, version: versionOf(fileOf(doc)) }
-      },
-      async decline(ref: BlockRef, replaces: string) {
-        const doc = find(ref, replaces)
-        if (doc.status !== "proposed") throw new DOMException("This block is not waiting in the inbox", "InvalidStateError")
-        blocks.splice(blocks.indexOf(doc), 1)
       },
     },
     cortex: {
@@ -220,16 +203,13 @@ export function createFixtureSource() {
       rendition: mediaOf,
     },
     async agenda() {
-      const read = blocks.map(doc => fileOf(doc)).map(file => readNode(file.path, file.text)?.node)
       return {
         unlabelled: blocks.filter(doc => doc.homeChannel === "other").length,
-        proposed: read.filter(node => node && "status" in node && node.status === "proposed").length,
-        waiting: 0,
         mediaWithoutAlt: blocks.filter(doc => doc.kind === "media").length,
         counted: "public and friends-only",
       }
     },
-  } satisfies Omit<HomeSource<"sync">, "channels" | "inbox" | "cortex" | "media" | "agenda"> & Pick<HomeSource, "channels" | "inbox" | "cortex" | "media" | "agenda">
+  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "agenda">
   return Object.assign(source, { fixtureIds, owner })
 }
 

@@ -41,7 +41,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 ## Boundaries
 
 - **PDS boundary:** the member's own PDS (for example Cirrus on their Cloudflare account). It holds only public posts (`com.ohmmmm.post`) and their blobs, written only by the member when they publish.
-- **Personal boundary:** everything else: Friends blocks, sealed private blocks, the sealed cortex, the inbox, the media cache, and the folders a vault reads. Nothing crosses to the PDS except through Publish.
+- **Personal boundary:** everything else: Friends blocks, sealed private blocks, the sealed cortex, the media cache, and the folders a vault reads. Nothing crosses to the PDS except through Publish.
 - **Media record:** a block for a file that is kept where it is. The record saves its path and metadata (origin, hash, size, dimensions, kind, alt); the bytes sit in ohm's media cache, sealed when private, and can always be sent again.
 
 ## Keys (account app)

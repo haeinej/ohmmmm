@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { FolderGitIcon, InboxIcon } from "lucide-react"
-import { inbox } from "@/data/workspace-data"
+import { FolderGitIcon } from "lucide-react"
 import { NotificationCenter } from "./NotificationCenter"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Icon } from "@/components/ui/icon"
@@ -36,7 +35,6 @@ const RackIcon = ({ icon }: { icon: LucideIcon }) => <Icon icon={icon} />
 /** The rack: a column of icons on the page itself, apart from the panels. */
 export function Rack() {
   const { side, searchOpen } = useWorkspace()
-  const unread = inbox.length
   return (
     <nav aria-label="Workspace" className="flex w-[68px] shrink-0 flex-col items-center gap-1 py-3">
       {/* The ohm dot, at the size of an icon, in a slot the size of a button. */}
@@ -47,12 +45,6 @@ export function Rack() {
       <RackButton label="New block" shortcut="⌘N" onClick={() => void report(createDraft())}><RackIcon icon={icons.write} /></RackButton>
       <div className="h-4" />
       <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
-      <RackButton label={unread ? `Inbox, ${unread} proposed` : "Inbox"} active={side === "inbox"} onClick={() => toggleSide("inbox")}>
-        <span className="relative flex">
-          <RackIcon icon={InboxIcon} />
-          {unread > 0 && <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary ring-2 ring-sidebar dark:bg-foreground dark:ring-background" />}
-        </span>
-      </RackButton>
       <div className="flex-1" />
       <NotificationCenter />
       <RackButton label="You" active={side === "profile"} onClick={() => (side === "profile" ? toggleSide("profile") : openSettings())}>

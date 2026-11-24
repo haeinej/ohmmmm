@@ -1,7 +1,7 @@
-// Channels: the member's channel files, and the inbox where agents' captures wait to be kept.
+// Channels: the member's channel files.
 export default {
   name: 'Channels',
-  about: 'Channels as files: each one\'s `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. The inbox is a channel too: a block an agent proposed waits there until the member keeps it in a channel or declines it. Private channels are sealed and kept with the private layer, never here.',
+  about: 'Channels as files: each one\'s `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here.',
   requests: {
     'com.ohmmmm.vault.listChannels': {
       verb: 'GET', asks: 'member', changes: false,
@@ -46,20 +46,6 @@ export default {
         const { from, to, replaces = null } = await body();
         return channels.move(did, from, to, { replaces });
       },
-    },
-    'com.ohmmmm.vault.keepProposed': {
-      verb: 'POST', asks: 'member', changes: true,
-      about: 'Keeps a block an agent proposed: moves it from the inbox to a channel and clears its `status: proposed`. Who proposed it (`by`) stays on it.',
-      takes: { id: 'the block\'s ID', channel: 'the channel to keep it in', replaces: 'the version being kept' },
-      gives: '`id`, `channel`, `version`',
-      run: async ({ body, channels, did }) => channels.keep(did, await body()),
-    },
-    'com.ohmmmm.vault.declineProposed': {
-      verb: 'POST', asks: 'member', changes: true,
-      about: 'Declines a block an agent proposed, and removes it from the inbox.',
-      takes: { id: 'the block\'s ID', replaces: 'the version being declined' },
-      gives: '`id`, `removed`',
-      run: async ({ body, channels, did }) => channels.decline(did, await body()),
     },
   },
 };

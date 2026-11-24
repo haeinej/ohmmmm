@@ -16,7 +16,7 @@ const fixtureId = (index: number) => newNodeId(Date.UTC(2026, 7, 1) + index, 0)
 export const fixtureIds = {
   garden: fixtureId(1), slow: fixtureId(2), address: fixtureId(3), monday: fixtureId(4), tokyo: fixtureId(5), tokyoTwo: fixtureId(6),
   scans: fixtureId(7), workspace: fixtureId(8), reading: fixtureId(9), sketches: fixtureId(10), dusk: fixtureId(11), paragraphs: fixtureId(12),
-  privateFirst: fixtureId(13), captions: fixtureId(14), renameJournal: fixtureId(15), suggestChannels: fixtureId(16), search: fixtureId(17), slowness: fixtureId(18), proposal: fixtureId(19),
+  privateFirst: fixtureId(13), captions: fixtureId(14), renameJournal: fixtureId(15), suggestChannels: fixtureId(16), search: fixtureId(17), slowness: fixtureId(18), byAgent: fixtureId(19),
 }
 
 export const blocks: Doc[] = [
@@ -96,9 +96,9 @@ export const cortex: Doc[] = [
     body: "# Slowness ties the essays to the photos\n\nNoticed, not said. [[slow-software]] links to [[tokyo-walks]]; [[yanaka-dusk]] returns to the same street later; all three were collected into the slowness channel. The essays and the walks argue the same thing in two forms." },
 ]
 
-// An agent's capture waiting in the inbox for the member to keep or decline.
-export const inbox: Doc[] = [
-  { id: fixtureIds.proposal, kind: "link", title: "A pattern language, online", slug: "pattern-language-online", homeChannel: "inbox",
-    status: "proposed", by: "agent:claude-code", visibility: "friends", updated: "2026-11-20",
+// A block an agent brought into a channel it was granted. It says who made it and starts private.
+export const byAgent: Doc[] = [
+  { id: fixtureIds.byAgent, kind: "link", title: "A pattern language, online", slug: "pattern-language-online", homeChannel: "reading",
+    by: "agent:claude-code", visibility: "private", updated: "2026-11-20",
     body: "# A pattern language, online\n\nhttps://example.com/pattern-language\n\nFound while you were reading; it is on your [[reading-list]]." },
 ]

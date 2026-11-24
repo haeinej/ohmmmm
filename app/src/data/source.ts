@@ -42,7 +42,7 @@ export type CortexChange = { id: string; file: HomeFile; replaces: string | null
 /** A cortex journal entry, opened on this device: who changed what, and why. */
 export type CortexEntry = { seq: number; created: string; entry: Record<string, unknown> }
 /** What waits for the member and their curator, counted by the service from the readable layers. */
-export type Agenda = { unlabelled: number; proposed: number; waiting: number; mediaWithoutAlt: number; counted: string }
+export type Agenda = { unlabelled: number; mediaWithoutAlt: number; counted: string }
 export type MediaWidth = 160 | 480 | 960 | 1600
 export type VaultContents = ReturnType<typeof readVault>
 export type VaultEvidence = ReturnType<typeof evidence>
@@ -64,13 +64,6 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
     /** Moves the channel, every channel inside it and every readable block filed in it, all or none. */
     move(from: string, to: string, replaces: string | null): Promise<ChannelMove>
     remove(path: string, replaces: string): Promise<void>
-  }
-  /** The inbox is the channel `inbox`: blocks agents proposed (`status: proposed`) wait there. */
-  inbox: {
-    /** Files a proposed block in a channel and clears its mark. Returns the kept block's new place and version. */
-    keep(ref: BlockRef, channel: string, replaces: string): Promise<{ ref: BlockRef; version: string }>
-    /** Removes a proposed block. */
-    decline(ref: BlockRef, replaces: string): Promise<void>
   }
   /** The sealed cortex: opened and sealed on this device, under `ohm-vault/cortex/v1`. */
   cortex: {
@@ -106,7 +99,6 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
 
 type Result<Mode, Value> = Mode extends "sync" ? Value : Promise<Value>
 
-export const INBOX = "inbox"
 export const CORTEX_CONTEXT = "ohm-vault/cortex/v1"
 
 /** sha256-<hex>: the content address the media cache names readable bytes by. */

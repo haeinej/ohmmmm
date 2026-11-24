@@ -7,7 +7,6 @@ import { cn } from "@/lib/cn"
 import { SettingsView } from "./Settings"
 import { surface } from "./Surface"
 import { openDropped, opensOnDrop } from "./drop"
-import { ProposalView } from "./Inbox"
 import { closeSettings, createDraft, report, setAudience, setSearchOpen, useWorkspace } from "./store"
 
 /** Signed out: the home lives on the vault service, so the way in is ohm's sign-in. */
@@ -25,7 +24,7 @@ export function SignIn() {
   )
 }
 
-/** Where things open: a block in the editor, an inbox item, or settings. A card of its own, apart from the rack. */
+/** Where things open: a block in the editor, or settings. A card of its own, apart from the rack. */
 export function MainPanel() {
   const { view, agent, audience, restored } = useWorkspace()
   const doc = view.kind === "doc" ? byId(view.id) : undefined
@@ -67,8 +66,6 @@ export function MainPanel() {
           </header>
           <SettingsView tab={view.tab} />
         </>
-      ) : view.kind === "inbox" ? (
-        <ProposalView id={view.id} />
       ) : (
         <Empty className="flex-1" onDragOver={e => { if (opensOnDrop(e.dataTransfer)) e.preventDefault() }}
           onDrop={e => { e.preventDefault(); void openDropped(e.dataTransfer) }}>

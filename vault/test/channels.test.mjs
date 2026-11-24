@@ -33,7 +33,6 @@ test('a channel is kept as its file, with compare-and-set and a change list', as
   refused({ path: '_drafts', text: CHANNEL });
   refused({ path: 'walks', text: '---\nvisibility: private\n---\n\nx' });
   refused({ path: 'walks', text: '---\nkind: shelf\n---\n\nx' });
-  refused({ path: 'inbox', text: '---\nkind: collection\n---\n\nx' });
   refused({ path: 'walks', text: CHANNEL, extra: 1 });
 });
 
@@ -83,23 +82,14 @@ test('a channel is removed only when empty, and moves with everything filed in i
   await assert.rejects(store.move(me, 'essays', 'writing', { replaces: essays.version }), refusal('HasPosts'));
 });
 
-test('an agent\'s proposal waits in the inbox until it is kept or declined', async () => {
+test('there is no inbox: inbox is an ordinary channel path, and moves like any other', async () => {
   const db = await testDatabase();
-  const store = channelStore(db), blocks = blockStore(db);
-  const proposal = block('inbox/idea.md', 'by: agent:helper\nstatus: proposed\n');
-  const first = await blocks.write(me, proposal);
-  const kept = await store.keep(me, { id: proposal.id, channel: 'walks', replaces: first.version });
-  const now = (await blocks.read(me, proposal.id)).block;
-  assert.equal(now.path, 'walks/idea.md');
-  assert.doesNotMatch(now.text, /status:/);
-  assert.match(now.text, /by: agent:helper/);
-  assert.equal(kept.channel, 'walks');
-  await assert.rejects(store.keep(me, { id: proposal.id, channel: 'walks', replaces: kept.version }), refusal('NotProposed'));
-
-  const other = block('inbox/other.md', 'by: agent:helper\nstatus: proposed\n');
-  const saved = await blocks.write(me, other);
-  await assert.rejects(store.keep(me, { id: other.id, channel: 'inbox', replaces: saved.version }), refusal('InvalidChannel'));
-  assert.deepEqual(await store.decline(me, { id: other.id, replaces: saved.version }), { id: other.id, removed: true });
+  const store = channelStore(db);
+  assert.equal(store.keep, undefined);
+  assert.equal(store.decline, undefined);
+  const saved = await store.write(me, { path: 'inbox', text: '---\ntitle: Things\n---\n' });
+  const moved = await store.move(me, 'inbox', 'things', { replaces: saved.version });
+  assert.deepEqual([moved.from, moved.to], ['inbox', 'things']);
 });
 
 test('channel requests go through the service for the member only', async () => {

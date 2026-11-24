@@ -50,8 +50,6 @@ async function answerOf<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
-const statusOf = (file: HomeFile) => (blockOf(file) as { status?: string } | undefined)?.status
-
 /** A new opaque ID for a sealed file: a private block or a cortex file. */
 export const newOpaqueId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
   .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
@@ -354,29 +352,6 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       },
       move: (from, to, replaces) => vaultAsk<ChannelMove>("moveChannel", { body: { from, to, replaces } }),
       async remove(path, replaces) { await vaultAsk("deleteChannel", { body: { path, replaces } }) },
-    },
-    inbox: {
-      async keep(ref, channel, replaces) {
-        checkRef(ref)
-        if (ref.store !== "sealed") {
-          const kept = await vaultAsk<{ id: string; version: string }>("keepProposed", { body: { id: ref.id, channel, replaces } })
-          return { ref, version: kept.version }
-        }
-        // A private capture is kept on this device: the same file, filed in the channel, unmarked.
-        const file = await source.readBlock(ref)
-        if (file.version !== replaces) throw new HomeRefusal("Changed", "The proposal changed. Review it again before keeping it.")
-        if (statusOf(file) !== "proposed") throw new HomeRefusal("NotProposed", "This block is not waiting in the inbox.")
-        const name = file.path.split("/").at(-1)!
-        const kept = { path: `${channel}/${name}`, text: setProperty(file.text, "status", undefined) }
-        return { ref, ...await source.saveBlock(ref, kept, replaces) }
-      },
-      async decline(ref, replaces) {
-        checkRef(ref)
-        if (ref.store !== "sealed") { await vaultAsk("declineProposed", { body: { id: ref.id, replaces } }); return }
-        const file = await source.readBlock(ref)
-        if (statusOf(file) !== "proposed") throw new HomeRefusal("NotProposed", "This block is not waiting in the inbox.")
-        await source.deleteBlock(ref, replaces)
-      },
     },
     cortex: {
       async list() {

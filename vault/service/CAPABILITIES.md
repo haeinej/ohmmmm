@@ -13,7 +13,7 @@ This page is the whole list. It is written from the same tables the service and 
 | **Posts** | Read and change the posts in a vault, one at a time. Every change names the version it replaces, so two edits never overwrite each other unseen. | `listPosts`, `getPost`, `putPost`, `deletePost` | [posts.mjs](src/capabilities/posts.mjs) |
 | **Friends** | The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here. | `listBlocks`, `getBlock`, `putBlock`, `deleteBlock`, `listFriends`, `addFriend`, `removeFriend`, `listShared`, `getShared` | [friends.mjs](src/capabilities/friends.mjs) |
 | **Private** | The private layer: private blocks, kept only as ciphertext sealed on the member's devices. The service stores and syncs them and cannot read them; no friend or agent can be given their contents by the service. Each is `{ id, ciphertext, version }`, with an opaque ID and compare-and-swap on the version. Several change together or not at all; every version is kept for restoring; the journal is sealed too; and a key rotation re-wraps every kept version and journal entry. | `listPrivateBlocks`, `getPrivateBlock`, `putPrivateBlock`, `putPrivateBlocks`, `listPrivateVersions`, `getPrivateVersion`, `listPrivateJournal`, `beginPrivateRotation`, `getPrivateRotation`, `listPrivateBelow`, `rewrapPrivate`, `finishPrivateRotation`, `deletePrivateBlock` | [private.mjs](src/capabilities/private.mjs) |
-| **Channels** | Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. The inbox is a channel too: a block an agent proposed waits there until the member keeps it in a channel or declines it. Private channels are sealed and kept with the private layer, never here. | `listChannels`, `getChannel`, `putChannel`, `deleteChannel`, `moveChannel`, `keepProposed`, `declineProposed` | [channels.mjs](src/capabilities/channels.mjs) |
+| **Channels** | Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here. | `listChannels`, `getChannel`, `putChannel`, `deleteChannel`, `moveChannel` | [channels.mjs](src/capabilities/channels.mjs) |
 | **Cortex** | The cortex: what the member's agents know about them and can do, as files sealed on the member's devices. The service keeps and syncs them and cannot read them. Each is `{ id, ciphertext, version }` with an opaque ID; several change together or not at all; every version is kept; the journal of who changed what, and why, is sealed too. Agents reach the cortex through the member's device, never through the service. | `listFiles`, `getFile`, `putFile`, `putFiles`, `deleteFile`, `listVersions`, `getVersion`, `listJournal`, `listBelow`, `rewrap` | [cortex.mjs](src/capabilities/cortex.mjs) |
 | **Media** | The media cache. A picture or file in a vault is a block that saves where the file is and what it is; its bytes are sent here once, so the cockpit can show them, and can always be sent again. Public and friends-only media is sent readable under its content address and can be shown smaller; private media is sealed on the member's device first and never rendered here. Nothing here is published: publishing sends a copy to the member's PDS. | `hasMedia`, `putMedia`, `getMedia`, `getRendition` | [media.mjs](src/capabilities/media.mjs) |
 | **Structure** | The shape of a vault: its labels, the sublabels inside them, and a line for each post. Enough to draw it or decide where something belongs, without reading any post in full. | `getTree`, `getAgenda` | [structure.mjs](src/capabilities/structure.mjs) |
@@ -343,7 +343,7 @@ Removes one private block. Its kept versions stay, so it can be restored.
 
 ## Channels
 
-Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. The inbox is a channel too: a block an agent proposed waits there until the member keeps it in a channel or declines it. Private channels are sealed and kept with the private layer, never here.
+Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here.
 
 ### `com.ohmmmm.vault.listChannels`
 
@@ -399,28 +399,6 @@ Moves a channel to another path, with every channel inside it and every friends-
 | Who may ask | The member |
 | Takes | `from`: the channel's path<br>`to`: its new path<br>`replaces`: the channel's version, or nothing for a folder with no `_channel.md` |
 | Gives | `from`, `to`, and how many `channels` and `blocks` moved |
-
-### `com.ohmmmm.vault.keepProposed`
-
-Keeps a block an agent proposed: moves it from the inbox to a channel and clears its `status: proposed`. Who proposed it (`by`) stays on it.
-
-| | |
-| --- | --- |
-| Reads or changes | Changes (`POST`) |
-| Who may ask | The member |
-| Takes | `id`: the block's ID<br>`channel`: the channel to keep it in<br>`replaces`: the version being kept |
-| Gives | `id`, `channel`, `version` |
-
-### `com.ohmmmm.vault.declineProposed`
-
-Declines a block an agent proposed, and removes it from the inbox.
-
-| | |
-| --- | --- |
-| Reads or changes | Changes (`POST`) |
-| Who may ask | The member |
-| Takes | `id`: the block's ID<br>`replaces`: the version being declined |
-| Gives | `id`, `removed` |
 
 ## Cortex
 
@@ -601,14 +579,14 @@ Labels, sublabels, and each post with who may see it, what kind of thing it is, 
 
 ### `com.ohmmmm.vault.getAgenda`
 
-What waits for the member and their curator, as counts: posts with no label of their own (`other`), agents' proposals in the inbox and those waiting more than a week, and media with no alt text. Counted from the public and friends-only layers only, without reading anything with a model; the private layer and the cortex are counted on the member's device.
+What waits for the member and their curator, as counts: posts with no label of their own (`other`) and media with no alt text. Counted from the public and friends-only layers only, without reading anything with a model; the private layer and the cortex are counted on the member's device.
 
 | | |
 | --- | --- |
 | Reads or changes | Reads only (`GET`) |
 | Who may ask | The member |
 | Takes | Nothing |
-| Gives | `unlabelled`, `proposed`, `waiting`, `mediaWithoutAlt`, and `counted`, the layers counted |
+| Gives | `unlabelled`, `mediaWithoutAlt`, and `counted`, the layers counted |
 
 ## Search
 
@@ -772,7 +750,6 @@ A refusal is JSON with an `error`, which is one of the names below, and a `messa
 | `PathTaken` | 409 | Another block in the friends layer, or another channel, is already at that path |
 | `NotEmpty` | 409 | A block or post is filed in the channel, or a channel is inside it. Move them first |
 | `HasPosts` | 409 | Published posts are filed in the channel. Their addresses come from their label, which changes through Publish |
-| `NotProposed` | 409 | The block is not waiting in the inbox as an agent's proposal |
 | `OlderKey` | 409 | The private block is sealed under an older master key than the member is rotating, or rotated, to |
 | `NoRotation` | 409 | No rotation to that generation is under way |
 | `RotationAhead` | 409 | The member already rotated to a later master key than the one asked for |
@@ -842,8 +819,6 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | `putChannel` | Channels | undefined |
 | `deleteChannel` | Channels | undefined |
 | `moveChannel` | Channels | undefined |
-| `keepProposed` | Channels | undefined |
-| `declineProposed` | Channels | undefined |
 | `listFiles` | Cortex | undefined |
 | `getFile` | Cortex | undefined |
 | `putFile` | Cortex | undefined |

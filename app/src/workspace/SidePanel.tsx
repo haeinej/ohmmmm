@@ -9,7 +9,7 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { FileTree, type FileTreeNode } from "@/components/ui/file-tree"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inbox, inOrder, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience, type Doc } from "@/data/workspace-data"
+import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inOrder, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience, type Doc } from "@/data/workspace-data"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/cn"
 import { DOC_DRAG } from "./drop"
@@ -24,8 +24,6 @@ import { VisibilityMarks } from "./VisibilityMarks"
 import { startChannel } from "./PageActions"
 import { SETTINGS_TABS } from "./settings-tabs"
 import { panelTitle, SidePanelFrame } from "./Surface"
-import { InboxPanel } from "./Inbox"
-import { INBOX } from "@/data/source"
 import {
   createDraft, kept, marks, me, moveBlock, moveChannel, open, openSettings, report, signOut, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
 } from "./store"
@@ -262,9 +260,8 @@ function RepoPanel() {
   const [showArchived, setShowArchived] = useState(false)
   const [rows, setRows] = useState<HTMLDivElement | null>(null)
   // Empty channels show to you, unfiltered; seen as someone else, a channel shows only what they can see in it.
-  // The inbox channel has its own panel; what waits in it is not filed yet.
   const vaultTree = useMemo(() => toTree("vault", vaultDocs, undefined, inChannels,
-    audience === "private" && !filtering ? channelRecords.map(c => c.path).filter(path => path !== INBOX) : []), [vaultDocs, audience, filtering, rev]) // eslint-disable-line react-hooks/exhaustive-deps
+    audience === "private" && !filtering ? channelRecords.map(c => c.path) : []), [vaultDocs, audience, filtering, rev]) // eslint-disable-line react-hooks/exhaustive-deps
   const showCortex = scope.cortex, showVault = scope.vault
   const treeRef = useRef<HTMLDivElement | null>(null)
   useTreeDragDrop(treeRef, [repoMode])
@@ -494,7 +491,6 @@ export function SidePanel() {
   const { side } = useWorkspace()
   if (side && homeStatus() !== "ready") return null
   if (side === "repo") return <RepoPanel />
-  if (side === "inbox") return <InboxPanel />
   if (side === "profile") return <ProfilePanel />
   return null
 }

@@ -6,7 +6,6 @@ import { docOf } from "./block-document"
 import { cortexDocOf } from "./cortex-document"
 import { createJournal, isJournalEntry, type JournalEntry } from "./journal"
 import type { Account, Agenda, BlockFile, BlockHead, BlockRef, CortexFile, HomeFile, HomeSource, Layer, VaultContents, VaultEvidence } from "./source"
-import { INBOX } from "./source"
 import { outgoing as describeOutgoing, type ChannelRecord, type Doc, type Outgoing, type Entity } from "./workspace-model"
 export * from "./workspace-model"
 
@@ -21,8 +20,6 @@ let selection = 0
 
 export let status: HomeStatus = "signed-out"
 export let blocks: Doc[] = []
-/** Blocks an agent proposed, waiting in the inbox channel. */
-export let inbox: Doc[] = []
 export let cortex: Doc[] = []
 export let channelRecords: ChannelRecord[] = []
 export let owner: Entity = defaultOwner
@@ -74,8 +71,7 @@ function project() {
     ...(channelFiles.has(channel.path) ? { version: channelFiles.get(channel.path)!.version } : {}),
   }))
   const docs = parsed.map(({ doc }) => doc)
-  inbox = docs.filter(doc => doc.status === "proposed")
-  blocks = docs.filter(doc => doc.status !== "proposed")
+  blocks = docs
   cortex = [...cortexFiles.values()].flatMap(file => cortexDocOf(file) ?? [])
   entities = vault.entities.map(entity => {
     const did = String(entity.properties.uri ?? "").replace(/^at:\/\//, "")
@@ -142,7 +138,7 @@ export async function selectSource(given: HomeSource | HomeSource<"sync"> | null
     project()
     const kept = entries.map(each => each.entry).filter(isJournalEntry) as JournalEntry[]
     const seen = new Set(carried.map(entry => entry.line.id))
-    journal = createJournal(() => [...blocks, ...inbox, ...cortex], [...kept.filter(entry => !seen.has(entry.line.id)), ...carried])
+    journal = createJournal(() => [...blocks, ...cortex], [...kept.filter(entry => !seen.has(entry.line.id)), ...carried])
     status = "ready"
     return true
   } catch (problem) {
@@ -186,11 +182,10 @@ export const blockVersion = (id: string) => {
   const found = held.get(id)
   return found && { ref: found.ref, version: found.version }
 }
-export const byId = (id: string) => blocks.find(doc => doc.id === id) ?? inbox.find(doc => doc.id === id) ?? cortex.find(doc => doc.id === id)
+export const byId = (id: string) => blocks.find(doc => doc.id === id) ?? cortex.find(doc => doc.id === id)
 export const bySlug = (slug: string) => blocks.find(doc => doc.slug === slug) ?? cortex.find(doc => doc.slug === slug)
 export const channelByPath = (path: string) => channelRecords.find(channel => channel.path === path)
 export const entityByHandle = (handle: string) => entities.find(person => person.handle === handle || person.did === handle)
-export const isInboxChannel = (path: string) => path === INBOX
 export function inOrder(path: string, docs: Doc[]) {
   const rank = new Map(vault.items(path).flatMap((node, index) => node.type === "block" ? [[node.slug, index] as const] : []))
   return [...docs].sort((a, b) => (rank.get(a.slug) ?? Infinity) - (rank.get(b.slug) ?? Infinity))

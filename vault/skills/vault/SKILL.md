@@ -22,7 +22,7 @@ The post is the same post at every visibility. Changing visibility marks it; it 
 ## The rules
 
 1. **Private reading is device-local.** Use the local tools in a vault the person selected. Never include private content in a post, message or commit unless the person approves the disclosure.
-2. **Capture new work locally.** `vault_capture` adds an HTTP(S) reference or an eligible configured-root file as a proposed block. `vault_save` edits existing public and friends-only posts.
+2. **Capture new work locally.** `vault_capture` adds an HTTP(S) reference or an eligible configured-root file as a block in a channel you were granted (`vault_where` lists them). It is marked as yours and starts private; only the person shows it to more people. `vault_save` edits existing public and friends-only posts.
 3. **Show the preview before the write.** `vault_set_visibility`, `vault_publish`, `vault_delete`, `vault_mirror`, `vault_save`, `vault_friends_save`, `vault_friends_delete` and `vault_friends_remove` use two calls when they change something. Show the answer and call with `confirm` only when the person agrees.
 4. **Read before you change.** `vault_read` gives a post's version, and `vault_save` needs it to change the post. If the save is refused because the post changed, read it again and redo the change on the new text; do not retry with the old text.
 5. **Use the person's own labels.** Look at `vault_tree` before filing a new post, and file it under a label they already use. Ask before inventing a new label.
@@ -65,7 +65,7 @@ A mirror copies each post as it was published. It does not file, and it does not
 | The person says | Do |
 | --- | --- |
 | "What have I written about X?" | Use `vault_search` and `vault_read` for shared posts, or `vault_local_search` and `vault_local_read` in the selected local vault |
-| "Save this address or file" | Use `vault_capture` and tell them where the proposed block landed |
+| "Save this address or file" | Use `vault_capture` into the channel you are working in, and tell them where the block landed |
 | "Change that post" | `vault_read`, then `vault_save` with the version and only the fields that change |
 | "File this under Y" | `vault_read`, then `vault_save` with the version and the new `label` or `sublabel` |
 | "Make it public" | `vault_set_visibility` to `public`: show what it answers, then confirm. Say that it is marked for everyone and not yet published |

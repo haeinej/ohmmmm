@@ -1,5 +1,4 @@
-// Channels: the member's channel files, kept readable on the vault service, and the inbox actions
-// that file a proposed block into one.
+// Channels: the member's channel files, kept readable on the vault service, and the agenda.
 //
 // A channel is the file `_channel.md` in its folder: its title, kind, order and description. It is
 // sent as `{ path, text }`, where `path` is the channel's path (`writing`, `photographs/seoul`), and
@@ -16,12 +15,10 @@
 import { recordVersion } from '../../vault/core.mjs';
 import { setProperty } from '../../vault/file.mjs';
 import { CHANNEL_FILE, isChannelPath, readNode } from '../../vault/node.mjs';
-import { blockStore } from './blocks.mjs';
 import { Refused } from './store.mjs';
 
 const PAGE = 1000;
 const LARGEST = 200_000;
-export const INBOX = 'inbox';
 
 // A channel's version: a name for exactly its path and text.
 export const channelVersion = ({ path, text }) => recordVersion({ path, text, type: 'channel' });
@@ -41,13 +38,11 @@ export function channelFile(given) {
   if (!read?.node || read.node.type !== 'channel') refuse(`${path} is not a channel's file`);
   const { node, problems } = read;
   if (node.properties?.visibility === 'private') refuse('A private channel is never kept readable here. Seal it on your device and keep it with the private layer');
-  if (path === INBOX && node.kind && node.kind !== 'inbox') refuse('The inbox channel is of kind inbox');
   if (problems.length) refuse(problems.join('\n'));
   return { path, text, node };
 }
 
 export function channelStore(db) {
-  const blocks = blockStore(db);
   const current = (did, path) => db.prepare('SELECT version, text, seq FROM channels WHERE did = ?1 AND path = ?2').bind(did, path).first();
   const next = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM channels WHERE did = ?1)';
   const changed = (path, held) => new Refused(409, 'Changed', 'The channel has changed since the version this request names', { path, current: held?.version ?? null });
@@ -150,7 +145,6 @@ export function channelStore(db) {
       known(from); known(to);
       if (from === to) return { from, to, unchanged: true };
       if (under(to, from)) throw new Refused(400, 'InvalidChannel', 'A channel cannot move inside itself');
-      if (from === INBOX || to === INBOX) throw new Refused(400, 'InvalidChannel', 'The inbox stays where it is');
       const held = await current(did, from);
       if ((held?.version ?? null) !== replaces) throw changed(from, held);
       const posts = await postsIn(did, from);
@@ -203,54 +197,20 @@ export function channelStore(db) {
     // What waits for the member and their curator, counted from what the service may read: no model
     // reads anything here. The private layer and the cortex are counted on the member's device.
 
-    async agenda(did, { now = new Date(), stale = 7 } = {}) {
+    async agenda(did) {
       const { results: posts } = await db.prepare('SELECT label FROM posts WHERE did = ?1 AND version IS NOT NULL').bind(did).all();
       const { results: rows } = await db.prepare('SELECT path, text FROM blocks WHERE did = ?1 AND version IS NOT NULL').bind(did).all();
-      const before = now.getTime() - stale * 24 * 60 * 60 * 1000;
-      let proposed = 0, waiting = 0, noAlt = 0;
+      let noAlt = 0;
       for (const row of rows) {
         const node = readNode(row.path, row.text)?.node;
         if (!node) continue;
-        if (node.status === 'proposed' && under(row.path.split('/').slice(0, -1).join('/'), INBOX)) {
-          proposed++;
-          if (Date.parse(node.created ?? '') < before) waiting++;
-        }
         if (node.kind === 'media' && !String(node.properties?.alt ?? '').trim()) noAlt++;
       }
       return {
         unlabelled: posts.filter(row => !row.label || row.label === 'other').length,
-        proposed, waiting, mediaWithoutAlt: noAlt,
+        mediaWithoutAlt: noAlt,
         counted: 'public and friends-only',
       };
     },
-
-    // ---- The inbox ----
-    // An agent's capture lands in the inbox marked `status: proposed`. Keeping it files it in a
-    // channel and clears the mark; declining it removes it. Private captures are sealed and are kept
-    // or declined on the member's device.
-
-    async keep(did, { id, channel, replaces = null }) {
-      known(channel);
-      if (channel === INBOX) throw new Refused(400, 'InvalidChannel', 'Keep it in a channel other than the inbox');
-      const { block } = await proposed(did, id);
-      const name = block.path.split('/').at(-1);
-      const text = setProperty(block.text, 'status', undefined);
-      const saved = await blocks.write(did, { id, path: `${channel}/${name}`, text }, { replaces });
-      return { id, channel, version: saved.version };
-    },
-
-    async decline(did, { id, replaces = null }) {
-      await proposed(did, id);
-      return blocks.remove(did, id, { replaces });
-    },
   };
-
-  async function proposed(did, id) {
-    const read = await blocks.read(did, id);
-    const node = readNode(read.block.path, read.block.text)?.node;
-    if (!under(read.block.path.split('/').slice(0, -1).join('/'), INBOX) || node?.status !== 'proposed') {
-      throw new Refused(409, 'NotProposed', 'This block is not waiting in the inbox', { id });
-    }
-    return read;
-  }
 }

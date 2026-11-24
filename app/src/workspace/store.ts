@@ -2,7 +2,7 @@
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
 import { useSyncExternalStore } from "react"
-import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel, inbox,
+import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
   inOrder, isBlock, journalOf, landBlock, landChannel, landCortex, heldCortex, owner, blocks, selectSource,
   type Audience, type Doc, type Visibility,
 } from "@/data/workspace-data"
@@ -12,7 +12,7 @@ import { docOf } from "@/data/block-document"
 import { setProperty, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { INBOX, type BlockRef, type HomeSource, type MoveTarget } from "@/data/source"
+import { type BlockRef, type HomeSource, type MoveTarget } from "@/data/source"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
@@ -93,11 +93,10 @@ async function saveChannelProperty(path: string, key: string, value: unknown) {
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "visibility" | "inbox" | "profile" | null
+export type Side = "repo" | "visibility" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
-  | { kind: "inbox"; id: string }
   | { kind: "settings"; tab: SettingsTab }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
@@ -197,7 +196,7 @@ export async function setSource<Master, Sealed>(
   set(bump())
   if (!await selectSource(next && "service" in next ? createServiceSource(next.service) : next)) return
   usedSlugs.clear()
-  for (const doc of [...blocks, ...inbox, ...cortex]) usedSlugs.add(doc.slug)
+  for (const doc of [...blocks, ...cortex]) usedSlugs.add(doc.slug)
   if (keepView) { set(bump()); return }
   bodyReplacements.clear()
   sourceRevision = ++replacementSequence
@@ -310,45 +309,6 @@ export function setVisibility(id: string, visibility: Visibility) {
     landBlock(moved.ref, { path: file.path, text: file.text }, file.version)
     set(bump())
     return { id: moved.ref.id, visibility, cleanupPending: moved.cleanupPending }
-  })
-}
-
-// Inbox: an agent's proposals wait in the channel `inbox` until you keep or decline them.
-export function openInbox(id: string) {
-  const item = inbox.find(i => i.id === id)
-  if (!item) throw new DOMException(`Nothing in the inbox with id ${id}`, "NotFoundError")
-  set({ view: { kind: "inbox", id }, ...bump(), ...sideAfterOpen() })
-  return { id, title: item.title, next: "inbox.keep" }
-}
-
-/** Keeps a proposal: files it in a channel and clears its mark. Consequential: the person approves it first. */
-export async function keepProposal(id: string, channel: string) {
-  validateChannel(channel)
-  // The same choice the screen offers: an existing channel outside the inbox.
-  if (channel === INBOX || channel.startsWith(`${INBOX}/`)) throw new DOMException("Keep it in a channel other than the inbox", "DataError")
-  if (!channelByPath(channel)) throw new DOMException(`There is no channel “${channel.replace("/", " › ")}”`, "DataError")
-  return serial(async () => {
-    const held = blockVersion(id)
-    if (!held || !inbox.some(item => item.id === id)) throw new DOMException("That proposal is no longer in the inbox", "NotFoundError")
-    const kept = await live().inbox.keep(held.ref, channel, held.version)
-    const file = await live().readBlock(kept.ref)
-    landBlock(kept.ref, { path: file.path, text: file.text }, file.version)
-    journalOf().syncJournal()
-    set({ ...bump(), ...(state.view.kind === "inbox" && state.view.id === id ? { view: { kind: "doc" as const, id, mode: "read" as const } } : {}) })
-    return { id, channel, next: "workspace.open" }
-  })
-}
-
-/** Declines a proposal and removes it. Consequential: the person approves it first. */
-export function declineProposal(id: string) {
-  return serial(async () => {
-    const held = blockVersion(id)
-    if (!held || !inbox.some(item => item.id === id)) throw new DOMException("That proposal is no longer in the inbox", "NotFoundError")
-    await live().inbox.decline(held.ref, held.version)
-    dropBlock(id)
-    journalOf().syncJournal()
-    set({ ...bump(), ...(state.view.kind === "inbox" && state.view.id === id ? { view: { kind: "empty" as const } } : {}) })
-    return { id, declined: true }
   })
 }
 
@@ -520,7 +480,7 @@ export async function moveBlock(id: string, from: string, to: string, opts: { be
  * The service moves the readable blocks itself; sealed ones are refiled on this device.
  */
 async function refileSealed(from: string, to: string, descendants: boolean) {
-  for (const doc of [...blocks, ...inbox]) {
+  for (const doc of blocks) {
     if (!isBlock(doc) || doc.visibility !== "private") continue
     const home = replacePath(doc.homeChannel, from, to, descendants)
     const channels = doc.channels?.map(path => replacePath(path, from, to, descendants))
@@ -590,9 +550,8 @@ export async function createChannel(inside?: string) {
 
 /** Removes an empty channel. One with blocks or channels in it is refused: move them out first. */
 export async function deleteChannel(path: string) {
-  if (path === INBOX) throw new DOMException("The inbox stays", "DataError")
   needsPrivateLayer("Removing a channel")
-  if ([...blocks, ...inbox].some(p => channelsOf(p).some(c => c === path || c.startsWith(`${path}/`))) || channelRecords.some(c => c.path.startsWith(`${path}/`)))
+  if (blocks.some(p => channelsOf(p).some(c => c === path || c.startsWith(`${path}/`))) || channelRecords.some(c => c.path.startsWith(`${path}/`)))
     throw new DOMException(`“${path.replace("/", " › ")}” is not empty: move what is in it out first`, "DataError")
   await serial(async () => {
     const held = heldChannel(path)

@@ -31,19 +31,19 @@ export const LOCAL_TOOLS = [
   tool('vault_neighbors', 'Follow evidence from a local vault node. Filter by direction and kind, up to five steps away.', {
     ref: text, direction: { enum: ['in', 'out', 'both'] }, kind: { enum: EDGE_KINDS }, depth: integer(1, 5),
   }, ['ref'], true),
-  tool('vault_capture', 'Propose a block from an HTTP(S) address or a file from a configured root. An address is kept as a reference.', {
+  tool('vault_capture', 'Bring a block into a channel from an HTTP(S) address or a file from a configured root, if the person granted you write on that channel. An address is kept as a reference. The block is marked as yours and starts private.', {
     source: text, channel: text, title: text,
-  }, ['source']),
+  }, ['source', 'channel']),
   tool('vault_collect', 'File a local block in a channel, or move it to a zero-based position in the channel’s explicit order.', {
     block: text, channel: text, position: { type: 'integer', minimum: 0 },
   }, ['block', 'channel']),
   tool('vault_index', 'Scan the local vault and its configured roots. Returns what changed and any problems.', {}),
   tool('vault_where', 'Where the person\'s knowledge and data live: the vault\'s channels, each configured root (its folder, channel, what it keeps, how many files, and the person\'s note on how to use it), and what you may change. Read it before looking for data or changing anything.', {}, [], true),
-  tool('vault_lint', 'Candidates for a semantic check of the vault: reported problems, links to nothing, orphan blocks, related blocks with no link between them, blocks with the same title, and proposals waiting. You judge them: read, then record conclusions with cortex_observe and fix only within your grant.', {
+  tool('vault_lint', 'Candidates for a semantic check of the vault: reported problems, links to nothing, orphan blocks, related blocks with no link between them, and blocks with the same title. You judge them: read, then record conclusions with cortex_observe and fix only within your grant.', {
     limit: integer(1, 100),
   }, [], true),
   tool('vault_history', 'What happened to one vault file, newest first, with the content address of each version kept in history. Use it to find a version to restore.', { path: text, limit: integer(1, 100) }, ['path'], true),
-  tool('vault_write', 'Make or replace a block, channel or entity file, if the person granted you write on its folder. To replace a file, pass its current content address (file.hash from vault_local_read) as replaces. The old version is kept and can be restored. A new block is marked as yours.', {
+  tool('vault_write', 'Make or replace a block, channel or entity file, if the person granted you write on its folder. To replace a file, pass its current content address (file.hash from vault_local_read) as replaces. The old version is kept and can be restored. A new block is marked as yours and starts private.', {
     path: text, text, replaces: text,
   }, ['path', 'text']),
   tool('vault_remove', 'Remove a block, channel or entity file, if the person granted you write on its folder. Pass its current content address as replaces. The removed version is kept and can be restored.', {
@@ -267,7 +267,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
           include: root.include, exclude: root.exclude, files: counts[root.name]?.files ?? 0, kinds: kinds(root.name),
           note: root.note ?? null, writable: false,
         })),
-        you: { agent, grant: agents[agent] ?? {}, always: ['vault_capture into the Inbox, as a proposal', 'vault_collect'] },
+        you: { agent, grant: agents[agent] ?? {}, always: ['vault_collect'] },
         problems: [...problems, ...grantProblems],
         read: 'Roots are read where they live and never written: search and read them, and capture a copy to change one. A root without a note is one to ask the person about, then record what they say with cortex_observe about its channel.',
       };
@@ -293,7 +293,11 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       await checkReplaces(before, replaces);
       let after = content;
       const node = readable(path, after);
-      if (before === undefined && node.type === 'block' && !node.post && !node.by) after = setProperty(after, 'by', by);
+      if (before === undefined && node.type === 'block') {
+        // A new block from an agent says so and starts private: only the person shows a block to more people.
+        if (!node.post && !node.by) after = setProperty(after, 'by', by);
+        if ((node.post?.visibility ?? node.visibility) !== 'private') after = setProperty(after, 'visibility', 'private');
+      }
       readable(path, after);
       await mkdir(dirname(join(vault, path)), { recursive: true });
       await recordChange(path, before, after, 'write');
@@ -349,15 +353,15 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       return { path, restored: to, unchanged: before === kept };
     },
 
-    async vault_capture(db, { source, channel = 'inbox', title }) {
-      if (!isChannelPath(channel)) refuse('Give the channel’s path.');
+    async vault_capture(db, { source, channel, title }) {
+      if (typeof channel !== 'string' || !isChannelPath(channel)) refuse('Give the path of the channel it goes into.');
       if (title !== undefined && !present(title)) refuse('Give a title as text.');
+      await mayChange('write', `${channel}/${CHANNEL_FILE}`);
       await beneath(vault, channel.split('/'));
-      if (channel === 'inbox') await ordinaryFile(vault, ['inbox', CHANNEL_FILE]);
       await beneath(vault, [SOURCES]);
       const added = await addToVault({ vault, source: await captureSource(vault, source), channel, title, by });
       await rescan(db);
-      return { ...added, node: lookedUp(db, added.block).key, status: 'proposed' };
+      return { ...added, node: lookedUp(db, added.block).key };
     },
 
     async vault_collect(db, { block, channel, position }) {
@@ -417,7 +421,7 @@ export async function serveLocalVault({ vault, agent, DatabaseSync, input, outpu
   if (!/^[A-Za-z0-9._-]+$/.test(agent)) refuse('Name the agent with letters, digits, dots, underscores or hyphens.');
   if (!(await info(vault))?.isDirectory()) refuse('Select an existing vault folder.');
   const tools = createLocalTools({ vault: await realpath(vault), by: `agent:${agent}`, DatabaseSync });
-  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals and restores need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
+  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures, writes, links, removals and restores need the person\'s grant on that folder, and what you make starts private. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
   input.setEncoding('utf8');
   await serve(createServer({ tools, list: LOCAL_TOOLS, instructions }), input, output);
 }

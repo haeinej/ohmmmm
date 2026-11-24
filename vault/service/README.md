@@ -98,15 +98,14 @@ Tests are in [../test/service.test.mjs](../test/service.test.mjs), [../test/iden
 
 Account/reconnect regressions are in [../test/workspace-service.test.mjs](../test/workspace-service.test.mjs), complete listing checks in [../test/member.test.mjs](../test/member.test.mjs), and shell tests of the page's actual handlers with DOM/network doubles in [../test/vault-browser.test.mjs](../test/vault-browser.test.mjs). These test state and transport, not browser layout or a live PDS. [../test/mcp.test.mjs](../test/mcp.test.mjs) also checks mirror approval interleavings and malformed-request recovery on the ordered stdio queue.
 
-## Channels, the inbox, the cortex and media
+## Channels, the cortex and media
 
 These hold everything personal; none of it reaches the member's PDS except through Publish ([words](../../docs/words.md#boundaries)).
 
 - **Channels** ([src/channels.mjs](src/channels.mjs)) keep each channel's `_channel.md` readable, like the friends layer, with compare-and-set on its version. Moving a channel moves every channel inside it and every friends-only block filed in or listed under it in one batch, or none of it. A channel that holds a published post does not move, since the post's address comes from its label. A private channel, and a mixed channel's private overlay, are sealed and kept with the private layer.
-- **The inbox** is the channel `inbox`. An agent's capture waits there marked `status: proposed`; `keepProposed` files it in a channel and clears the mark, and `declineProposed` removes it. Private captures are kept or declined on the member's device.
 - **The cortex** is kept sealed beside the private layer, in its own tables, by the same store ([src/private.mjs](src/private.mjs), kind `cortex`). The member's one key rotation covers both and cannot finish while either still holds anything under the older key. The device seals cortex files under the context `ohm-vault/cortex/v1`, which the account app's `packages/keys` has to provide.
 - **Media** ([src/media.mjs](src/media.mjs)): a picture or file is a block of kind `media` that saves its `origin`, hash and metadata; only its bytes are sent here, to the R2 bucket bound as `MEDIA`, once, under the member's DID. Readable media is named by its content address and can be shown smaller with the optional `IMAGES` binding; private media is sealed on the device under an opaque ID and never rendered here. Media is served on the app's address, so every answer is sandboxed (`Content-Security-Policy: sandbox`), and anything but a plain picture (PNG, JPEG, GIF, WebP, AVIF) is sent as a download.
-- **The agenda** (`getAgenda`) counts what waits for the member and their curator (unlabelled posts, agents' proposals, media with no alt text) from the public and friends-only layers, without any model reading anything. The curator itself runs in the member's own coding agent.
+- **The agenda** (`getAgenda`) counts what waits for the member and their curator (unlabelled posts and media with no alt text) from the public and friends-only layers, without any model reading anything. The curator itself runs in the member's own coding agent.
 
 ## Deploying
 

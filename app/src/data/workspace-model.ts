@@ -12,8 +12,7 @@ export type Doc = {
   id: string
   /** A sealed block's own vault ID (a TID), which its opaque storage ID hides. */
   vaultId?: string
-  /** `proposed` while an agent's capture waits in the inbox. */
-  status?: "proposed" | "kept" | "archived"
+  status?: "kept" | "archived"
   kind: Kind
   title: string
   slug: string
@@ -35,7 +34,7 @@ export type Doc = {
   connect?: Connection[]
   /** What an observation is about: block IDs, or channels written channel:<path>. None is about the person. */
   about?: string[]
-  /** Who wrote an observation or proposed a block: an agent by name, or "you". */
+  /** Who wrote an observation or a block: an agent by name, or "you". */
   by?: string
   /** The versions of the blocks an observation is about, as they were when it was written. */
   evidence?: { node: string; version: string }[]

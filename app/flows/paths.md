@@ -83,7 +83,7 @@ How to read each path:
 | D2a | Find a label in the list | Click a label's name in the graph | The list opens with that channel revealed | Go from the map to the files | *UI only* |
 | D3 | Rearrange | Drag a node | Its neighbours follow on soft springs and settle back | Untangle a part to look at | *UI only* |
 | D4 | Zoom and pan | Wheel or pinch, drag the background, or + / − / fit | The view moves; item names and folders inside folders fade in as you zoom; names that would overlap are left out; fit returns to all | Read detail or the whole | *UI only* |
-| D5 | **Centre on a person** | A person in search results, or an inbox mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
+| D5 | **Centre on a person** | A person in search results, or a mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
 | D6 | Back to you | Back to me | All your blocks again | Return | `workspace.graph` |
 | D7 | Filter the graph | Graph settings → Connections; Lay out again | The lines show or hide; the layout restarts | Simplify or refresh | *UI only* |
 
@@ -114,16 +114,12 @@ How to read each path:
 | E16 | **History** | Block toolbar → clock | The block's versions, as in H9 | Go back in time | `history.versions` |
 | E17 | Read a shared block | Open a block for friends or everyone | Read-only, with "changing it asks first" | Protect what others already see | *UI only* |
 
-## F. Inbox and notifications
+## F. Notifications
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| F1 | **Inbox** | Rack Inbox (a dot while anything is proposed) | The side panel lists what agents proposed: the blocks waiting in the channel `inbox` marked `status: proposed`, with who proposed them, and how many have waited over a week (the service's agenda). Empty, it says there is nothing to review | See what your agents captured for you | *UI only* |
-| F2 | Open a proposal | Click it | The proposal opens in the main panel as plain text, with **Keep in** (a channel) and **Decline** | Review it | `workspace.open` is not used: the inbox tools need the proposal on screen |
-| F2a | **Keep a proposal** | Proposal → choose a channel → **Keep** | It is filed in that channel and its mark is cleared, at the service (readable) or on this device (sealed); it leaves the inbox and opens as a block. Who proposed it stays on it | Keep what is worth keeping | `inbox.keep` (consequential: the person approves in a dialog first) |
-| F2b | **Decline a proposal** | Proposal → **Decline** | It is removed, at the service or on this device; the panel says it is no longer in the inbox | Drop what isn't | `inbox.decline` (consequential: the person approves in a dialog first) |
-| F3 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
-| F4 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
+| F1 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
+| F2 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
 
 ## G. Profile and settings
 
@@ -172,10 +168,8 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
-| `inbox.keep` | Keeps the proposal on screen in a channel, after the person approves | F2a | consequential, untrusted content | Filed in the channel, out of the inbox; declined approval leaves it waiting (`NotAllowedError`) |
-| `inbox.decline` | Declines the proposal on screen, after the person approves | F2b | consequential | Removed; declined approval leaves it waiting (`NotAllowedError`) |
 
-Nothing an agent can do here is public. Keeping and declining a proposal are consequential and stop at the person's approval; aborting removes the dialog and changes nothing. Making a block visible to others, deleting, and publishing are not tools yet. When they become tools, they will be marked consequential and ask the person first, as the UI does now.
+Nothing an agent can do here is public. Making a block visible to others, deleting, and publishing are not tools yet. When they become tools, they will be marked consequential and ask the person first, as the UI does now.
 
 ## End states, in short
 
@@ -185,7 +179,6 @@ Nothing an agent can do here is public. Keeping and declining a proposal are con
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
 | Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer at the service, after your yes for wider. Public is reached only through Publish |
-| Keeping or declining a proposal | It is filed in the channel or removed, at the service, after your click or your approval of an agent's |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |
