@@ -16,9 +16,10 @@ const ASKS = {
   token: ['Whoever holds a token from a PDS', 'A token the PDS issued for this one request and no other, signed with the key the account\'s own DID document names'],
   member: ['The member', 'Such a token from their own PDS, as the command line and an agent\'s tools send; or their ohm session, as the editor sends, which is worth exactly the one account it was connected to'],
   ohm: ['The member, signed in to ohm', 'Their ohm session only. A request that changes something must also come from ohm\'s own pages'],
+  viewer: ['Anyone, about the member `did` names', 'Nothing is needed for what the member published. A viewer token (`Authorization: Bearer`, from `content.view`) says who is looking; if the member put them on their friend list, the answer also holds the friends layer. Never the private layer'],
 };
 const FILES = Object.fromEntries(Object.entries({
-  Posts: 'posts', Friends: 'friends', Private: 'private', Channels: 'channels', Cortex: 'cortex', Media: 'media', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Account: 'account', Identity: 'identity',
+  Posts: 'posts', Friends: 'friends', Private: 'private', Channels: 'channels', Cortex: 'cortex', Media: 'media', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Content: 'content', Account: 'account', Identity: 'identity',
 }).map(([name, file]) => [name, `src/capabilities/${file}.mjs`]));
 
 // Every way the service says no. The same words go to a person in the editor and to an agent.
@@ -55,6 +56,9 @@ export const REFUSALS = {
   NoRepository: [400, 'The account\'s DID document does not say where its repository is kept'],
   RepositoryUnreachable: [502, 'The account\'s PDS would not answer'],
   MediaUnavailable: [503, 'The media cache is not set up on this service'],
+  ViewerTokenInvalid: [401, 'The viewer token is not one this service made, is for another member, or has run out'],
+  ViewersUnavailable: [503, 'Viewer tokens, and so Friends reads for sites, are not set up on this service'],
+  NotTheirSite: [400, 'The return address is not on one of the member\'s sites'],
   InternalError: [500, 'Something went wrong in the service itself'],
 };
 
@@ -155,6 +159,11 @@ const NO_TOOL = {
   Private: 'Private contents never reach the service readable. Agents read them only on the person\'s device, after unlock',
   Account: 'It rides on an ohm session, which an agent does not have',
   Identity: 'It is part of signing in',
+  Channels: 'The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write',
+  Media: 'The cockpit sends and shows media. An agent works with the media blocks in the local vault',
+  'com.ohmmmm.vault.getAgenda': 'The cockpit shows it. An agent counts the same things in the local vault with vault_lint',
+  Cortex: 'The cortex is sealed. An agent reads and writes it on the person\'s device, through the cortex\'s own tools',
+  Content: 'It is for sites: a site\'s content loader reads it, for whoever is looking at the site. The member\'s own agent reads their vault through the other tools',
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

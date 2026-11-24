@@ -210,3 +210,12 @@ CREATE TABLE IF NOT EXISTS cortex_batches (
   created_at TEXT NOT NULL,
   PRIMARY KEY (did, batch_id)
 );
+
+-- A member's own sites: the only addresses a viewer token is posted back to (src/viewers.mjs). One
+-- row for each https origin the member listed, signed in to ohm.
+CREATE TABLE IF NOT EXISTS sites (
+  did TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (did, origin)
+);
