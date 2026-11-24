@@ -38,6 +38,12 @@ You get a count of pages, posts, and media files. Check it against what you expe
 
 The agent shows you the sections your site already has, or a plain starting point if you have none, and asks you questions until the structure is yours. [Forms, labels, and sublabels](labels.md)
 
+If your things are in more than one place (a site, a newsletter, folders of photos and notes, an older PDS), ask the curator first:
+
+> Use the curator agent and its design-home skill on [my site folder, my Substack, my PDS, these folders]. Read only.
+
+It counts what is in each place, marks what looks private, and hands you a [home report](agents/home-report.md): your sources, a channel structure with every name left for you, the questions only you can answer, and which things stay personal. Then it goes through the report with you one item at a time, writes down what you decide, and applies only that. Your files stay where they are; the vault keeps a record of each, with its path. [An example report](../examples/home-report-haeinjung.md)
+
 ### 3. Try one item
 
 > Convert one item from my site. Show me its record, the page before and after, and how you mapped each piece. Wait for my approval.
