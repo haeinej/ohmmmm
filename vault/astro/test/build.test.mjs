@@ -45,3 +45,11 @@ test('example refuses conflicting post permalinks', buildOptions, async t => {
   assert.notEqual(code, 0, log);
   assert.match(log, /Duplicate ohm permalink/);
 });
+
+test('example refuses routes that collide after Astro Unicode normalization', buildOptions, async t => {
+  const { code, log } = await build(t, [
+    document('one', { sublabel: 'J\u030c' }), document('two', { slug: 'one', sublabel: '\u01f0' }),
+  ]);
+  assert.notEqual(code, 0, log);
+  assert.match(log, /Duplicate ohm permalink/);
+});
