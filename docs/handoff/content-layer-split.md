@@ -47,3 +47,15 @@ The vault service has no reads for anyone but the member yet (every Posts and Fr
 - Nothing is written to a real PDS. Publishing anything needs the owner.
 - Finish each PR with documentation, as `vault/skills/document-work/SKILL.md` says.
 - End commits with the co-author line your tool uses, and say in the PR which task ID it is.
+
+## One script per agent
+
+Each agent gets one script and works through its whole track in order. When a step depends on a PR the owner has not merged yet, it **stacks**: it branches from that PR's branch and opens its PR against it, saying so at the top of the description, then rebases onto `main` once the base merges. When a step needs something only the owner can give (a decision, a merge before a conflict-only task), it stops and reports what it is waiting for. It never merges.
+
+### Claude: C1 → C2 → C3
+
+C1 on `home/production-wiring` (#33); C2 on `vault/content-reads`, stacked on #33 if it is not merged; C3 on `home/visibility`, stacked on C2 if it is not merged. Ask the owner at the start of each step for the decisions the plan leaves to them, and agree C2's request names and C3's design before building.
+
+### Devin: D1 → D2 → D3 → D4
+
+D1 on `vault/astro-loader`, stacked on #37 if it is not merged; D2 in `haeinej/haeinjung.com`, using D1's branch until it merges; D3 once #33 is merged, otherwise stop and report; D4 once C2 is merged (or its PR is open, stacked on it), otherwise stop and report.
