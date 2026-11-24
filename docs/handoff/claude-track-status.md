@@ -2,17 +2,30 @@
 
 Where the work stands, for a fresh session on your own machine. The plan is [vault/plans/content-layer.md](../../vault/plans/content-layer.md); the split is [content-layer-split.md](content-layer-split.md).
 
-## The pull requests (merge in this order; each is stacked on the one before)
+## The pull requests: one stack, merged in this order (restacked 24 November, evening)
 
-| PR | Branch | What it is |
-| --- | --- | --- |
-| [#33](https://github.com/haeinej/ohmmmm/pull/33) | `home/production-wiring` | Production wiring, plus **C1: the inbox removed**. Agents write into granted channels and their new blocks start private. `design-home` grants write on every channel it set up (that skill is on #34) |
-| [#41](https://github.com/haeinej/ohmmmm/pull/41) | `vault/content-reads` | **C2: content reads for sites.** `com.ohmmmm.content.*` by DID. Public is what is on the PDS; Friends needs a 10-minute viewer token, posted back only to the member's listed sites; private is never read |
-| [#42](https://github.com/haeinej/ohmmmm/pull/42) | `home/visibility` | **C3: visibility moves.** One set of rules (`vault/vault/visibility.mjs`); only you show a block to more people; an agent asks (a request in Notifications) or, with a grant, hides a friends-only block for your device to seal; every move journalled by ID. Also: any block becomes a post when public; agents never create friends-only blocks; Friends keeps working when the PDS is down |
-| [#43](https://github.com/haeinej/ohmmmm/pull/43) | `home/friend-access` | **Friends approved like devices.** Someone asks, signed in to ohm (their DID is their account); you see their name and email and approve them for every channel or some; their agents read with their access; no expiry |
-| [#45](https://github.com/haeinej/ohmmmm/pull/45) | `home/connections` | **Agents in ohm:** every two-step agent action waits for **Approve** in the rack's **Agents** panel, which also pauses or disconnects an agent. An agent asks by email (`vault_friends_ask`, `vault_connections`), gets a mail draft approved (`vault_mail_ask`) and sends it itself, and the connections skill finds friends in the member's inbox with the agent's own mail tools. **Connections** in the rack (people as a list or a graph, Make friends by email, read what each shares with you), **Settings › Friends** (channels per friend, stop sharing), an ask delivered when that person joins ohm, and **one invite email** (from "<you> via ohm", replies to your email, once per address, at most 20 a day) |
+Every open PR was merged into the one above it and its conflicts resolved, so each merges cleanly in this order. The root `npm test` passes on every branch tip. Merge in order; when a base merges, retarget the next PR to `main`.
 
-Every PR passed the root `npm test` when last pushed; #45 passed CI at `d08b06b`, and Auto-fix watches it from the Claude session that built the Agents panel. Nothing is merged and nothing is deployed.
+| Order | PR | Branch | What it is |
+| --- | --- | --- | --- |
+| 1 | [#39](https://github.com/haeinej/ohmmmm/pull/39) | `vault/astro-loader` | D1: the `ohm` Astro loader (public posts from the PDS) |
+| 2 | [#34](https://github.com/haeinej/ohmmmm/pull/34) | `home/curator` | The curator, `design-home`, the home report |
+| 3 | [#40](https://github.com/haeinej/ohmmmm/pull/40) | `vault/move-to-astro` | D2: `move-to-astro` (on #34) |
+| 4 | [#35](https://github.com/haeinej/ohmmmm/pull/35) | `vault/host-pds` | Host your own PDS (Cirrus) |
+| 5 | [#33](https://github.com/haeinej/ohmmmm/pull/33) | `home/production-wiring` | Production wiring, no inbox (C1). Contains 1–4, so merge those first |
+| 6 | [#41](https://github.com/haeinej/ohmmmm/pull/41) | `vault/content-reads` | C2: content reads for sites |
+| 7 | [#42](https://github.com/haeinej/ohmmmm/pull/42) | `home/visibility` | C3: visibility moves |
+| 8 | [#44](https://github.com/haeinej/ohmmmm/pull/44) | `claude/wonderful-feynman-de22rc` | Images as media blocks, renames, `ohmmmm serve`: now on #42 |
+| 9 | [#47](https://github.com/haeinej/ohmmmm/pull/47) | `claude/cortex-in-app` | The real cortex in the paired app |
+| 10 | [#43](https://github.com/haeinej/ohmmmm/pull/43) | `home/friend-access` | Friends approved like devices: now on #47 |
+| 11 | [#45](https://github.com/haeinej/ohmmmm/pull/45) | `home/connections` | Connections, agents in ohm, the Agents panel |
+
+What the restack decided (with the owner):
+
+- **One app, the vault service first.** #33 had rebuilt the app's data layer for the vault service, #44 for the home on this computer. The app now has one `HomeSource`; `app/src/data/local-source.ts` answers it through the bridge (channels as `_channel.md` files, `moveVisibility` rewriting the file's layer, `moves` as `.vault/requests.json`, the cortex through its own routes, history from both journals). Publishing on this computer stays its own dialog. See `app/docs/agents/home-source.md`.
+- **Connections are built, tested and off screen for the first release:** `app/src/features.ts` (`connections: false`). Their store handlers, the service's requests and the MCP tools stay. The Agents panel stays on screen.
+- **Retries are answered, not repeated.** Publishing, renames, visibility moves and their journal, friend answers, invite emails (claimed before sending), agents' approvals (a used approval answers a retry for 15 minutes) and cortex writes (one lock across processes) were made idempotent, with partial unique indexes in the unapplied migrations 0007, 0008 and 0010.
+- **Known gap:** an unfinished move to private (sealed, but the friends copy not yet removed) is remembered in the page only; a reload before it is finished can seal a second copy if the move is repeated.
 
 ## Before deploying (all yours)
 
