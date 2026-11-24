@@ -374,7 +374,8 @@ async function enter({ name, did, mirrored = true, approvedAtPds = false }) {
   // A new account's vault is filled from its PDS without being asked.
   if (!mirrored) await mirror({ first: true });
   // Back from approving at the PDS's own screen: the changes are shown again, ready to be made.
-  if (approvedAtPds) await openPublish();
+  // Sent from the cockpit to publish one post: its preview opens at once.
+  if (approvedAtPds || onlyOne()) await openPublish();
   else refreshStatus();
 }
 
@@ -693,6 +694,10 @@ async function mirror({ first = false } = {}) {
 }
 
 // ---- Publish: making what is published in the member's own repository match the vault. ----
+// The cockpit sends a visibility move to or from public here as ?publish=<post ID>: the plan then
+// shows, and publishes, that one post alone.
+function onlyOne() { return new URLSearchParams(location.search).get('publish'); }
+function planQuery() { return { prepare: '1', ...(onlyOne() ? { only: onlyOne() } : {}) }; }
 // The service works out what would change and writes nothing. The changes are made from this
 // page, by the member, signed in at their own PDS for as long as it takes and no longer.
 // The mark on the Publish button says there is something to publish.
@@ -744,7 +749,7 @@ async function openPublish() {
   $('publish-form').hidden = true;
   try {
     const signedIn = await restore();
-    const plan = await call('getPublishPlan', { query: { prepare: '1' } });
+    const plan = await call('getPublishPlan', { query: planQuery() });
     if (ticket === selection && state.publishing) showPlan(plan, Boolean(signedIn && signedIn.did === state.did));
   } catch (problem) {
     $('publish-summary').textContent = `What would change could not be worked out: ${problem.message}`;
@@ -787,7 +792,7 @@ $('publish-form').addEventListener('submit', async event => {
       $('publish-password').value = '';
     }
     // The yes is for the changes that were shown. If they are no longer the changes, they are shown again.
-    const plan = await call('getPublishPlan', { query: { prepare: '1' } });
+    const plan = await call('getPublishPlan', { query: planQuery() });
     if (plan.plan !== state.plan?.plan) {
       showPlan(plan, true);
       notice('What would change is different now. Look again, then publish.');
@@ -806,7 +811,7 @@ $('publish-form').addEventListener('submit', async event => {
     await leave().catch(() => {});
     const said = [done.created && `${done.created} published`, done.replaced && `${done.replaced} replaced`, done.removed && `${done.removed} taken down`].filter(Boolean).join(', ');
     notice(`Published: ${said}`);
-    showPlan(await call('getPublishPlan', { query: { prepare: '1' } }), false);
+    showPlan(await call('getPublishPlan', { query: planQuery() }), false);
     refreshStatus();
   } catch (problem) {
     notice(`Publishing did not work: ${problem.message}`, 'error');

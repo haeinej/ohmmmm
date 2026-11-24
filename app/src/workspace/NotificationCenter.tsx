@@ -9,7 +9,13 @@ import { onNotice } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/cn"
 import { ago, clearAll, markRead, record, remove, useNotifications, type NotificationKind } from "./notifications"
-import { open as openDoc, useWorkspace } from "./store"
+import { approveMoveRequest, declineMoveRequest, loadMoveRequests, open as openDoc, previewMove, report, useWorkspace, waitingRequests } from "./store"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { notify } from "@/components/ui/notice"
+import { byId, titleOf } from "@/data/workspace-data"
+import type { MoveRequest } from "@/data/source"
+
+const LAYER = { private: "only you", friends: "friends", public: "everyone" } as const
 
 const TABS: { kind: NotificationKind; label: string }[] = [{ kind: "agent", label: "Agent" }, { kind: "system", label: "System" }]
 
@@ -24,6 +30,12 @@ export function NotificationCenter() {
   const { agent } = useWorkspace()
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<NotificationKind>("agent")
+  const [answering, setAnswering] = useState<MoveRequest | null>(null)
+  const waiting = waitingRequests()
+  // Agents' requests are read again whenever the panel opens.
+  useEffect(() => { if (open) report(loadMoveRequests()) }, [open])
+  const nameOf = (request: MoveRequest) => { const doc = byId(request.block); return doc ? titleOf(doc) : "a block locked on this device" }
+  const warningOf = (request: MoveRequest) => { try { return previewMove(request.block, request.to).warning } catch (err) { return (err as Error).message } }
 
   // Everything the workspace raises as a notice is kept here too.
   useEffect(() => onNotice(n => record({ kind: "system", title: typeof n.message === "string" ? n.message : "Notice", tone: n.tone === "error" ? "error" : "info" })), [])
@@ -31,7 +43,7 @@ export function NotificationCenter() {
   useEffect(() => { if (open) markRead(tab) }, [open, tab, items])
 
   const unread = (k: NotificationKind) => items.filter(i => i.kind === k && !i.read).length
-  const total = unread("agent") + unread("system")
+  const total = unread("agent") + unread("system") + waiting.length
   const status = [agent?.state === "working" && `Agent: ${agent.label}`, unread("agent") && `${unread("agent")} from agents`, unread("system") && `${unread("system")} system`]
     .filter(Boolean).join(" · ") || "All caught up"
   const shown = items.filter(i => i.kind === tab)
@@ -68,6 +80,21 @@ export function NotificationCenter() {
           </div>
         )}
 
+        {tab === "agent" && waiting.length > 0 && (
+          <section aria-label="Waiting for you" className="mx-1.5 mb-1 flex flex-col gap-px">
+            {waiting.map(request => (
+              <div key={request.id} className="flex flex-col gap-1.5 rounded-lg bg-muted px-2.5 py-2">
+                <span className="text-body">{request.askedBy.replace(/^agent:/, "")} asks to show “{nameOf(request)}” to {LAYER[request.to]}</span>
+                {request.reason && <span className="text-small text-muted-foreground">{request.reason}</span>}
+                <div className="flex justify-end gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => report(declineMoveRequest(request.id)).then(() => notify({ message: "Declined. Nothing moved.", tone: "info" }))}>Decline</Button>
+                  <Button size="sm" onClick={() => setAnswering(request)}>Review</Button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
         <ul role="tabpanel" className="flex max-h-96 flex-col gap-px overflow-y-auto px-1.5 pb-1.5">
           {shown.map(i => (
             <li key={i.id} className="group/item relative">
@@ -96,6 +123,26 @@ export function NotificationCenter() {
           )}
         </ul>
       </PopoverContent>
+      <Dialog open={!!answering} onOpenChange={o => !o && setAnswering(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Show “{answering && nameOf(answering)}” to {answering && LAYER[answering.to]}?</DialogTitle>
+            <DialogDescription>{answering && warningOf(answering)}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAnswering(null)}>Not now</Button>
+            <Button onClick={() => {
+              if (!answering) return
+              const request = answering
+              setAnswering(null)
+              report(approveMoveRequest(request.id)).then(result => {
+                if (result.publish) window.open(result.publish, "_blank", "noopener")
+                notify({ message: result.publish ? "Marked. Finish it on the Publish page." : "Moved.", tone: "info" })
+              })
+            }}>Approve</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Popover>
   )
 }

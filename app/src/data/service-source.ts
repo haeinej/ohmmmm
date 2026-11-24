@@ -4,13 +4,13 @@ import { words } from "../../../vault/vault/words.mjs"
 import {
   blockOf, CORTEX_CONTEXT, mediaName, moveVisibility, readEvidence, searchInput, visibilityMove,
   type Account, type Agenda, type BlockFile, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove,
-  type CortexEntry, type CortexFile, type Friend, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type PublishPlan,
+  type CortexEntry, type CortexFile, type Friend, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
 } from "./source"
 import { isBlockKind } from "./block-kind"
 import type { SearchHit } from "./search"
 
-type RemoteBlock = { id: string; path: string; title?: string; version: string; kind: string }
-type PostHead = { id: string; slug: string; title?: string; visibility: Layer }
+type RemoteBlock = { id: string; path: string; title?: string; version: string; kind: string; leaving?: string }
+type PostHead = { id: string; slug: string; title?: string; visibility: Layer; leaving?: string }
 type Tree = { labels: { label: string; posts: PostHead[]; sublabels: { sublabel: string; posts: PostHead[] }[] }[] }
 type SealedRow<Sealed> = { id: string; sealed: Sealed; version: string }
 type SealOptions = { context?: typeof CORTEX_CONTEXT }
@@ -56,7 +56,7 @@ export const newOpaqueId = () => btoa(String.fromCharCode(...crypto.getRandomVal
 
 const friendsHead = (block: RemoteBlock): BlockHead => ({
   id: block.id, path: block.path, title: block.title, version: block.version,
-  layer: "friends", store: block.kind === "post" ? "post" : "block",
+  layer: "friends", store: block.kind === "post" ? "post" : "block", ...(block.leaving ? { leaving: block.leaving } : {}),
 })
 const visibleLayers: readonly Layer[] = ["public", "friends"]
 /** packages/keys seals journal entries as a file with this ID. */
@@ -178,7 +178,7 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
     const { labels } = await vaultAsk<Tree>("getTree")
     const at = (posts: PostHead[], path: string): BlockHead[] => posts
       .filter(post => post.visibility === "public" || post.visibility === "friends")
-      .map(post => ({ id: post.id, layer: post.visibility, title: post.title, store: "post", path: `${path}/${post.slug}.md` }))
+      .map(post => ({ id: post.id, layer: post.visibility, title: post.title, store: "post", path: `${path}/${post.slug}.md`, ...(post.leaving ? { leaving: post.leaving } : {}) }))
     return labels.flatMap(label => [
       ...at(label.posts, label.label),
       ...label.sublabels.flatMap(group => at(group.posts, `${label.label}/${group.sublabel}`)),
@@ -428,6 +428,12 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       },
       get: name => mediaBytes("getMedia", { name }),
       rendition: (name, width) => mediaBytes("getRendition", { name, width: String(width) }),
+    },
+    moves: {
+      requests: async () => (await vaultAsk<{ requests: MoveRequest[] }>("listMoveRequests")).requests,
+      async decline(id, reason) { await vaultAsk("declineMoveRequest", { body: { id, ...(reason ? { reason } : {}) } }) },
+      record: move => vaultAsk<{ state: string }>("recordMove", { body: move }),
+      publishPage: postId => new URL(`?publish=${encodeURIComponent(postId)}`, base).href,
     },
     agenda: () => vaultAsk<Agenda>("getAgenda"),
   }

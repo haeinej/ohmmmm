@@ -68,8 +68,9 @@ How to read each path:
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
 | C1 | Show who each block is for | Click the eye in the home header | Each block shows an icon at its end: globe (Everyone), people (Friends), lock (Only you); the label is on hover | See at a glance what is shared | *UI only* |
-| C2 | **Make a block less private** | Click a block's icon → Friends or Everyone → **confirm** | The block is *marked* for that audience. It is **not published**: it reaches your site and other apps only when you publish | Decide who a block is for | *UI only* · **asks first** |
-| C3 | Make a block more private | Click its icon → Friends or Only you | Marked at once (no confirmation needed) | Pull something back | *UI only* |
+| C2 | **Show a block to more people** | Click a block's icon → Friends or Everyone → the preview's warning → **Change visibility** | Only you → Friends: moved into the friends layer at the service. → Everyone: a block that is not a post becomes one at its channel's address, is marked public, and the Publish page opens with that one post's preview; it is public only once it is published | Decide who a block is for | `visibility.move` (consequential: the same dialog) |
+| C3 | Make a block more private | Click its icon → Only you | Friends → Only you: sealed on this device at once (no confirmation). Everyone → Friends asks first and opens the Publish page, which takes the record down | Pull something back | `visibility.move` |
+| C3a | Preview a move | (the dialog in C2) | What the move does, its warning, and what it still needs, by the shared rules | Know before deciding | `visibility.preview` (read-only) |
 | C4 | **View as someone else** | Hover the eye → View as You / Friends / Public | The tree, graph and block show only what that audience can see; the cortex is locked; a bar says "Viewing as…" with Back to you. If the open block is one they can't see, the editor says so instead of showing it | Check what others actually see before you publish | *UI only* |
 | C5 | Back to yourself | Back to you, choose You, or hide visibility | Everything is visible again | Return to editing | *UI only* |
 
@@ -120,6 +121,8 @@ How to read each path:
 | --- | --- | --- | --- | --- | --- |
 | F1 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
 | F2 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
+| F3 | **Answer an agent's request** | Bell → Agent → *Waiting for you* → **Review** → **Approve**, or **Decline** | Approve: the same move as C2/C3, by the same handler, journalled as asked by the agent and approved by you. Decline: nothing moves. A block changed since the agent asked is refused, to be reviewed again | Only you show a block to more people | *UI only*: an agent asks with `vault_set_visibility` |
+| F4 | What an agent hid | Opening the home with the private layer unlocked | Blocks an agent with a grant hid on their way to private are sealed into the private layer and journalled | Finish narrowing an agent started | *automatic* |
 
 ## G. Profile and settings
 
@@ -168,8 +171,10 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
+| `visibility.preview` | What moving one block would do, by the shared rules | C3a | read-only | Nothing changes |
+| `visibility.move` | Moves one block after the person approves the same dialog as C2 | C2, C3 | consequential | Moved and journalled, or, to or from public, marked and the Publish page opened; declining leaves it as it was (`NotAllowedError`) |
 
-Nothing an agent can do here is public. Making a block visible to others, deleting, and publishing are not tools yet. When they become tools, they will be marked consequential and ask the person first, as the UI does now.
+Nothing an agent can do here is public without the person. `visibility.move` stops at the person's approval; publishing happens on the Publish page, signed in at the PDS. Deleting and publishing are not tools yet.
 
 ## End states, in short
 
@@ -178,7 +183,7 @@ Nothing an agent can do here is public. Making a block visible to others, deleti
 | Opening anything | One block is open in the editor; the tree has revealed it and shows it selected; the graph rings it; it is in your back/forward history; its unread dot is gone |
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
-| Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer at the service, after your yes for wider. Public is reached only through Publish |
+| Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer, after your yes for wider. Public is reached only through Publish, for that one post. Every move is journalled |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |

@@ -222,7 +222,7 @@ The plugin starts a small server on your own machine, `ohm-vault`, that gives yo
 | `vault_list`, `vault_read` | List posts, and read one in full |
 | `vault_search` | Search your posts at every visibility |
 | `vault_save` | Create a post, always private, or change one that was read |
-| `vault_set_visibility` | Mark a post as public, for friends, or private |
+| `vault_set_visibility` | Ask to move a post or friends-only block to public, friends or private. With a write grant, a move to private hides it from friends at once; anything else waits for you in the cockpit |
 | `vault_status` | What publishing would change, without changing anything |
 | `vault_publish` | Publish: make what is published in your repository match your vault. It shows what would change first |
 | `vault_mirror` | Bring what you have already published on your PDS into the vault. It looks first and says what it found |

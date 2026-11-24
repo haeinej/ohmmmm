@@ -6,7 +6,7 @@ import { Refused } from '../store.mjs';
 
 export default {
   name: 'Content',
-  about: 'Content for sites, read by the member\'s DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it.',
+  about: 'Content for sites, read by the member\'s DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. When the member\'s PDS cannot be reached, Friends is still served, with the last public copy and `publicStale` (when it was read), or with `publicUnavailable` when there is none.',
   requests: {
     'com.ohmmmm.content.listChannels': {
       verb: 'GET', asks: 'viewer', changes: false,

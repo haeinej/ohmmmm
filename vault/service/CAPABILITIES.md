@@ -13,6 +13,7 @@ This page is the whole list. It is written from the same tables the service and 
 | **Posts** | Read and change the posts in a vault, one at a time. Every change names the version it replaces, so two edits never overwrite each other unseen. | `listPosts`, `getPost`, `putPost`, `deletePost` | [posts.mjs](src/capabilities/posts.mjs) |
 | **Friends** | The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here. | `listBlocks`, `getBlock`, `putBlock`, `deleteBlock`, `listFriends`, `addFriend`, `removeFriend`, `listShared`, `getShared` | [friends.mjs](src/capabilities/friends.mjs) |
 | **Private** | The private layer: private blocks, kept only as ciphertext sealed on the member's devices. The service stores and syncs them and cannot read them; no friend or agent can be given their contents by the service. Each is `{ id, ciphertext, version }`, with an opaque ID and compare-and-swap on the version. Several change together or not at all; every version is kept for restoring; the journal is sealed too; and a key rotation re-wraps every kept version and journal entry. | `listPrivateBlocks`, `getPrivateBlock`, `putPrivateBlock`, `putPrivateBlocks`, `listPrivateVersions`, `getPrivateVersion`, `listPrivateJournal`, `beginPrivateRotation`, `getPrivateRotation`, `listPrivateBelow`, `rewrapPrivate`, `finishPrivateRotation`, `deletePrivateBlock` | [private.mjs](src/capabilities/private.mjs) |
+| **Visibility** | Moves between the public, friends and private layers, by one set of rules the cockpit and the agent tools share. Every move is previewed first and journalled with who asked, who approved and why; the journal names a block by its ID only. Showing a block to more people is the member's move: an agent asks, and its request waits in the cockpit until the member answers. An agent with a write grant may start a move to private, which hides the block from friends at once; the member's device seals it when next unlocked. Public is reached only through Publish. | `previewMove`, `hideBlock`, `requestMove`, `listMoveRequests`, `declineMoveRequest`, `recordMove`, `listMoves` | [visibility.mjs](src/capabilities/visibility.mjs) |
 | **Channels** | Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here. | `listChannels`, `getChannel`, `putChannel`, `deleteChannel`, `moveChannel` | [channels.mjs](src/capabilities/channels.mjs) |
 | **Cortex** | The cortex: what the member's agents know about them and can do, as files sealed on the member's devices. The service keeps and syncs them and cannot read them. Each is `{ id, ciphertext, version }` with an opaque ID; several change together or not at all; every version is kept; the journal of who changed what, and why, is sealed too. Agents reach the cortex through the member's device, never through the service. | `listFiles`, `getFile`, `putFile`, `putFiles`, `deleteFile`, `listVersions`, `getVersion`, `listJournal`, `listBelow`, `rewrap` | [cortex.mjs](src/capabilities/cortex.mjs) |
 | **Media** | The media cache. A picture or file in a vault is a block that saves where the file is and what it is; its bytes are sent here once, so the cockpit can show them, and can always be sent again. Public and friends-only media is sent readable under its content address and can be shown smaller; private media is sealed on the member's device first and never rendered here. Nothing here is published: publishing sends a copy to the member's PDS. | `hasMedia`, `putMedia`, `getMedia`, `getRendition` | [media.mjs](src/capabilities/media.mjs) |
@@ -21,7 +22,7 @@ This page is the whole list. It is written from the same tables the service and 
 | **Mirror** | Bring what the member has already published on their PDS into the vault. It only reads the PDS, and it never changes a post the member has since changed in the vault. | `importPublished` | [mirror.mjs](src/capabilities/mirror.mjs) |
 | **Publish** | Work out what would have to change in the member's own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only standard.site documents holding an ohm post are touched, with the member's publication made the first time; a record the vault knows nothing about is never removed. | `getPublishPlan`, `getAttachment` | [publish.mjs](src/capabilities/publish.mjs) |
 | **Export** | The whole vault written out as files a person can keep: each post as Markdown, where it sits in a folder. The same files open in Obsidian, and read back as the same posts. | `exportFiles` | [export.mjs](src/capabilities/export.mjs) |
-| **Content** | Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. | `listChannels`, `getChannel`, `listBlocks`, `getBlock`, `getMedia`, `view`, `listSites`, `addSite`, `removeSite` | [content.mjs](src/capabilities/content.mjs) |
+| **Content** | Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. When the member's PDS cannot be reached, Friends is still served, with the last public copy and `publicStale` (when it was read), or with `publicUnavailable` when there is none. | `listChannels`, `getChannel`, `listBlocks`, `getBlock`, `getMedia`, `view`, `listSites`, `addSite`, `removeSite` | [content.mjs](src/capabilities/content.mjs) |
 | **Account** | For a member signed in to ohm: who they are, and which AT Protocol account their vault is. One ohm account works in one AT Protocol account, and the other way round. These ride on the ohm session only; a token from a PDS does not reach them. | `get`, `connect`, `disconnect` | [account.mjs](src/capabilities/account.mjs) |
 | **Identity** | The first steps of signing in: finding an account from its handle, and saying who a token from a PDS names. Neither touches a vault. | `findAccount`, `whoAmI` | [identity.mjs](src/capabilities/identity.mjs) |
 
@@ -343,6 +344,87 @@ Removes one private block. Its kept versions stay, so it can be restored.
 | Takes | `id`: the block's opaque ID<br>`replaces`: the version being removed<br>`journal`: optional: a sealed journal entry |
 | Gives | `id`, `removed` |
 
+## Visibility
+
+Moves between the public, friends and private layers, by one set of rules the cockpit and the agent tools share. Every move is previewed first and journalled with who asked, who approved and why; the journal names a block by its ID only. Showing a block to more people is the member's move: an agent asks, and its request waits in the cockpit until the member answers. An agent with a write grant may start a move to private, which hides the block from friends at once; the member's device seals it when next unlocked. Public is reached only through Publish.
+
+### `com.ohmmmm.vault.previewMove`
+
+What moving one block to another layer would do: the action, whether it shows the block to more people, the warning, who may finish it, what it still needs (a title, to be published), and any request already waiting. A private block is named by its opaque ID with `from=private`.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `id`: the block's or post's ID<br>`to`: public, friends or private<br>`from`: optional: `private` for a sealed block |
+| Gives | `id`, `from`, `to`, `action`, `widens`, `warning`, `finishes`, `via`, `needs`, `store`, `version`, `leaving`, `waiting` |
+
+### `com.ohmmmm.vault.hideBlock`
+
+Starts a move to private for a friends-only block or post: from now on no friend and no site reads it, and the member's device seals it into the private layer when next unlocked. The agent tools call it only with the agent's write grant on the block's channel. Sent twice, it changes nothing more.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `id`: the block's or post's ID<br>`replaces`: the version read<br>`by`: me, or agent:<name><br>`reason`: optional: why |
+| Gives | `id`, `hidden` (when), and `unchanged` when it was hidden already |
+
+### `com.ohmmmm.vault.requestMove`
+
+An agent asks the member for a move it may not finish, such as showing a block to more people. The request waits in the cockpit until the member approves or declines it; nothing moves until then. One request waits per block and layer.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `block`: the block's ID (opaque for a private block)<br>`store`: block, post or sealed<br>`from`: its layer now<br>`to`: the layer asked for<br>`version`: optional: the version read<br>`by`: agent:<name><br>`reason`: optional: why, shown to the member |
+| Gives | `request` (id, block, store, from, to, version, askedBy, reason, asked, state), and `unchanged` when one was waiting already |
+
+### `com.ohmmmm.vault.listMoveRequests`
+
+Agents' requests for moves, oldest first: those waiting, or those approved or declined.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `state`: optional: waiting (the default), approved or declined |
+| Gives | `requests` |
+
+### `com.ohmmmm.vault.declineMoveRequest`
+
+The member declines an agent's request. Nothing moves. Only the member, signed in to ohm, answers a request. Declining it again changes nothing more.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `id`: the request's ID<br>`reason`: optional: why |
+| Gives | `id`, `declined`, and `unchanged` when it was declined already |
+
+### `com.ohmmmm.vault.recordMove`
+
+The member's cockpit records a move it made, after the member approved it: a request it answers, a hidden block it sealed, or a move to or from public it handed to Publish. Only the member, signed in to ohm, records a move. Sent again with the same `moveId` (or `sealedAs`, or `request`), it changes nothing more and answers as the first time.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member, signed in to ohm |
+| Takes | `block`: the block's ID before the move<br>`from`: its layer before<br>`to`: its layer after<br>`request`: optional: the request this answers<br>`sealedAs`: optional: its opaque ID in the private layer<br>`cleanupPending`: optional: true when the old copy could not be removed<br>`reason`: optional: why<br>`moveId`: optional: the cockpit's own ID for this move, so sending it again records nothing more |
+| Gives | `block`, `from`, `to`, `state` (done, cleanup-pending, or previewed for Publish), `approved` with the request, and `unchanged` when this move was recorded already |
+
+### `com.ohmmmm.vault.listMoves`
+
+The journal of visibility moves, newest first: each block by its ID, from and to which layer, the action, how it stands, who asked, who approved and why. No titles or text.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `since`: optional: a `seq`, for only what came after it<br>`limit`: optional: up to 500 |
+| Gives | `moves` (seq, at, block, from, to, action, state, askedBy, approvedBy, reason, request) |
+
 ## Channels
 
 Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here.
@@ -632,7 +714,7 @@ What publishing would do: the posts it would publish for the first time, replace
 | --- | --- |
 | Reads or changes | Reads only (`GET`) |
 | Who may ask | The member |
-| Takes | `prepare`: optional: `1` to include `writes`, the changes to make |
+| Takes | `prepare`: optional: `1` to include `writes`, the changes to make<br>`only`: optional: one post's ID, for a preview of that post alone, as a visibility move to or from public shows it |
 | Gives | `repository`, `pds`, `collection` (`site.standard.document`), `contentType` (`com.ohmmmm.post`), `publication` when it is to be made, `create`, `replace`, `remove`, `unchanged`, `cannot`, `notInVault`, `changes` (how many); and with `prepare`, `writes` and `plan`, a name for exactly these changes |
 
 ### `com.ohmmmm.vault.getAttachment`
@@ -663,7 +745,7 @@ Every post as a file: its path in a folder, and its text.
 
 ## Content
 
-Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it.
+Content for sites, read by the member's DID: channels become collections and blocks become entries. Anyone gets what the member published to their PDS, and nothing before they publish it. A viewer the member put on their friend list, proved by a viewer token, also gets the friends layer. A viewer who is not a friend gets exactly what anyone gets. Private content is never read. Entries leave out where a file came from and who made it. When the member's PDS cannot be reached, Friends is still served, with the last public copy and `publicStale` (when it was read), or with `publicUnavailable` when there is none.
 
 ### `com.ohmmmm.content.listChannels`
 
@@ -867,6 +949,10 @@ A refusal is JSON with an `error`, which is one of the names below, and a `messa
 | `MediaUnavailable` | 503 | The media cache is not set up on this service |
 | `ViewerTokenInvalid` | 401 | The viewer token is not one this service made, is for another member, or has run out |
 | `ViewersUnavailable` | 503 | Viewer tokens, and so Friends reads for sites, are not set up on this service |
+| `NotFriendsOnly` | 409 | Only a friends-only block or post is hidden on its way to private |
+| `Answered` | 409 | The move request has been approved or declined already |
+| `NotThisMove` | 409 | The move recorded is not the one the request asked for |
+| `InvalidMove` | 400 | The layer named is not public, friends or private, or the block is in it already |
 | `NotTheirSite` | 400 | The return address is not on one of the member's sites |
 | `InternalError` | 500 | Something went wrong in the service itself |
 
@@ -881,14 +967,14 @@ The tools are in [../mcp/tools.mjs](../mcp/tools.mjs), and reach the service as 
 | `vault_read` | Reads only | `getTree`, `getPost` | Read one post in full, with its version. The version is needed to save changes to it. |
 | `vault_search` | Reads only | `searchPosts` | Search the person's public and friends-only posts. Returns the best matches with a passage from each. |
 | `vault_save` | Changes | `getTree`, `getPost`, `putPost` | Change an existing public or friends-only post. Pass the version vault_read gave. Fields left out stay as they are. Takes two calls. Use vault_capture to add a private block on the device. |
-| `vault_set_visibility` | Changes | `getTree`, `getPost`, `putPost` | Mark a post for everyone or for friends. Always takes two calls. Moves into the private layer require the person on their device. |
+| `vault_set_visibility` | Changes | `getTree`, `getPost`, `getBlock`, `previewMove`, `hideBlock`, `requestMove` | Move a post or friends-only block to another layer: public, friends or private. Takes two calls; the first says what the move does and who may finish it. Showing it to more people, or taking a published post down, is the person's move: the second call sends them a request, which waits in their cockpit. With a write grant on its channel, a move to private hides it from friends at once, and the person's device seals it. |
 | `vault_status` | Reads only | `getPublishPlan` | What publishing would change, without changing anything: the posts that would be published for the first time, replaced or taken down, the ones that cannot be published and why, and published records the vault knows nothing about. Use it to answer "what is not published yet?". |
 | `vault_publish` | Changes | `getPublishPlan`, `getAttachment` | Publish: make what is published in the person's own repository match their vault. Posts marked public are published or replaced, and published posts that are no longer public are taken down. Always takes two calls: the first says exactly what would change; the second, with the confirm value, changes it. Publishing is public the moment it is done, and taking a post down does not recall copies others already made. |
 | `vault_mirror` | Changes | `importPublished` | Bring what the person has already published on their PDS into the vault. Always takes two calls: the first only looks, and says what is there, what would differ from what is published, and what could not be kept; the second, with the confirm value, brings the posts in. It only reads the PDS, never publishes, and never changes a post the person has since changed in the vault. Posts that come with no label land under "other" and want filing. |
 | `vault_delete` | Changes | `getTree`, `getPost`, `deletePost` | Remove a post for good. Always takes two calls. |
 | `vault_friends_list` | Reads only | `listBlocks` | List your friends-only blocks. Pass the previous cursor as since to continue or read changes and removals. |
 | `vault_friends_read` | Reads only | `getBlock` | Read your friends-only block as a Markdown file with its version. |
-| `vault_friends_save` | Changes | `putBlock` | Save a friends-only block as a Markdown file with visibility: friends. Friends can read it as soon as it is saved. Preview, then confirm the exact file and version. |
+| `vault_friends_save` | Changes | `putBlock` | Change a friends-only block that is already shared, as a Markdown file with visibility: friends, from the version read. Friends read the change as soon as it is saved. It never makes a new block: a new block starts private, and vault_set_visibility asks the person to share it. Preview, then confirm the exact file and version. |
 | `vault_friends_delete` | Changes | `deleteBlock` | Remove a friends-only block for good. Preview, then confirm with the version being removed. |
 | `vault_friends_who` | Reads only | `listFriends` | List the DIDs that can read your friends layer. |
 | `vault_friends_remove` | Changes | `listFriends`, `removeFriend` | Take away a DID’s access to your friends layer. Preview and confirm. Copies they already made remain with them. |
@@ -922,6 +1008,10 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | `rewrapPrivate` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `finishPrivateRotation` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `deletePrivateBlock` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
+| `listMoveRequests` | Visibility | Answering a request and recording a move are the member's, in the cockpit, signed in to ohm. An agent asks with vault_set_visibility |
+| `declineMoveRequest` | Visibility | Answering a request and recording a move are the member's, in the cockpit, signed in to ohm. An agent asks with vault_set_visibility |
+| `recordMove` | Visibility | Answering a request and recording a move are the member's, in the cockpit, signed in to ohm. An agent asks with vault_set_visibility |
+| `listMoves` | Visibility | Answering a request and recording a move are the member's, in the cockpit, signed in to ohm. An agent asks with vault_set_visibility |
 | `listChannels` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
 | `getChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |
 | `putChannel` | Channels | The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write |

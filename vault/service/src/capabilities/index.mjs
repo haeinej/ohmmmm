@@ -23,8 +23,9 @@ import privateLayer from './private.mjs';
 import publish from './publish.mjs';
 import search from './search.mjs';
 import structure from './structure.mjs';
+import visibility from './visibility.mjs';
 
-export const CAPABILITIES = [posts, friends, privateLayer, channels, cortex, media, structure, search, mirror, publish, exporting, content, account, identity];
+export const CAPABILITIES = [posts, friends, privateLayer, visibility, channels, cortex, media, structure, search, mirror, publish, exporting, content, account, identity];
 
 // Every request by its name, with the capability it belongs to.
 export const REQUESTS = Object.fromEntries(CAPABILITIES.flatMap(capability =>
