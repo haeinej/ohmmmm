@@ -193,8 +193,12 @@ export async function scan({ vault, db, home = homedir(), now = new Date() }) {
       }
     }
     // A file that went from one path and appeared at another, the same file or the same bytes, moved.
+    // So did one a tool said it moved since the last scan (a rename that also rewrote it), whatever
+    // its bytes are now.
+    const toldMoves = await movesSince(vault, lastScan);
     for (const row of fresh) {
-      const twin = gone.findIndex(old => old.root === row.root && ((row.hash && old.hash === row.hash) || (old.ino === row.ino && old.size === row.size)));
+      const said = toldMoves.get(`${row.root}\u0000${row.path}`);
+      const twin = gone.findIndex(old => old.root === row.root && (old.path === said || (row.hash && old.hash === row.hash) || (old.ino === row.ino && old.size === row.size)));
       if (twin >= 0) report.moved.push({ root: row.root, from: gone.splice(twin, 1)[0].path, to: row.path });
       else report.added.push({ root: row.root, path: row.path });
     }
@@ -210,6 +214,13 @@ export async function scan({ vault, db, home = homedir(), now = new Date() }) {
     throw problem;
   }
   return report;
+}
+
+// The moves a tool journaled since the last scan, by where each file is now: root + path → from.
+async function movesSince(vault, lastScan) {
+  const { events } = await readEvents(vault);
+  return new Map(events.filter(event => event.op === 'moved' && event.via !== 'scan' && event.at > lastScan)
+    .map(event => [`${event.root}\u0000${event.path}`, event.from]));
 }
 
 // Write what this scan found to the journal, then load the whole journal into the index.
@@ -246,13 +257,18 @@ async function journal(vault, db, report, lastScan) {
     }
   }
   // A tool that changed or removed a file journaled it already, with the versions it kept.
-  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore'].includes(known.via) && (op === 'removed' || known.hash === hash);
+  const recorded = (known, op, hash) => known?.op === op && ['write', 'link', 'restore', 'rename'].includes(known.via) && (op === 'removed' || known.hash === hash);
+  // A move a tool journaled already is not journaled again.
+  const toldMove = new Set(before.filter(event => event.op === 'moved' && event.via !== 'scan' && event.at > lastScan)
+    .map(event => `${event.root}\u0000${event.from}\u0000${event.path}`));
   for (const { root, path } of report.changed) {
     const known = said(root, path);
     if (recorded(known, 'changed', row.get(root, path)?.hash)) continue;
     events.push({ at, op: 'changed', root, path, by: known?.by ?? 'unknown', via: 'scan', ...(known?.session ? { session: known.session } : {}), ...(row.get(root, path)?.hash ? { hash: row.get(root, path).hash } : {}) });
   }
-  for (const { root, from, to } of report.moved) events.push({ at, op: 'moved', root, path: to, from, by: said(root, to)?.by ?? 'unknown', via: 'scan' });
+  for (const { root, from, to } of report.moved) {
+    if (!toldMove.has(`${root}\u0000${from}\u0000${to}`)) events.push({ at, op: 'moved', root, path: to, from, by: said(root, to)?.by ?? 'unknown', via: 'scan' });
+  }
   for (const { root, path } of report.removed) {
     if (!recorded(said(root, path), 'removed')) events.push({ at, op: 'removed', root, path, by: said(root, path)?.by ?? 'unknown', via: 'scan' });
   }
@@ -313,7 +329,9 @@ async function rebuild(db, roots, report, { folder, before = [] }) {
   // Old names keep working: they come from the journal, and what this scan finds renamed is written
   // there first (renamed), so the index stays something the files and the journal can make again.
   let vault = readVault(files, { nodes, former: formerNames(journalEvents(db)) });
-  const renamed = renamesBetween(before, vault, { moved: report.moved, at: report.at });
+  // A rename a tool journaled already (vault_rename) is not journaled again.
+  const said = new Set(journalEvents(db).filter(event => event.op === 'renamed').map(event => `${event.path}\u0000${event.from}`));
+  const renamed = renamesBetween(before, vault, { moved: report.moved, at: report.at }).filter(event => !said.has(`${event.path}\u0000${event.from}`));
   report.renamed = renamed.map(({ path, from }) => ({ from, to: path }));
   if (renamed.length) {
     await appendEvents(folder, renamed);

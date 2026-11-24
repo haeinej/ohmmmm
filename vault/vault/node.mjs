@@ -433,6 +433,22 @@ function renamed(blocks, channels, former, report) {
 
 // ---- Evidence ----
 
+// The block a written name means, as a [[link]] finds it: by slug, by path with or without .md, by
+// file name, or by title (the first block to claim a name keeps it), then by the slug made from the
+// name. Undefined when no block answers to it now.
+export function blockResolver(vault) {
+  const blockBy = new Map();
+  for (const block of vault.blocks) {
+    for (const name of [block.slug, block.path, block.path.replace(/\.md$/i, ''), block.path.split('/').at(-1).replace(/\.md$/i, ''), block.title].filter(Boolean)) {
+      if (!blockBy.has(name.toLowerCase())) blockBy.set(name.toLowerCase(), block);
+    }
+  }
+  return target => {
+    const name = String(target).trim().replace(/\.md$/i, '').toLowerCase();
+    return blockBy.get(name) ?? blockBy.get(slugOf(name));
+  };
+}
+
 // The lines of a body that are prose, with their numbers: fenced code and `code spans` are left out,
 // so an example in code never becomes a link.
 function prose(body) {
@@ -465,19 +481,14 @@ export function evidence(vault) {
     const parent = channel.path.split('/').slice(0, -1).join('/');
     if (parent) add('contains', channelKey(parent), nodeKey(channel), 'folder');
   }
-  const blockBy = new Map();
-  for (const block of vault.blocks) {
-    for (const name of [block.slug, block.path, block.path.replace(/\.md$/i, ''), block.path.split('/').at(-1).replace(/\.md$/i, ''), block.title].filter(Boolean)) {
-      if (!blockBy.has(name.toLowerCase())) blockBy.set(name.toLowerCase(), block);
-    }
-  }
+  const blockNamed = blockResolver(vault);
   const entityBy = new Map();
   for (const entity of vault.entities) {
     for (const name of [entity.slug, entity.name, ...entity.aliases]) entityBy.set(name.replace(/^@/, '').toLowerCase(), entity);
   }
   const resolve = target => {
     const name = target.trim().replace(/\.md$/i, '').toLowerCase();
-    const block = blockBy.get(name) ?? blockBy.get(slugOf(name));
+    const block = blockNamed(target);
     if (block) return nodeKey(block);
     const entity = entityBy.get(name) ?? entityBy.get(slugOf(name));
     return entity ? nodeKey(entity) : null;

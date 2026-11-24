@@ -10,6 +10,7 @@ import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
 import { appendEvents, JOURNAL, readEvents } from '../vault/journal.mjs';
+import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
 
 // Every version an agent replaced or wrote, by content address, so any agent change can be undone.
@@ -55,8 +56,11 @@ export const LOCAL_TOOLS = [
   tool('vault_restore', 'Put a vault file back to a version kept in history (an address from vault_history), if the person granted you write on its folder. Pass the file\'s current content address as replaces when it exists.', {
     path: text, to: text, replaces: text,
   }, ['path', 'to']),
+  tool('vault_rename', 'Rename or move a block or a channel, if the person granted you write where it is and where it goes. Every file that used the old name is rewritten to the new one where you may write it; any other keeps working through the old name, and is listed in left. For a channel, give it as ref and its new path as to. For a block, give it as ref and any of: its new slug as to, a title, or a new home channel.', {
+    ref: text, to: text, title: text, channel: text,
+  }, ['ref']),
 ];
-const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore'];
+const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename'];
 
 const refuse = message => { throw new VaultProblem(message); };
 const present = value => typeof value === 'string' && value.trim() && !value.includes('\0');
@@ -159,7 +163,7 @@ async function replaceFile(path, before, after) {
 }
 
 // SQLite releases this lock even if a local MCP process exits during collection.
-async function withCollectLock(vault, DatabaseSync, collect) {
+export async function withCollectLock(vault, DatabaseSync, collect) {
   const path = await ordinaryFile(vault, ['.vault', 'collect.sqlite']);
   const lock = new DatabaseSync(path);
   try {
@@ -349,6 +353,35 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       return { path, restored: to, unchanged: before === kept };
     },
 
+    async vault_rename(db, { ref, to, title, channel }) {
+      for (const [name, value] of Object.entries({ to, title, channel })) {
+        if (value !== undefined && (!present(value) || value.length > 300 || value.includes('\n'))) refuse(`Give ${name} as one line of text.`);
+      }
+      const found = lookedUp(db, ref);
+      if (found.root !== CANONICAL) refuse('Rename what is in the vault. A read-only root is renamed where it lives.');
+      let change;
+      if (found.node.type === 'channel') {
+        if (to === undefined || title !== undefined || channel !== undefined) refuse('For a channel, give only its new path as to.');
+        change = { channel: found.node.path, to };
+      } else if (found.node.type === 'block') {
+        change = { block: found.node.path, ...(to === undefined ? {} : { slug: to }), ...(title === undefined ? {} : { title }), ...(channel === undefined ? {} : { channel }) };
+      } else refuse('Rename a block or a channel.');
+      const { files, paths } = await readVaultFolder(vault, { open: path => ordinaryFile(vault, path.split('/')) });
+      const plan = planRename(files, change, { paths });
+      // No symlink anywhere a file is moved or written.
+      if (plan.folder) await beneath(vault, plan.folder.from.split('/'));
+      for (const path of [...plan.moves.flatMap(move => [move.from, move.to]), ...plan.writes.map(write => write.path)]) {
+        if (path.split('/').some(part => part.startsWith('.'))) refuse('A rename does not touch hidden files.');
+        await ordinaryFile(vault, path.split('/'));
+      }
+      const held = await grants();
+      const may = path => Boolean(allowed(held, agent, 'write', path));
+      if (!may(plan.from) || !may(plan.to)) await mayChange('write', may(plan.from) ? plan.to : plan.from);
+      const done = await applyRename({ vault, plan, by, may, keep });
+      await rescan(db);
+      return done;
+    },
+
     async vault_capture(db, { source, channel = 'inbox', title }) {
       if (!isChannelPath(channel)) refuse('Give the channel’s path.');
       if (title !== undefined && !present(title)) refuse('Give a title as text.');
@@ -417,7 +450,7 @@ export async function serveLocalVault({ vault, agent, DatabaseSync, input, outpu
   if (!/^[A-Za-z0-9._-]+$/.test(agent)) refuse('Name the agent with letters, digits, dots, underscores or hyphens.');
   if (!(await info(vault))?.isDirectory()) refuse('Select an existing vault folder.');
   const tools = createLocalTools({ vault: await realpath(vault), by: `agent:${agent}`, DatabaseSync });
-  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals and restores need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
+  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals, restores and renames need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
   input.setEncoding('utf8');
   await serve(createServer({ tools, list: LOCAL_TOOLS, instructions }), input, output);
 }

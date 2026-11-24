@@ -13,7 +13,8 @@
 //   by     me, agent:<name>, or unknown: the vault says who only when it was told
 //   via    add (ohm vault add or vault_capture), collect (vault_collect), hook (an agent's hook),
 //          scan (found by indexing), editor, sync, write (vault_write or vault_remove), link
-//          (vault_link), restore (vault_restore or ohm vault restore)
+//          (vault_link), restore (vault_restore or ohm vault restore), rename (vault_rename or
+//          ohm vault rename)
 //   before the content address of the file as it was, kept in .vault/history/ (agent writes only)
 //   hash   the content address of the file as it is now
 import { execFile, spawn } from 'node:child_process';
@@ -23,7 +24,7 @@ import { promisify } from 'node:util';
 
 export const JOURNAL = '.vault/journal.jsonl';
 export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed'];
-export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore'];
+export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;
 
 // Why an event cannot go in the journal. Empty when it can.

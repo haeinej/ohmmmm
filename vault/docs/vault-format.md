@@ -130,7 +130,18 @@ On Are.na you can rename a channel or a block and every connection holds. The va
 - a channel's `order` still places the block it named;
 - `vault inspect notes` opens `journal`, and says it was found by an old name.
 
-Nothing is rewritten for you. Each place still using an old name is listed by `vault index` with the new name to write, so you can tidy it when you like. A name in use now always wins over an old one: make a new `notes` folder, and `notes` means the new one.
+A rename made elsewhere rewrites nothing. Each place still using an old name is listed by `vault index` with the new name to write, so you can tidy it when you like. A name in use now always wins over an old one: make a new `notes` folder, and `notes` means the new one.
+
+To rename and tidy in one go, rename through ohm. It moves the files and rewrites every place that used the old name, as Obsidian does: `channels` lists, a channel's order, a post's `connect`, and links and embeds in any text. Each link keeps the form you wrote it in, by slug, path or title, and links inside code are left alone:
+
+```sh
+npx github:haeinej/ohmmmm vault rename notes journal                 # a channel, and everything in it
+npx github:haeinej/ohmmmm vault rename rain rain-walk                # a block's slug, and its file's name
+npx github:haeinej/ohmmmm vault rename rain --title "Rain in Busan"  # its title
+npx github:haeinej/ohmmmm vault rename rain --channel essays         # its home channel
+```
+
+A channel renamed this way gets an `id` in its `_channel.md`, so a site or a record that points at it can use the ID and never break. Every file changed is journaled with both versions kept, so `ohm vault restore` can undo any of it. An agent can rename too (`vault_rename`), where you granted it write. Files it may not write keep their old names, which go on working, and it says which.
 
 Because the renames are in the journal, not only in the index, deleting the index loses none of them.
 

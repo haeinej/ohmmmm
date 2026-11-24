@@ -1,6 +1,6 @@
 # Renaming breaks nothing
 
-**Status:** decided by the owner, 24 November 2026. Step 1 is built (`vault/vault/names.mjs`). This settles decision 5 in the [app handoff](../../docs/handoff/devin-ohmmmm-app.md): channels get stable IDs, and renaming a block or a channel breaks nothing, as on Are.na.
+**Status:** decided by the owner, 24 November 2026. Steps 1 and 2 are built (`vault/vault/names.mjs`, `vault/vault/rename.mjs`). This settles decision 5 in the [app handoff](../../docs/handoff/devin-ohmmmm-app.md): channels get stable IDs, and renaming a block or a channel breaks nothing, as on Are.na.
 
 ## Why
 
@@ -34,9 +34,9 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 | `vault/vault/names.mjs` (new, built) | `formerNames(events)` reads old names from the journal; `renamesBetween` finds what a scan saw renamed |
 | `vault/vault/node.mjs` | Built: `readVault` (`former`) and `evidence` resolve `channels`, `order` and links through former names. Still to come: `order` may also hold IDs |
 | `vault/vault/indexer.mjs` | Built: `scan` writes `renamed` events and reads the vault through former names; `inspect` finds a node by an old name. No table of names, and no new `INDEX_VERSION`: the journal is the record |
-| `vault/vault/journal.mjs` | Built: `op: 'renamed'`. Still to come: `via: 'rename'` for renames made through ohm. Path changes stay `moved` with `from` |
-| `vault/vault/rename.mjs` (new) | Rename or move a block or a channel: move the files, give a channel its ID, rewrite references and journal it, under the collect lock |
-| `vault/mcp/local.mjs`, `vault/scripts/vault.mjs` | `vault_rename` (needs `write` on every channel it touches) and `ohm vault rename` |
+| `vault/vault/journal.mjs` | Built: `op: 'renamed'`, and `via: 'rename'` for renames made through ohm. Path changes stay `moved` with `from`. The scan journals a tool's rename once |
+| `vault/vault/rename.mjs` (new, built) | Rename or move a block or a channel: move the files, give a channel its ID, rewrite references and journal it, under the collect lock |
+| `vault/mcp/local.mjs`, `vault/scripts/vault.mjs` | Built: `vault_rename` (needs `write` where the node is and where it goes; references in files without a grant are left, listed, and keep working) and `ohm vault rename` |
 | `contract/vault-reader.mjs`, `vault/vault/cortex.mjs`, `cortex/src/vault.mjs` | Channels carry their `id` when they have one. Nothing is removed; `test/home.test.mjs` keeps the three together |
 | Lexicon `com.ohmmmm.vault.channel` | `order` items may be IDs |
 | `app/` | `ChannelRecord.id` stays and comes from `_channel.md`; the tree, the graph and links key channels by ID; a rename in the app goes through the same handler as the agent tool |
@@ -46,7 +46,7 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 ## Order
 
 1. **Former names,** with moves of files and folders detected. Built: from here on nothing breaks, even after renames made outside ohm (`vault/test/renames.test.mjs`).
-2. **`ohm vault rename` and `vault_rename`,** which rewrite references.
+2. **`ohm vault rename` and `vault_rename`,** which rewrite references. Built (`vault/test/rename.test.mjs`). Only the renamed channel gets an ID; channels inside it move without one, and their old paths are journaled.
 3. **Channel IDs through the contract,** the app and `com.ohmmmm.channel` records.
 4. **Former addresses in the loader** ([content-layer split](../../docs/handoff/content-layer-split.md), D1), so sites redirect.
 
