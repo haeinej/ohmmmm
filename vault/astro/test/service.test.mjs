@@ -11,7 +11,7 @@ const publicPost = {
 };
 const friendsPost = {
   id: 'two', layer: 'friends', kind: 'media', channel: 'garden', channels: ['essays'], slug: 'tree',
-  media, body: `**Friends** only ![Tree](media:${media.name}) <script>blocked()</script>`,
+  media, body: '**Friends** only\n\n![[tree.png|Tree]]\n\n`![[example.png]]`\n\n![[other.png]]\n\n<script>blocked()</script>',
 };
 const privatePost = { ...friendsPost, id: 'three', layer: 'private' };
 const entries = [publicPost, friendsPost, privatePost];
@@ -100,9 +100,12 @@ test('live reads use only the current viewer and expose only Friends entries fro
   assert.deepEqual(stranger, { entries: [] });
   const entry = await loader.loadEntry({ filter: { ...filter, id: 'two' } });
   assert.equal(entry.data.layer, 'friends');
+  assert.equal(entry.body, friendsPost.body);
   assert.equal(entry.data.media.url, `/friends/media/${media.name}`);
   assert.match(entry.rendered.html, /<strong>Friends<\/strong>/);
   assert.match(entry.rendered.html, /alt="A tree"/);
+  assert.match(entry.rendered.html, /<code>!\[\[example\.png\]\]<\/code>/);
+  assert.match(entry.rendered.html, /!\[\[other\.png\]\]/);
   assert.doesNotMatch(entry.rendered.html, /<script>/);
   for (const id of ['one', 'three', 'missing']) {
     const { error } = await loader.loadEntry({ filter: { ...filter, id } });

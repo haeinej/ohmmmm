@@ -58,7 +58,7 @@ test('example refuses routes that collide after Astro Unicode normalization', bu
 });
 
 test('Astro builds public from C2 and reads Friends only during live requests', buildOptions, async t => {
-  const media = { name: 'sha256-' + 'a'.repeat(64), type: 'image/png' };
+  const media = { name: 'sha256-' + 'a'.repeat(64) };
   const publicPost = {
     id: 'one', layer: 'public', channel: 'essays', channels: [], kind: 'post',
     slug: 'one', title: 'Public essay', body: 'This is **public**.', address: '/posts/essays/one',
@@ -66,7 +66,7 @@ test('Astro builds public from C2 and reads Friends only during live requests', 
   };
   const friendPost = {
     id: 'two', layer: 'friends', channel: 'essays', channels: [], kind: 'media', slug: 'two',
-    title: 'Friends essay', media, body: `This is **for Friends**. ![Tree](media:${media.name})`,
+    title: 'Friends essay', media, body: 'This is **for Friends**.\n\n![[tree.png|Tree]]',
   };
   const service = createServer((request, response) => {
     const url = new URL(request.url, 'http://localhost');
@@ -120,6 +120,7 @@ test('Astro builds public from C2 and reads Friends only during live requests', 
   assert.equal(friendPage.headers.get('cache-control'), 'private, no-store');
   const html = await friendPage.text();
   assert.match(html, /<strong>for Friends<\/strong>/);
+  assert.ok(html.includes(`<img src="/media/${media.name}" alt="Tree"`));
   assert.doesNotMatch(html, /Public essay|test-friend/);
   assert.doesNotMatch(await (await fetch(url)).text(), /Friends essay/);
   assert.match(await (await fetch(`${url}/?id=two`, viewer)).text(), /Friends essay/);

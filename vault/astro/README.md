@@ -125,7 +125,8 @@ and the experience when an entry is unavailable. [Content for sites](../docs/con
 Use `Cache-Control: private, no-store` for Friends HTML, data and media.
 If a page shows media, configure `mediaPath` with a local route. That route
 uses the same viewer session to call `source.readMedia()` for each request
-and forwards the response. Keep viewer tokens out of URLs and rendered
+and forwards the response. The loader renders a media block's own
+`![[file.png]]` embed through it. Keep viewer tokens out of URLs and rendered
 pages. See the [Friends example](example/friends/) for the Astro pages and
 media route. It uses an existing viewer cookie. Connect your site's callback
 and server session before using it with real viewers.

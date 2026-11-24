@@ -1,6 +1,7 @@
 import { isRecordKey, webUrl } from '../feed/pds.mjs';
 import { renderArchivePost } from '../feed/render.mjs';
 import { documentUri } from '../feed/standard.mjs';
+import { addressKind, outsideCode } from '../vault/file.mjs';
 
 const DID = /^did:[a-z]+:[A-Za-z0-9._:%-]+$/;
 const MEDIA_NAME = /^sha256-[0-9a-f]{64}$/;
@@ -46,6 +47,7 @@ function publicEntry(block, { did, site, channel, paths }) {
 function friendsEntry(block, mediaPath) {
   const { id, body, kind, slug, channel, channels, title, subtitle, tags, created, updated } = block;
   const media = new Map();
+  let renderedBody = body;
   let attachment;
   if (MEDIA_NAME.test(block.media?.name ?? '')) {
     const { name, type, alt, width, height } = block.media;
@@ -56,11 +58,27 @@ function friendsEntry(block, mediaPath) {
     attachment = { name, type, alt, width, height, url };
     if (url) {
       const [family] = (type ?? '').split('/');
-      const kind = ['image', 'video', 'audio'].includes(family) ? family : 'file';
-      media.set(name, { kind, url, alt, caption: '', poster: null });
+      const item = { kind: ['image', 'video', 'audio'].includes(family) ? family : 'file', url, alt, caption: '', poster: null };
+      media.set(name, item);
+      if (kind === 'media') {
+        // As in the workspace, a media block's first embed names its own file.
+        let seen = false;
+        renderedBody = outsideCode(body, part => part.replace(
+          /(?<!\\)!\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g,
+          (whole, target, description = '') => {
+            if (seen) return whole;
+            seen = true;
+            const fileKind = addressKind(target.trim());
+            if (!fileKind) return whole;
+            if (!type) item.kind = fileKind;
+            const label = description.trim().replace(/[\\[\]]/g, '\\$&');
+            return `![${label}](media:${name})`;
+          },
+        ));
+      }
     }
   }
-  const { bodyHtml } = renderArchivePost({ body, media, permalink: `/${encodeURIComponent(id)}` });
+  const { bodyHtml } = renderArchivePost({ body: renderedBody, media, permalink: `/${encodeURIComponent(id)}` });
   return {
     id, body, rendered: { html: bodyHtml },
     data: { layer: 'friends', kind, slug, channel, channels, title, subtitle, tags, created, updated, media: attachment },

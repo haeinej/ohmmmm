@@ -23,8 +23,9 @@ post links are expanded to the referenced post's normalized permalink using the
 complete inventory. Posts outside this collection keep their canonical URL.
 Keep the site's routes compatible with these permalinks.
 
-`build.mjs` copies these canonical feed modules and `forms.mjs` into `dist/feed`
-and the loader and service source into `dist/astro`. Their relative imports remain valid inside an
+`build.mjs` copies the canonical feed modules into `dist/feed`,
+`file.mjs` and `core.mjs` into `dist/vault`, and the loader and service
+source into `dist/astro`. Their relative imports remain valid inside an
 installed tarball. `npm pack` runs this build through `prepare`. Edit the authored
 files and rebuild. The output is ignored. Package dependencies provide
 `markdown-it` and `markdown-it-footnote`; the consuming site supplies Astro.
@@ -95,7 +96,10 @@ that depends on the viewer session.
 
 Friends `data.media` is metadata for the content address the block names.
 `mediaPath(name)` optionally supplies its same-origin route for the renderer
-and templates. Forward the current viewer token only from that server route
+and templates. For a media block the renderer maps its first workspace file
+embed to that content address and leaves the source body intact. Later
+embeds can refer to other blocks and are kept as written. Forward the
+current viewer token only from that server route
 to `readMedia({ name, viewerToken, width? })`. This calls C2's `getMedia` for
 each request and overrides its response's cache lifetime with
 `private, no-store` while preserving its content type and download headers.
