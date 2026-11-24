@@ -1,6 +1,6 @@
 # Renaming breaks nothing
 
-**Status:** decided by the owner, 24 November 2026. This settles decision 5 in the [app handoff](../../docs/handoff/devin-ohmmmm-app.md): channels get stable IDs, and renaming a block or a channel breaks nothing, as on Are.na.
+**Status:** decided by the owner, 24 November 2026. Step 1 is built (`vault/vault/names.mjs`). This settles decision 5 in the [app handoff](../../docs/handoff/devin-ohmmmm-app.md): channels get stable IDs, and renaming a block or a channel breaks nothing, as on Are.na.
 
 ## Why
 
@@ -20,7 +20,7 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 
 1. **Every block and every channel has an ID.** Blocks already do. A channel gets one the first time ohm writes its `_channel.md`, and ohm writes that file whenever the channel is renamed, ordered or described, or something outside the vault points at it. A folder no one has touched stays a channel with no ID yet, as now.
 2. **People write names; everything outside the files holds IDs.** In files, people keep writing paths and slugs (`channels: [essays]`, `[[on-rain]]`), so the folder stays readable in Obsidian or any editor. Site configs, `com.ohmmmm.channel` records (keyed by the channel's ID), links into the app, cortex memories and the journal hold IDs.
-3. **An old name keeps working.** The index keeps every name a node has had (path, slug and title) against its ID. A reference written with an old name resolves to the same node, and is listed as something to tidy, not as a break. A current name always wins over a former one. The index learns former names however the rename happened:
+3. **An old name keeps working.** Every name a node has had (path, slug and title) is kept in the journal, as `moved` and `renamed` events, and the index reads it from there, so deleting the index loses none. A reference written with an old name resolves to the same node, and is listed as something to tidy, not as a break. A current name always wins over a former one. The scan learns former names however the rename happened:
    - **A node with an ID** that turns up under a new path, slug or title: its file still carries its `id`.
    - **A file moved outside ohm** (Finder, Obsidian, `git mv`): the scan already finds moves by hash and inode, and writes `moved` with `from`.
    - **A folder with no ID:** when every block in it turns up in one new folder, the scan records the channel's move.
@@ -31,9 +31,10 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 
 | Where | Change |
 | --- | --- |
-| `vault/vault/node.mjs` | `readVault` and `evidence` resolve `channels`, `order` and links through former names; `order` may also hold IDs |
-| `vault/vault/indexer.mjs` | A `names` table (node ID, kind of name, name, until), filled by `scan`; `INDEX_VERSION` goes up |
-| `vault/vault/journal.mjs` | `via: 'rename'` for renames made through ohm. Path changes stay `moved` with `from` |
+| `vault/vault/names.mjs` (new, built) | `formerNames(events)` reads old names from the journal; `renamesBetween` finds what a scan saw renamed |
+| `vault/vault/node.mjs` | Built: `readVault` (`former`) and `evidence` resolve `channels`, `order` and links through former names. Still to come: `order` may also hold IDs |
+| `vault/vault/indexer.mjs` | Built: `scan` writes `renamed` events and reads the vault through former names; `inspect` finds a node by an old name. No table of names, and no new `INDEX_VERSION`: the journal is the record |
+| `vault/vault/journal.mjs` | Built: `op: 'renamed'`. Still to come: `via: 'rename'` for renames made through ohm. Path changes stay `moved` with `from` |
 | `vault/vault/rename.mjs` (new) | Rename or move a block or a channel: move the files, give a channel its ID, rewrite references and journal it, under the collect lock |
 | `vault/mcp/local.mjs`, `vault/scripts/vault.mjs` | `vault_rename` (needs `write` on every channel it touches) and `ohm vault rename` |
 | `contract/vault-reader.mjs`, `vault/vault/cortex.mjs`, `cortex/src/vault.mjs` | Channels carry their `id` when they have one. Nothing is removed; `test/home.test.mjs` keeps the three together |
@@ -44,7 +45,7 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 
 ## Order
 
-1. **Former names in the index,** with moves of files and folders detected. From here on nothing breaks, even after renames made outside ohm.
+1. **Former names,** with moves of files and folders detected. Built: from here on nothing breaks, even after renames made outside ohm (`vault/test/renames.test.mjs`).
 2. **`ohm vault rename` and `vault_rename`,** which rewrite references.
 3. **Channel IDs through the contract,** the app and `com.ohmmmm.channel` records.
 4. **Former addresses in the loader** ([content-layer split](../../docs/handoff/content-layer-split.md), D1), so sites redirect.

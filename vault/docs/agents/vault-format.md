@@ -78,7 +78,7 @@ CLI: [scripts/vault.mjs](../../scripts/vault.mjs), run as `ohm vault init|add SO
 [vault/journal.mjs](../../vault/journal.mjs) manages `.vault/journal.jsonl` (`JOURNAL`).
 - The journal is append-only. It is **not** derived data: never truncate or rewrite it, and sync it with the vault.
 - Event shape: `{ at, op, root, path, from?, origin?, by, via, session?, hash? }`.
-  - `op` is one of `added`, `changed`, `moved` (needs `from`), `removed`, `written`, `copied-from` (needs `origin`) or `downloaded-from` (needs `origin`).
+  - `op` is one of `added`, `changed`, `moved` (needs `from`), `removed`, `written`, `copied-from` (needs `origin`), `downloaded-from` (needs `origin`) or `renamed` (needs `from`: the old name; `path` is the block's file, or the channel's folder, now).
   - `by` is `me`, `unknown` or `agent:<name>`.
   - `via` is `add`, `hook`, `scan`, `editor` or `sync`.
 - `appendEvents` checks every event, then writes all of them or none, in one append.
@@ -89,9 +89,24 @@ How `scan` writes the journal: after walking, and **before** the index transacti
 - for each added file, `added`, unless an `add`, `hook` or `editor` event since the last scan already said `added`;
 - `changed`, `moved` and `removed` events;
 - for a new file in the vault folder that has no stated origin, `copied-from` when its content address matches another indexed file (read-only roots preferred);
-- for a new non-`.md` file, `downloaded-from` from macOS.
+- for a new non-`.md` file, `downloaded-from` from macOS;
+- then, inside the rebuild, `renamed` events for what `renamesBetween` finds (below), appended and loaded into `events` before the vault is read a second time.
 
-`by` comes from the latest non-scan event for that path since the last scan (`meta.scanned`); otherwise it is `unknown`. The whole journal is then loaded into the `events` table. A crash between the append and the commit can repeat an event; it cannot lose one. `INDEX_VERSION` is 2. `history(db, root, path)` follows `moved` events backwards, and `inspect` returns it as `history`.
+## Former names
+
+[vault/names.mjs](../../vault/names.mjs). Pure; no disk. Plan: [renames.md](../../plans/renames.md), step 1.
+- `formerNames(events)` → `{ channels: Map<old path, path now>, blocks: Map<nameKey(old name), file now> }`, from the vault root's `moved` and `renamed` events in order. A later event wins for a name. Chains are followed (`notes` → `journal` → `diary`), cycles stop.
+  - `moved`: the file's `pathNames(from)` (the path, the file name and `slugOf` it, as `nameKey`) name the new file; a moved `_channel.md` names its folder's move.
+  - `renamed`: a `from` ending in `.md` gives its `pathNames`; any other `from` with a `.md` `path` is one block name; with a folder `path` it is a channel's old path.
+- `renamesBetween(before, vault, { moved, at })` → `renamed` events (`root: 'vault'`, `by: 'unknown'`, `via: 'scan'`):
+  - a block found again (by `id`, else by its file's move, else at the same path) that lost its old slug or title, unless the move's `pathNames` already cover it; and its old path when no move says so;
+  - a channel whose path is gone: by `id`; else, when every block anywhere under it now sits under one other folder in the same place inside it (`notes/2026/x` → `journal/2026/x` gives `notes` → `journal`). A moved `_channel.md` is left to its `moved` event. Folders whose blocks split are not taken for a rename.
+- `readVault(files, { nodes, former })`: before its checks, a block's `channels` entry or a channel's `order` entry that names nothing now, but a former name does, is put on the node it names now, and a problem says the name to write. A current name always wins.
+- `evidence(vault)`: a `[[link]]`, `![[embed]]` or `connect` target that only `vault.former` explains resolves to that block, and its edge carries `former: <the name written>`. `scan` lists each as a problem on the linking file.
+- `scan` reads `nodes` before the rebuild as `before`; reads the vault with `formerNames` of the `events` table; writes `renamesBetween`'s events to the journal and `events`, and reads the vault again if there were any. `report.renamed` is `[{ from, to }]`. There is no table of names: the journal is the record, so a deleted index loses nothing.
+- `inspect(db, ref)` falls back to former names (a channel's old path, a block's old name) and then says `formerly: ref`.
+
+`by` comes from the latest non-scan event for that path since the last scan (`meta.scanned`); otherwise it is `unknown`. The whole journal is then loaded into the `events` table. A crash between the append and the commit can repeat an event; it cannot lose one. `INDEX_VERSION` is 3. `history(db, root, path)` follows `moved` events backwards, and `inspect` returns it as `history`.
 
 [vault/add.mjs](../../vault/add.mjs):
 - `addToVault({ vault, source, channel = 'inbox', by = 'me', title, move })`:

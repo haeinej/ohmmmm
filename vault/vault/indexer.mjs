@@ -15,6 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { blobCid, FILE_TYPES, kindOf as mediaKind } from './core.mjs';
 import { slugOf } from './file.mjs';
+import { formerNames, nameKey, renamesBetween } from './names.mjs';
 import { evidence, nodeKey, originKind, readVault, SOURCES } from './node.mjs';
 import { appendEvents, downloadedFrom, readEvents } from './journal.mjs';
 import { CANONICAL, CONFIG, readConfig } from './roots.mjs';
@@ -112,7 +113,7 @@ export const stampOf = info => `${info.ino}:${info.size}:${info.mtimeMs}:${info.
 // Bring the index into line with the vault folder and its roots, and say what changed.
 //   vault: the vault's absolute path; db: from openIndex; home: for "~" in the configuration
 export async function scan({ vault, db, home = homedir(), now = new Date() }) {
-  const report = { at: now.toISOString(), roots: [], added: [], changed: [], removed: [], moved: [], recognised: [], journaled: 0, unchanged: 0, opened: 0, cached: 0, problems: [] };
+  const report = { at: now.toISOString(), roots: [], added: [], changed: [], removed: [], moved: [], renamed: [], recognised: [], journaled: 0, unchanged: 0, opened: 0, cached: 0, problems: [] };
   const lastScan = db.prepare("SELECT value FROM meta WHERE key = 'scanned'").get()?.value ?? '';
   let config;
   try {
@@ -198,8 +199,10 @@ export async function scan({ vault, db, home = homedir(), now = new Date() }) {
       else report.added.push({ root: row.root, path: row.path });
     }
     report.removed.push(...gone.map(row => ({ root: row.root, path: row.path })));
+    // The nodes as they were, to see what this scan finds renamed (names.mjs).
+    const before = db.prepare('SELECT key, node FROM nodes').all().map(row => ({ key: row.key, node: JSON.parse(row.node) }));
     await journal(vault, db, report, lastScan);
-    rebuild(db, roots, report);
+    await rebuild(db, roots, report, { folder: vault, before });
     db.prepare("INSERT INTO meta (key, value) VALUES ('scanned', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(report.at);
     db.exec('COMMIT');
   } catch (problem) {
@@ -290,7 +293,11 @@ export function rootBlocks(root, rows) {
   return { files, nodes, where };
 }
 
-function rebuild(db, roots, report) {
+// The events the journal holds, as names.mjs reads them.
+const journalEvents = db => db.prepare('SELECT op, root, path, from_path FROM events ORDER BY seq').all()
+  .map(row => ({ op: row.op, root: row.root, path: row.path, from: row.from_path ?? undefined }));
+
+async function rebuild(db, roots, report, { folder, before = [] }) {
   for (const table of ['nodes', 'edges', 'terms', 'problems']) db.exec(`DELETE FROM ${table}`);
   const rows = db.prepare('SELECT * FROM files').all();
   const own = rows.filter(row => row.root === CANONICAL);
@@ -303,7 +310,18 @@ function rebuild(db, roots, report) {
     nodes.push(...made.nodes);
     for (const [path, row] of made.where) where.set(path, row);
   }
-  const vault = readVault(files, { nodes });
+  // Old names keep working: they come from the journal, and what this scan finds renamed is written
+  // there first (renamed), so the index stays something the files and the journal can make again.
+  let vault = readVault(files, { nodes, former: formerNames(journalEvents(db)) });
+  const renamed = renamesBetween(before, vault, { moved: report.moved, at: report.at });
+  report.renamed = renamed.map(({ path, from }) => ({ from, to: path }));
+  if (renamed.length) {
+    await appendEvents(folder, renamed);
+    const insert = db.prepare('INSERT INTO events (at, op, root, path, from_path, origin, by, via, session, hash) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL)');
+    for (const event of renamed) insert.run(event.at, event.op, event.root, event.path, event.from, event.by, event.via);
+    report.journaled += renamed.length;
+    vault = readVault(files, { nodes, former: formerNames(journalEvents(db)) });
+  }
   // A block read from a root's Markdown says where it came from, like any other block of a root.
   for (const block of vault.blocks) {
     const row = where.get(block.path);
@@ -327,7 +345,19 @@ function rebuild(db, roots, report) {
     for (const [term, weight] of weights) insertTerm.run(term, key, weight);
   }
   const insertEdge = db.prepare('INSERT INTO edges (kind, src, dst, at) VALUES (?, ?, ?, ?)');
-  for (const edge of evidence(vault)) insertEdge.run(edge.kind, edge.from, edge.to, String(edge.at));
+  const pathOf = new Map(all.map(node => [nodeKey(node), node.path]));
+  const slugOfKey = new Map(vault.blocks.map(block => [nodeKey(block), block.slug]));
+  for (const edge of evidence(vault)) {
+    insertEdge.run(edge.kind, edge.from, edge.to, String(edge.at));
+    // A link written with an old name still counts; it is listed to tidy.
+    if (edge.former) {
+      const path = pathOf.get(edge.from);
+      const where = /^\d+$/.test(String(edge.at)) ? `on line ${edge.at}` : `in ${edge.at}`;
+      const problem = `[[${edge.former}]] ${where} is "${slugOfKey.get(edge.to)}" now. It still links there; write [[${slugOfKey.get(edge.to)}]] to tidy it`;
+      const held = vault.problems.find(each => each.path === path);
+      if (held) held.problems.push(problem); else vault.problems.push({ path, problems: [problem] });
+    }
+  }
   const insertProblem = db.prepare('INSERT INTO problems (root, path, problem) VALUES (?, ?, ?)');
   for (const { path, problems } of vault.problems) {
     const row = where.get(path);
@@ -350,11 +380,23 @@ function rebuild(db, roots, report) {
 const plain = row => ({ ...row });
 
 // One node with everything known about it: the node, its file's size, times and content address,
-// and the edges into and out of it. `ref` is a node key, a slug, or a path in the vault.
+// and the edges into and out of it. `ref` is a node key, a slug, or a path in the vault, or a name
+// it had before (`formerly` then says which).
 export function inspect(db, ref) {
+  let formerly;
+  const byFormer = () => {
+    const former = formerNames(journalEvents(db));
+    const channel = former.channels.get(ref);
+    const file = former.blocks.get(nameKey(ref)) ?? former.blocks.get(slugOf(nameKey(ref)));
+    const found = (channel !== undefined && db.prepare("SELECT * FROM nodes WHERE type = 'channel' AND path = ?").get(channel))
+      || (file && db.prepare("SELECT * FROM nodes WHERE root = 'vault' AND file = ?").get(file));
+    if (found) formerly = ref;
+    return found || undefined;
+  };
   const row = db.prepare('SELECT * FROM nodes WHERE key = ?').get(ref)
     ?? db.prepare("SELECT * FROM nodes WHERE slug = ? ORDER BY type = 'block' DESC LIMIT 1").get(ref)
-    ?? db.prepare('SELECT * FROM nodes WHERE path = ? OR file = ? LIMIT 1').get(ref, ref);
+    ?? db.prepare('SELECT * FROM nodes WHERE path = ? OR file = ? LIMIT 1').get(ref, ref)
+    ?? byFormer();
   if (!row) return null;
   const file = row.file ? db.prepare('SELECT root, path, abs, size, mtime, hash, cached, seen FROM files WHERE root = ? AND path = ?').get(row.root, row.file) : null;
   return {
@@ -364,6 +406,7 @@ export function inspect(db, ref) {
     out: db.prepare('SELECT kind, dst AS node, at FROM edges WHERE src = ? ORDER BY kind, dst').all(row.key).map(plain),
     in: db.prepare('SELECT kind, src AS node, at FROM edges WHERE dst = ? ORDER BY kind, src').all(row.key).map(plain),
     ...(row.file ? { history: history(db, row.root, row.file) } : {}),
+    ...(formerly ? { formerly } : {}),
   };
 }
 

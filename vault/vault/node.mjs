@@ -331,10 +331,13 @@ export const nodeKey = node => node.type === 'channel'
 
 // Every file of a vault read together: the nodes, every channel including the folders with no
 // _channel.md, and what could not be read, by path.
-//   files: [{ path, text }]
-//   nodes: nodes made elsewhere, such as the blocks the indexer makes for files in a read-only root,
-//          each with its own `problems` list (may be empty)
-export function readVault(files, { nodes = [] } = {}) {
+//   files:  [{ path, text }]
+//   nodes:  nodes made elsewhere, such as the blocks the indexer makes for files in a read-only root,
+//           each with its own `problems` list (may be empty)
+//   former: what old names name now, from the journal (formerNames in names.mjs): { channels: Map
+//           old path → path, blocks: Map old name → file }. A reference that only an old name
+//           explains still counts, and is listed as something to tidy, never as a break.
+export function readVault(files, { nodes = [], former } = {}) {
   const blocks = [], entities = [], sources = [], problems = [];
   const channels = new Map();
   const reads = [...files.map(({ path, text: content }) => [path, readNode(path, content)]),
@@ -362,6 +365,7 @@ export function readVault(files, { nodes = [] } = {}) {
     if (held) held.problems.push(problem);
     else problems.push({ path, problems: [problem] });
   };
+  if (former) renamed(blocks, channels, former, report);
   const bySlug = new Map(), byId = new Map();
   for (const node of [...blocks, ...entities, ...sources, ...channels.values()]) {
     if (!node.id) continue;
@@ -388,7 +392,43 @@ export function readVault(files, { nodes = [] } = {}) {
       .sort((a, b) => String(b.created ?? b.id ?? '').localeCompare(String(a.created ?? a.id ?? '')) || name(a).localeCompare(name(b)));
     return [...listed, ...others];
   };
-  return { blocks, channels: [...channels.values()].sort((a, b) => a.path.localeCompare(b.path)), entities, sources, problems, items };
+  return { blocks, channels: [...channels.values()].sort((a, b) => a.path.localeCompare(b.path)), entities, sources, problems, items, ...(former ? { former } : {}) };
+}
+
+// A name as references match it: trimmed, without .md, in lower case.
+const referenceName = name => String(name).trim().replace(/\.md$/i, '').toLowerCase();
+
+// The block an old name names now, if any: by the name, or by the slug made from it.
+function formerBlock(former, blocks, name) {
+  const path = former?.blocks?.get(referenceName(name)) ?? former?.blocks?.get(slugOf(referenceName(name)));
+  return path ? blocks.find(block => block.path === path) : undefined;
+}
+
+// Puts old names in `channels` lists and `order` back on what they name now, and says so.
+function renamed(blocks, channels, former, report) {
+  const channelNow = name => {
+    const to = former.channels?.get(name);
+    return to !== undefined && to !== name && channels.has(to) ? to : undefined;
+  };
+  for (const block of blocks) {
+    const now = block.channels.map(name => {
+      if (channels.has(name)) return name;
+      const to = channelNow(name);
+      if (to) report(block.path, `It names the channel "${name}", which is "${to}" now. It still counts there; write "${to}" to tidy it`);
+      return to ?? name;
+    });
+    block.channels = unique(now).filter(name => name !== block.home);
+  }
+  const slugs = new Set(blocks.map(block => block.slug));
+  for (const channel of channels.values()) {
+    if (!channel.order.length) continue;
+    channel.order = unique(channel.order.map(name => {
+      if (slugs.has(name) || channels.has(name)) return name;
+      const to = channelNow(name) ?? formerBlock(former, blocks, name)?.slug;
+      if (to) report(`${channel.path}/${CHANNEL_FILE}`, `Its order names "${name}", which is "${to}" now. It still counts; write "${to}" to tidy it`);
+      return to ?? name;
+    }));
+  }
 }
 
 // ---- Evidence ----
@@ -415,9 +455,11 @@ function prose(body) {
 // its body points at, mentions the entities it names by @handle, and is from or quotes its source.
 // Each edge says where it was read: `at` is the line of the body, or the property it came from.
 // A target the vault does not have is kept, as missing:<what was written>, so nothing is dropped.
+// A target only an old name explains (readVault's `former`) is found, and its edge says `former`:
+// the name written, to tidy.
 export function evidence(vault) {
   const edges = [];
-  const add = (kind, from, to, at) => edges.push({ kind, from, to, at });
+  const add = (kind, from, to, at, former) => edges.push({ kind, from, to, at, ...(former ? { former } : {}) });
   const channelKey = path => nodeKey(vault.channels.find(channel => channel.path === path) ?? { type: 'channel', path });
   for (const channel of vault.channels) {
     const parent = channel.path.split('/').slice(0, -1).join('/');
@@ -440,6 +482,13 @@ export function evidence(vault) {
     const entity = entityBy.get(name) ?? entityBy.get(slugOf(name));
     return entity ? nodeKey(entity) : null;
   };
+  // What only an old name explains, from the journal (readVault's `former`): the edge says which name.
+  const named = target => {
+    const key = resolve(target);
+    if (key) return { key };
+    const block = formerBlock(vault.former, vault.blocks, target);
+    return block ? { key: nodeKey(block), former: target.trim() } : { key: `missing:${target.trim()}` };
+  };
   for (const block of vault.blocks) {
     const self = nodeKey(block);
     if (block.home) add('contains', channelKey(block.home), self, 'folder');
@@ -450,17 +499,18 @@ export function evidence(vault) {
       add(block.excerpt ? 'quotes' : 'from', self, key, block.excerpt ? 'excerpt' : 'from');
     }
     for (const value of [block.post?.connect ?? []].flat()) {
-      const key = /^https?:\/\//i.test(value) ? `url:${value}` : /^at:\/\//.test(value) ? `at:${value}` : resolve(value) ?? `missing:${value}`;
-      add('links', self, key, 'connect');
+      const { key, former } = /^https?:\/\//i.test(value) ? { key: `url:${value}` } : /^at:\/\//.test(value) ? { key: `at:${value}` } : named(value);
+      add('links', self, key, 'connect', former);
     }
     for (const { line, text: content } of prose(block.body)) {
       for (const [, target] of content.matchAll(/!\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g)) {
         const name = target.trim();
-        const key = /\.[A-Za-z0-9]{1,5}$/.test(name) && !/\.md$/i.test(name) ? `file:${name}` : resolve(name) ?? `missing:${name}`;
-        add('embeds', self, key, line);
+        const { key, former } = /\.[A-Za-z0-9]{1,5}$/.test(name) && !/\.md$/i.test(name) ? { key: `file:${name}` } : named(name);
+        add('embeds', self, key, line, former);
       }
       for (const [, target] of content.replace(/!\[\[[^\]]*\]\]/g, ' ').matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)) {
-        add('links', self, resolve(target) ?? `missing:${target.trim()}`, line);
+        const { key, former } = named(target);
+        add('links', self, key, line, former);
       }
       for (const [, address] of content.matchAll(/(?<!!)\[[^\]]*\]\(\s*<?((?:https?|at):\/\/[^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) {
         add('links', self, address.startsWith('at:') ? `at:${address}` : `url:${address}`, line);

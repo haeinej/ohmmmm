@@ -7,7 +7,9 @@
 //
 //   op     added, changed, moved (from: the old path), removed, written (an agent wrote the file,
 //          reported by its hook), copied-from (origin: the file it has the same bytes as),
-//          downloaded-from (origin: the address macOS recorded when it was downloaded)
+//          downloaded-from (origin: the address macOS recorded when it was downloaded), renamed
+//          (from: the name it had; path: the block's file, or the channel's folder, now). Renames
+//          are what keep old names working (names.mjs)
 //   by     me, agent:<name>, or unknown: the vault says who only when it was told
 //   via    add (ohm vault add or vault_capture), collect (vault_collect), hook (an agent's hook),
 //          scan (found by indexing), editor, sync, write (vault_write or vault_remove), link
@@ -20,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 export const JOURNAL = '.vault/journal.jsonl';
-export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from'];
+export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed'];
 export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;
 
@@ -34,6 +36,7 @@ export function eventProblems(event) {
   if (typeof event.root !== 'string' || !event.root) problems.push('root names the root the file is in');
   if (typeof event.path !== 'string' || !event.path || event.path.startsWith('/') || event.path.split('/').includes('..')) problems.push('path is the file\'s path inside its root');
   if (event.op === 'moved' && typeof event.from !== 'string') problems.push('A move says where from');
+  if (event.op === 'renamed' && (typeof event.from !== 'string' || !event.from.trim())) problems.push('A rename says the name it had');
   if (['copied-from', 'downloaded-from'].includes(event.op) && typeof event.origin !== 'string') problems.push('It says the origin');
   if (!Number.isFinite(Date.parse(event.at))) problems.push('at is a time');
   for (const key of ['before', 'hash']) if (event[key] !== undefined && event[key] !== null && !/^b[a-z2-7]{20,}$/.test(event[key])) problems.push(`${key} is a content address`);

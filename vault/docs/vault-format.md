@@ -119,6 +119,21 @@ npx github:haeinej/ohmmmm vault status
 
 If Google Drive is not running, its root cannot be read. The index keeps what it knew about it and says so, rather than treating its files as removed. The index can always be deleted: the next `vault index` makes it again from your files.
 
+### Renaming breaks nothing
+
+On Are.na you can rename a channel or a block and every connection holds. The vault keeps the same promise, however you rename: in Finder, in Obsidian, with `git mv`, or by editing a title.
+
+`vault index` notices when a block turns up under a new name (the same `id`, or the same file moved) and when a folder's blocks all turn up in another folder. It writes each rename into the journal. From then on the old name still means the same thing:
+
+- a block that lists `channels: [notes]` is still in the channel now called `journal`;
+- `[[Rain in Seoul]]` still links to the block now titled "Rain in Busan", and `[[rain]]` to the file now called `rain-walk.md`;
+- a channel's `order` still places the block it named;
+- `vault inspect notes` opens `journal`, and says it was found by an old name.
+
+Nothing is rewritten for you. Each place still using an old name is listed by `vault index` with the new name to write, so you can tidy it when you like. A name in use now always wins over an old one: make a new `notes` folder, and `notes` means the new one.
+
+Because the renames are in the journal, not only in the index, deleting the index loses none of them.
+
 ## Where things came from
 
 Once a file has been copied into a folder, nothing in it says where it was copied from. So the vault writes down where things came from at the moment they arrive, in `.vault/journal.jsonl`: one line for each file added, changed, moved or removed, with who did it and how. Unlike the index, the journal cannot be made again from your files, so it is only ever added to, and it stays with the vault.
