@@ -12,7 +12,7 @@ import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
+import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -326,6 +326,9 @@ export function previewMove(id: string, to: Visibility) {
  * finished on the Publish page, which previews that one post. Every move is journalled.
  */
 export function setVisibility(id: string, visibility: Visibility, { request, reason }: { request?: string; reason?: string } = {}) {
+  // A move to private that sealed its copy before failing: moving it again finishes only what is left.
+  const pending = pendingSeals.get(id)
+  if (pending && visibility === "private") return serial(() => finishSeal(id, pending))
   const preview = previewMove(id, visibility)
   // The home on this computer publishes only through its own Publish dialog, which the person runs.
   if (preview.via === "publish" && "planPublish" in (getSource() ?? {})) {
@@ -357,6 +360,18 @@ export function setVisibility(id: string, visibility: Visibility, { request, rea
     const target: MoveTarget = visibility === "private" ? { layer: "private", opaqueId: newOpaqueId() } : { layer: "friends" }
     const moved = await live().moveVisibility(held.ref, target, held.version)
     const file = await live().readBlock(moved.ref)
+    if (target.layer === "private") {
+      // Sealed: from here on, a retry finishes this move rather than sealing another copy.
+      const seal: PendingSeal = {
+        from: held.ref, version: held.version, sealed: moved.ref, removed: !moved.cleanupPending, journalled: null,
+        record: { block: id, from, to: "private", sealedAs: moved.ref.id, moveId: newMoveId(), ...(request ? { request } : {}), ...(reason ? { reason } : {}) },
+      }
+      pendingSeals.set(id, seal)
+      // A friends copy that could not be removed stays in the tree, where moving it again removes it.
+      if (seal.removed) dropBlock(id)
+      landBlock(moved.ref, { path: file.path, text: file.text }, file.version)
+      return finishSeal(id, seal, { remove: false })
+    }
     if (moved.ref.id !== id || held.ref.layer !== moved.ref.layer) dropBlock(id)
     landBlock(moved.ref, { path: file.path, text: file.text }, file.version)
     await live().moves.record({
@@ -366,6 +381,49 @@ export function setVisibility(id: string, visibility: Visibility, { request, rea
     set(bump())
     return { id: moved.ref.id, visibility, cleanupPending: moved.cleanupPending }
   })
+}
+
+/**
+ * A move to private that sealed its copy but did not finish: the friends copy is still to be removed
+ * (cleanup pending), or the move is still to be journalled. Keyed by the block's ID before the move.
+ * Moving the block to private again runs `finishSeal`, which does only what is left, so a retry never
+ * seals a second private copy, and the journal hears of the move once (by its `moveId`).
+ *
+ * Remembered here rather than worked out from the opaque ID: an opaque ID derived from the vault ID
+ * would let the service tie a sealed block to the block it came from, which is what an opaque ID is
+ * for not doing. Nor is a sealed copy with the same vault ID proof of an unfinished move: sharing a
+ * block keeps its private copy, an older one. It lasts while the home is open; after a reload, a
+ * friends copy left behind is moved like any other block.
+ */
+type PendingSeal = {
+  from: BlockRef; version: string; sealed: BlockRef; removed: boolean
+  /** What the journal has been told: nothing yet, the move with its old copy left, or the move done. */
+  journalled: null | "cleanup-pending" | "done"
+  record: MoveRecord & { moveId: string }
+}
+const pendingSeals = new Map<string, PendingSeal>()
+const newMoveId = () => `m${crypto.randomUUID().replaceAll("-", "")}`
+/** Removes the friends copy if it is still there (unless `remove` is false), then journals what is new. Runs inside `serial`. */
+async function finishSeal(id: string, seal: PendingSeal, { remove = true } = {}): Promise<{ id: string; visibility: Visibility; cleanupPending: boolean; publish?: string }> {
+  if (remove && !seal.removed) {
+    try {
+      await live().deleteBlock(seal.from, seal.version)
+      seal.removed = true
+      dropBlock(id)
+    } catch { /* still there: the move stays cleanup-pending, and moving it again tries once more */ }
+  }
+  if (seal.journalled === null) {
+    await live().moves.record({ ...seal.record, ...(seal.removed ? {} : { cleanupPending: true }) })
+    seal.journalled = seal.removed ? "done" : "cleanup-pending"
+  } else if (seal.journalled === "cleanup-pending" && seal.removed) {
+    // The old copy is gone now: a second line says the move is done. The request was answered by the first.
+    const { request: _answered, reason: _given, ...move } = seal.record
+    await live().moves.record({ ...move, moveId: `${seal.record.moveId}-done` })
+    seal.journalled = "done"
+  }
+  if (seal.journalled === "done") pendingSeals.delete(id)
+  set(bump())
+  return { id: seal.sealed.id, visibility: "private", cleanupPending: !seal.removed }
 }
 
 const doc = (id: string) => { const found = byId(id); if (!isBlock(found)) throw new DOMException("Only blocks have visibility", "DataError"); return found }
@@ -476,6 +534,7 @@ async function movesOnOpen() {
   friendRequests = []
   // Friends are not shown in the first release (features.ts); their requests are read only when they are.
   if (features.connections) try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
+  pendingSeals.clear()
   try {
     await loadMoveRequests()
     await sealHidden()
@@ -494,6 +553,12 @@ export async function loadMoveRequests() {
 export async function approveMoveRequest(requestId: string) {
   const request = moveRequests.find(each => each.id === requestId)
   if (!request) throw new DOMException("That request is no longer waiting", "NotFoundError")
+  // Approved before, but the move did not finish: finish it, without checking a copy that may be gone.
+  if (request.to === "private" && pendingSeals.has(request.block)) {
+    const moved = await setVisibility(request.block, request.to, { request: request.id })
+    await loadMoveRequests()
+    return moved
+  }
   const held = blockVersion(request.block)
   if (!held) throw new DOMException("The block it asks about is not here, or is locked on this device", "NotFoundError")
   // Pinned to what the agent read: a block changed since then is reviewed again.

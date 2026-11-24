@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createLocalTools } from '../mcp/local.mjs';
 import { allowed, changeGrants, readGrants } from '../vault/grants.mjs';
-import { readEvents } from '../vault/journal.mjs';
+import { blobCid } from '../vault/core.mjs';
+import { HISTORY, keepVersion, readEvents } from '../vault/journal.mjs';
 import { readConfig } from '../vault/roots.mjs';
 
 // Every note here is invented.
@@ -69,6 +70,12 @@ test('an agent writes within its grant, replaces only what it read, and every ve
   const original = await readFile(join(vault, 'notes/walk.md'), 'utf8');
   const changed = await call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\n---\n\nRewritten.\n', replaces: read.file.hash });
   assert.equal(changed.before, read.file.hash);
+  // The same write tried again, its answer lost, is not refused: the file says it already.
+  const retried = await call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\n---\n\nRewritten.\n', replaces: read.file.hash });
+  assert.deepEqual([retried.unchanged, retried.hash], [true, changed.hash]);
+  const madeAgain = await call('vault_write', { path: 'notes/new.md', text: 'A new idea about lanterns.' });
+  assert.deepEqual([madeAgain.made, madeAgain.unchanged, madeAgain.hash], [false, true, made.hash]);
+  await assert.rejects(call('vault_write', { path: 'notes/new.md', text: 'Another idea.' }), /replaces/);
   const { events: history } = await call('vault_history', { path: 'notes/walk.md' });
   assert.equal(history[0].via, 'write');
   assert.equal(history[0].by, 'agent:helper');
@@ -80,6 +87,28 @@ test('an agent writes within its grant, replaces only what it read, and every ve
   assert.match(await readFile(join(vault, 'notes/new.md'), 'utf8'), /new idea/);
   const { events } = await readEvents(vault);
   assert.ok(events.filter(event => event.via === 'restore').length === 2);
+});
+
+test('a kept version is never left cut off under its address: one that does not match is written again', async t => {
+  const { vault, call } = await setUp(t);
+  await grant(vault, { write: ['notes'] });
+  const text = '---\ntitle: Lanterns\n---\n\nPaper lanterns along the river.\n';
+  const address = await blobCid(Buffer.from(text, 'utf8'));
+  // A crash part-way through keeping it, before versions were kept whole, left only its start.
+  await mkdir(join(vault, HISTORY), { recursive: true });
+  await writeFile(join(vault, HISTORY, address), text.slice(0, 20));
+  assert.equal(await keepVersion(vault, text), address);
+  assert.equal(await readFile(join(vault, HISTORY, address), 'utf8'), text);
+  // A whole one is left as it is, and no temporary file stays behind.
+  assert.equal(await keepVersion(vault, text), address);
+  assert.deepEqual((await readdir(join(vault, HISTORY))).filter(name => name.startsWith('.')), []);
+
+  // The agent's tools keep theirs the same way.
+  const after = '---\ntitle: Lanterns\n---\n\nPaper lanterns, then rain.\n';
+  const hash = await blobCid(Buffer.from(after, 'utf8'));
+  await writeFile(join(vault, HISTORY, hash), 'cut');
+  await call('vault_write', { path: 'notes/lanterns.md', text: after, replaces: (await call('vault_local_read', { ref: 'lanterns' })).file.hash });
+  assert.equal(await readFile(join(vault, HISTORY, hash), 'utf8'), after);
 });
 
 test('an agent links within a link grant, once, with a note, and the link becomes evidence', async t => {

@@ -56,10 +56,10 @@ export function friendshipStore(db) {
       if (owner === viewer) throw new Refused(400, 'InvalidRequest', 'You can always read your own vault');
       if (message !== undefined && message !== null && (typeof message !== 'string' || message.length > MESSAGE)) throw new Refused(400, 'InvalidRequest', `A message is text, at most ${MESSAGE} characters`);
       if (await friendScope(db, owner, viewer)) return { asked: true };
-      const held = await db.prepare("SELECT id FROM friend_requests WHERE did = ?1 AND friend = ?2 AND state = 'waiting'").bind(owner, viewer).first();
-      if (held) return { asked: true };
+      // One request waits for each asker (friend_requests_one_waiting): a second ask, even at the
+      // same moment as the first, leaves the one already waiting.
       await db.prepare(`INSERT INTO friend_requests (did, id, friend, name, email, message, asked_at, state)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'waiting')`).bind(owner, `f${crypto.randomUUID().replaceAll('-', '')}`, viewer, name || null, email || null, message || null, now.toISOString()).run();
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'waiting') ON CONFLICT DO NOTHING`).bind(owner, `f${crypto.randomUUID().replaceAll('-', '')}`, viewer, name || null, email || null, message || null, now.toISOString()).run();
       return { asked: true };
     },
 
@@ -132,26 +132,40 @@ export function friendshipStore(db) {
       return { requests: results.map(row) };
     },
 
-    // The member approves: the asker becomes a friend, for every channel or only those given.
+    // The member approves: the asker becomes a friend, for every channel or only those given. Sent
+    // again with the same channels, say after the answer was lost, it answers as it did the first time.
     async approve(did, { id, channels, now = new Date() }) {
       const scope = channelList(channels);
       const held = await db.prepare('SELECT * FROM friend_requests WHERE did = ?1 AND id = ?2').bind(did, id).first();
       if (!held) throw new Refused(404, 'NotFound', 'There is no such request');
-      if (held.state !== 'waiting') throw new Refused(409, 'Answered', 'This request has been answered already', { state: held.state });
-      const at = now.toISOString();
-      await db.batch([
-        db.prepare("UPDATE friend_requests SET state = 'approved', answered_at = ?3 WHERE did = ?1 AND id = ?2").bind(did, id, at),
-        db.prepare(`INSERT INTO friends (did, friend, added_at, channels, name, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-          ON CONFLICT (did, friend) DO UPDATE SET channels = excluded.channels, name = excluded.name, email = excluded.email`)
-          .bind(did, held.friend, at, scope ? JSON.stringify(scope) : null, held.name, held.email),
-      ]);
-      return { did: held.friend, channels: scope ?? '*' };
+      const answer = { did: held.friend, channels: scope ?? '*' };
+      if (held.state === 'waiting') {
+        const at = now.toISOString();
+        // Only a request still waiting is approved, and the friend is added only by the approval that
+        // answered it, so a decline or another approval at the same moment is never undone.
+        const [approved] = await db.batch([
+          db.prepare("UPDATE friend_requests SET state = 'approved', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting'").bind(did, id, at),
+          db.prepare(`INSERT INTO friends (did, friend, added_at, channels, name, email)
+            SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM friend_requests WHERE did = ?1 AND id = ?7 AND state = 'approved' AND answered_at = ?3)
+            ON CONFLICT (did, friend) DO UPDATE SET channels = excluded.channels, name = excluded.name, email = excluded.email`)
+            .bind(did, held.friend, at, scope ? JSON.stringify(scope) : null, held.name, held.email, id),
+        ]);
+        if (approved.meta.changes) return answer;
+      }
+      const state = (await db.prepare('SELECT state FROM friend_requests WHERE did = ?1 AND id = ?2').bind(did, id).first())?.state;
+      const friend = state === 'approved' ? await friendScope(db, did, held.friend) : null;
+      if (friend && JSON.stringify(friend.channels) === JSON.stringify(scope)) return answer;
+      throw new Refused(409, 'Answered', 'This request has been answered already', { state });
     },
 
+    // Sent again, say after the answer was lost, it answers as it did the first time.
     async decline(did, { id, now = new Date() }) {
       const done = await db.prepare("UPDATE friend_requests SET state = 'declined', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting' RETURNING id").bind(did, id, now.toISOString()).first();
-      if (!done) throw new Refused(404, 'NotFound', 'There is no such request waiting');
-      return { id, declined: true };
+      if (done) return { id, declined: true };
+      const held = await db.prepare('SELECT state FROM friend_requests WHERE did = ?1 AND id = ?2').bind(did, id).first();
+      if (!held) throw new Refused(404, 'NotFound', 'There is no such request');
+      if (held.state === 'declined') return { id, declined: true };
+      throw new Refused(409, 'Answered', 'This request has been answered already', { state: held.state });
     },
 
     // Which channels one friend sees. Fewer or more: either way it is the member's, signed in to ohm.

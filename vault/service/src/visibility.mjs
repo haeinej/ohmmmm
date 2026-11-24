@@ -12,6 +12,11 @@
 //
 // The journal names a block by its ID (opaque for a private block) and never holds its title or
 // text. `db` has the shape of a Cloudflare D1 database.
+//
+// Every change and its journal line are written in one `db.batch`, which D1 runs as one transaction:
+// both are kept or neither is. The journal line goes first, and only when the row is still as it was
+// read; the change then needs that line. So a request sent again, after a failure or a lost answer,
+// either does the whole thing or finds it done and answers as the first one did.
 import { MoveProblem, planMove, whyNot } from '../../vault/visibility.mjs';
 import { readNode } from '../../vault/node.mjs';
 import { postFile } from '../../vault/file.mjs';
@@ -38,10 +43,15 @@ const actorOf = value => (typeof value === 'string' && ACTOR.test(value) ? value
 
 export function visibilityStore(db) {
   const next = '(SELECT COALESCE(MAX(seq), 0) + 1 FROM moves WHERE did = ?1)';
-  const journal = (did, { at, block, from, to, action, state, askedBy, approvedBy = null, reason = null, request = null }) => db.prepare(
-    `INSERT INTO moves (did, seq, at, block, from_layer, to_layer, action, state, asked_by, approved_by, reason, request)
-     VALUES (?1, ${next}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
-  ).bind(did, at, block, from, to, action, state, askedBy, approvedBy, reason, request);
+  // A journal line, written only `when` that condition holds (its values are ?13 on). A line with a
+  // `moveId` already journalled is not written again.
+  const journal = (did, { at, block, from, to, action, state, askedBy, approvedBy = null, reason = null, request = null, moveId = null }, when = '1', ...values) => db.prepare(
+    `INSERT INTO moves (did, seq, at, block, from_layer, to_layer, action, state, asked_by, approved_by, reason, request, move_id)
+     SELECT ?1, ${next}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12 WHERE ${when}
+     ON CONFLICT DO NOTHING`,
+  ).bind(did, at, block, from, to, action, state, askedBy, approvedBy, reason, request, moveId, ...values);
+  const waitingIs = "EXISTS (SELECT 1 FROM move_requests WHERE did = ?1 AND id = ?11 AND state = 'waiting')";
+  const answer = (did, request) => db.prepare("SELECT * FROM moves WHERE did = ?1 AND request = ?2 AND state <> 'requested' ORDER BY seq DESC").bind(did, request).first();
 
   // A readable block or post: its layer, title, path and version, for a preview.
   async function readable(did, id) {
@@ -94,9 +104,16 @@ export function visibilityStore(db) {
       const at = now.toISOString();
       const table = held.store === 'post' ? 'posts' : 'blocks';
       const why = reasonOf(reason);
-      const done = await db.prepare(`UPDATE ${table} SET leaving_at = ?3 WHERE did = ?1 AND id = ?2 AND version IS ?4 AND leaving_at IS NULL RETURNING id`).bind(did, id, at, replaces).first();
-      if (!done) throw new Refused(409, 'Changed', 'The block changed while it was being hidden. Look again and retry', { id });
-      await journal(did, { at, block: id, from: 'friends', to: 'private', action: 'seal', state: 'hidden', askedBy, approvedBy: askedBy, reason: why }).run();
+      const still = `EXISTS (SELECT 1 FROM ${table} WHERE did = ?1 AND id = ?3 AND version IS ?13 AND leaving_at IS NULL)`;
+      const [line] = await db.batch([
+        journal(did, { at, block: id, from: 'friends', to: 'private', action: 'seal', state: 'hidden', askedBy, approvedBy: askedBy, reason: why }, still, replaces),
+        db.prepare(`UPDATE ${table} SET leaving_at = ?3 WHERE did = ?1 AND id = ?2 AND version IS ?4 AND leaving_at IS NULL`).bind(did, id, at, replaces),
+      ]);
+      if (!line.meta.changes) {
+        const current = await readable(did, id);
+        if (current?.leaving && current.version === replaces) return { id, hidden: current.leaving, unchanged: true };
+        throw new Refused(409, 'Changed', 'The block changed while it was being hidden. Look again and retry', { id });
+      }
       return { id, hidden: at, next: 'The person\'s device seals it into the private layer when it is next unlocked.' };
     },
 
@@ -112,11 +129,17 @@ export function visibilityStore(db) {
       const id = `r${crypto.randomUUID().replaceAll('-', '')}`;
       const at = now.toISOString();
       const why = reasonOf(reason);
-      await db.batch([
+      // Two agents asking at once: the index on waiting requests keeps one, and the other is told of it.
+      const [asked] = await db.batch([
         db.prepare(`INSERT INTO move_requests (did, id, block, store, from_layer, to_layer, version, asked_by, reason, asked_at, state)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'waiting')`).bind(did, id, block, store, from, to, version, askedBy, why, at),
-        journal(did, { at, block, from, to, action: move.action, state: 'requested', askedBy, reason: why, request: id }),
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'waiting') ON CONFLICT DO NOTHING`).bind(did, id, block, store, from, to, version, askedBy, why, at),
+        journal(did, { at, block, from, to, action: move.action, state: 'requested', askedBy, reason: why, request: id }, waitingIs),
       ]);
+      if (!asked.meta.changes) {
+        const waiting = await db.prepare("SELECT * FROM move_requests WHERE did = ?1 AND block = ?2 AND to_layer = ?3 AND state = 'waiting'").bind(did, block, to).first();
+        if (waiting) return { request: requestRow(waiting), unchanged: true };
+        throw new Refused(409, 'Changed', 'A request for this move was answered while this one was asked. Look again and retry');
+      }
       return { request: requestRow(await db.prepare('SELECT * FROM move_requests WHERE did = ?1 AND id = ?2').bind(did, id).first()) };
     },
 
@@ -126,37 +149,62 @@ export function visibilityStore(db) {
       return { requests: results.map(requestRow) };
     },
 
+    // Declining a request declined already changes nothing and answers the same; one approved is `Answered`.
     async decline(did, { id, reason, now = new Date() }) {
       const held = await db.prepare("SELECT * FROM move_requests WHERE did = ?1 AND id = ?2").bind(did, id).first();
       if (!held) throw new Refused(404, 'NotFound', 'There is no such request');
-      if (held.state !== 'waiting') throw new Refused(409, 'Answered', 'This request has been answered already', { state: held.state });
+      const again = state => {
+        if (state === 'declined') return { id, declined: true, unchanged: true };
+        throw new Refused(409, 'Answered', 'This request has been answered already', { state });
+      };
+      if (held.state !== 'waiting') return again(held.state);
       const at = now.toISOString();
       const why = reasonOf(reason);
-      const answered = await db.prepare("UPDATE move_requests SET state = 'declined', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting' RETURNING id").bind(did, id, at).first();
-      if (!answered) throw new Refused(409, 'Answered', 'This request has been answered already');
-      await journal(did, { at, block: held.block, from: held.from_layer, to: held.to_layer, action: planMove({ from: held.from_layer, to: held.to_layer }).action, state: 'declined', askedBy: held.asked_by, approvedBy: null, reason: why, request: id }).run();
+      const [line] = await db.batch([
+        journal(did, { at, block: held.block, from: held.from_layer, to: held.to_layer, action: planMove({ from: held.from_layer, to: held.to_layer }).action, state: 'declined', askedBy: held.asked_by, approvedBy: null, reason: why, request: id }, waitingIs),
+        db.prepare("UPDATE move_requests SET state = 'declined', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting'").bind(did, id, at),
+      ]);
+      if (!line.meta.changes) return again((await db.prepare('SELECT state FROM move_requests WHERE did = ?1 AND id = ?2').bind(did, id).first()).state);
       return { id, declined: true };
     },
 
     // The member's cockpit records a move it made. With `request`, it answers that request; a move
     // that seals a hidden block finishes it. `cleanupPending` says the old copy is still there.
-    async record(did, { block, from, to, request = null, reason, cleanupPending = false, sealedAs, now = new Date() }) {
+    // `moveId` names this move, so the cockpit can send it again: a move recorded already is not
+    // journalled twice, and the answer is the first one's. Without it, `sealedAs` names the move, and
+    // a request is answered once whatever is sent; a move with neither is journalled each time.
+    async record(did, { block, from, to, request = null, reason, cleanupPending = false, sealedAs, moveId, now = new Date() }) {
       if (typeof block !== 'string' || !ID.test(block)) refuse('Say which block with its ID');
+      if (moveId !== undefined && moveId !== null && (typeof moveId !== 'string' || !ID.test(moveId))) refuse('A move\'s ID is up to 200 letters, digits and -_=+/');
       const move = plan({ from, to, title: 'checked by the cockpit' });
       const at = now.toISOString();
-      reasonOf(reason);
+      const why = reasonOf(reason);
+      const sealed = typeof sealedAs === 'string' && ID.test(sealedAs) ? sealedAs : null;
+      const key = moveId ?? (sealed ? `seal:${sealed}` : null);
+      const state = cleanupPending ? 'cleanup-pending' : move.via === 'publish' ? 'previewed' : 'done';
+      const answered = row => ({ block, from, to, state: row.state, ...(request ? { request, approved: true } : {}), unchanged: true });
       let asked = 'me';
       if (request !== null) {
         const held = await db.prepare('SELECT * FROM move_requests WHERE did = ?1 AND id = ?2').bind(did, request).first();
         if (!held) throw new Refused(404, 'NotFound', 'There is no such request');
-        if (held.state !== 'waiting') throw new Refused(409, 'Answered', 'This request has been answered already', { state: held.state });
         if (held.block !== block || held.from_layer !== from || held.to_layer !== to) throw new Refused(409, 'NotThisMove', 'The move made is not the one requested');
+        // Approved already by this same move (sent again): answer as the first time did.
+        const again = async state => {
+          const earlier = state === 'approved' ? await answer(did, request) : null;
+          if (earlier && (moveId === undefined || moveId === null || earlier.move_id === moveId)) return answered(earlier);
+          throw new Refused(409, 'Answered', 'This request has been answered already', { state });
+        };
+        if (held.state !== 'waiting') return again(held.state);
         asked = held.asked_by;
-        const answered = await db.prepare("UPDATE move_requests SET state = 'approved', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting' RETURNING id").bind(did, request, at).first();
-        if (!answered) throw new Refused(409, 'Answered', 'This request has been answered already');
+        const [line] = await db.batch([
+          journal(did, { at, block: sealed ?? block, from, to, action: move.action, state, askedBy: asked, approvedBy: 'me', reason: why, request, moveId: key }, waitingIs),
+          db.prepare("UPDATE move_requests SET state = 'approved', answered_at = ?3 WHERE did = ?1 AND id = ?2 AND state = 'waiting'").bind(did, request, at),
+        ]);
+        if (!line.meta.changes) return again((await db.prepare('SELECT state FROM move_requests WHERE did = ?1 AND id = ?2').bind(did, request).first()).state);
+      } else {
+        const { meta } = await journal(did, { at, block: sealed ?? block, from, to, action: move.action, state, askedBy: asked, approvedBy: 'me', reason: why, moveId: key }).run();
+        if (!meta.changes && key) return answered(await db.prepare('SELECT * FROM moves WHERE did = ?1 AND move_id = ?2').bind(did, key).first());
       }
-      const state = cleanupPending ? 'cleanup-pending' : move.via === 'publish' ? 'previewed' : 'done';
-      await journal(did, { at, block: typeof sealedAs === 'string' && ID.test(sealedAs) ? sealedAs : block, from, to, action: move.action, state, askedBy: asked, approvedBy: 'me', reason: reasonOf(reason), request }).run();
       return { block, from, to, state, ...(request ? { request, approved: true } : {}) };
     },
 

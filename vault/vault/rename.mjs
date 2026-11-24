@@ -4,8 +4,12 @@
 // body. What is not rewritten (no grant, or changed since it was read) keeps working through the old
 // name, which the journal records (names.mjs), and is listed.
 //
-//   planRename(files, change, { paths })   pure: what to move, write and journal
-//   applyRename({ vault, plan, by, ... })   does it on this machine, then journals it in one append
+//   planRename(files, change, { paths, events })   pure: what to move, write and journal
+//   applyRename({ vault, plan, by, ... })   does it on this machine, journaling each step as it is done
+//
+// A rename that stops part-way (a crash, a full disk) never strands what it moved: the moves are
+// journaled as soon as they are made, so old names keep working, and the same rename tried again
+// (planRename with the journal's `events`) finishes what is left.
 //
 // A channel renamed through ohm gets an `id` in its _channel.md (rule 1), made if it had none, so
 // what points at it from outside the vault can hold its ID.
@@ -59,17 +63,36 @@ function remap(text, key, map) {
   return JSON.stringify(after) === JSON.stringify(before) ? text : setProperty(text, key, after);
 }
 
+// A rename tried again after it stopped part-way: the files its last try already moved (that try's
+// `moved` events, from the node's old place, all at one time) are read as if still where they were,
+// so the plan is the same one, and applyRename skips the moves that are done.
+function undoneMoves(files, paths, change, events) {
+  const from = change.block ?? change.channel;
+  const under = path => (change.block === undefined ? path.startsWith(`${from}/`) : path === from);
+  if (typeof from !== 'string' || paths.some(under)) return { files, paths };
+  const moved = events.filter(event => event.root === 'vault' && event.op === 'moved' && event.via === 'rename');
+  const last = moved.findLast(event => under(event.from));
+  if (!last) return { files, paths };
+  const there = new Set(paths);
+  const back = new Map(moved.filter(event => event.at === last.at && event.by === last.by && !there.has(event.from)).map(event => [event.path, event.from]));
+  const undo = path => back.get(path) ?? path;
+  return { files: files.map(file => ({ ...file, path: undo(file.path) })), paths: paths.map(undo) };
+}
+
 /**
  * What a rename does, without touching a disk.
  *   files:  the vault's Markdown, [{ path, text }]
  *   change: { channel, to }                         a channel and its new path
  *           { block, slug?, title?, channel? }       a block's file and its new slug, title or home channel
  *   paths:  every file in the vault folder (for a channel, its other files move too); defaults to files'
+ *   events: the vault's journal; when given, the same rename tried again after it stopped part-way
+ *           plans what it would have, from where its files were
  * Returns { kind, from, to, moves: [{ from, to }], folder?, writes: [{ path, before?, after }],
  * renamed: [{ path, from }], id? }. A write's path is where the file is after the moves; `before` is
  * the text read, absent for a file made new.
  */
-export function planRename(files, change, { paths = files.map(file => file.path), newId = newNodeId } = {}) {
+export function planRename(files, change, { paths = files.map(file => file.path), newId = newNodeId, events } = {}) {
+  if (events) ({ files, paths } = undoneMoves(files, paths, change, events));
   const vault = readVault(files);
   const texts = new Map(files.map(file => [file.path, file.text]));
   const taken = new Set(paths);
@@ -214,9 +237,10 @@ async function replaceText(file, before, after) {
 }
 
 /**
- * Does a plan in the vault folder, then journals it in one append: `moved` for every file moved,
- * `changed` or `added` for every file written (each version kept by `keep`), and `renamed` for the
- * names no move says. Call it under the collect lock, then index.
+ * Does a plan in the vault folder, journaling each step as soon as it is done: `moved` for every file
+ * moved and `renamed` for the names no move says, straight after the moves, then `changed` or `added`
+ * for each file as it is written (each version kept by `keep` first). A move already made, by a try
+ * that stopped part-way, is skipped and not journaled again. Call it under the collect lock, then index.
  *   may(path): whether this file may be written; a reference in one it may not is left, and listed
  *   keep(text): keeps a version, returns its content address
  */
@@ -227,29 +251,42 @@ export async function applyRename({ vault, plan, by, via = 'rename', may = () =>
   // The renamed node itself, where it is and where it goes, is all or nothing.
   const own = plan.kind === 'channel' ? [`${plan.from}/${CHANNEL_FILE}`, `${plan.to}/${CHANNEL_FILE}`] : [plan.from, plan.to];
   for (const path of [...own, ...plan.moves.flatMap(move => [move.from, move.to])]) if (!may(path)) refuse(`You may not change ${path}.`);
+  const there = async path => Boolean(await lstat(join(vault, path)).catch(problem => { if (problem.code !== 'ENOENT') throw problem; }));
+  // Made already when the old place is gone and the new one is there.
+  const done = async (from, to) => !await there(from) && await there(to);
+  const moves = [];
   if (plan.folder) {
-    await mkdir(dirname(join(vault, plan.folder.to)), { recursive: true });
-    await rename(join(vault, plan.folder.from), join(vault, plan.folder.to));
+    if (!await done(plan.folder.from, plan.folder.to)) {
+      await mkdir(dirname(join(vault, plan.folder.to)), { recursive: true });
+      await rename(join(vault, plan.folder.from), join(vault, plan.folder.to));
+      moves.push(...plan.moves);
+    }
   } else {
     for (const move of plan.moves) {
+      if (await done(move.from, move.to)) continue;
       await mkdir(dirname(join(vault, move.to)), { recursive: true });
       await rename(join(vault, move.from), join(vault, move.to));
+      moves.push(move);
     }
   }
-  for (const move of plan.moves) events.push({ at, op: 'moved', root: 'vault', path: move.to, from: move.from, by, via });
+  // Journaled before anything else can fail, so the old names keep working whatever happens next.
+  const first = moves.map(move => ({ at, op: 'moved', root: 'vault', path: move.to, from: move.from, by, via }));
+  if (moves.length || !plan.moves.length) for (const each of plan.renamed) first.push({ at, op: 'renamed', root: 'vault', path: each.path, from: each.from, by, via });
+  await appendEvents(vault, first);
+  events.push(...first);
   const written = [];
   for (const write of plan.writes) {
     if (!may(write.path)) { left.push({ path: write.path, why: 'no grant' }); continue; }
-    if (!await replaceText(join(vault, write.path), write.before, write.after)) { left.push({ path: write.path, why: 'changed since it was read' }); continue; }
-    written.push(write.path);
     const kept = keep ? {
       ...(write.before === undefined ? {} : { before: await keep(write.before) }),
       hash: await keep(write.after),
     } : { hash: await blobCid(Buffer.from(write.after, 'utf8')) };
-    events.push({ at, op: write.before === undefined ? 'added' : 'changed', root: 'vault', path: write.path, by, via, ...kept });
+    if (!await replaceText(join(vault, write.path), write.before, write.after)) { left.push({ path: write.path, why: 'changed since it was read' }); continue; }
+    written.push(write.path);
+    const event = { at, op: write.before === undefined ? 'added' : 'changed', root: 'vault', path: write.path, by, via, ...kept };
+    await appendEvents(vault, [event]);
+    events.push(event);
   }
-  for (const each of plan.renamed) events.push({ at, op: 'renamed', root: 'vault', path: each.path, from: each.from, by, via });
-  await appendEvents(vault, events);
   return {
     kind: plan.kind, from: plan.from, to: plan.to, ...(plan.id ? { id: plan.id } : {}),
     moved: plan.moves.length, written, left,

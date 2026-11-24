@@ -35,16 +35,16 @@ export default {
     },
     'com.ohmmmm.vault.declineMoveRequest': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'The member declines an agent\'s request. Nothing moves. Only the member, signed in to ohm, answers a request.',
+      about: 'The member declines an agent\'s request. Nothing moves. Only the member, signed in to ohm, answers a request. Declining it again changes nothing more.',
       takes: { id: 'the request\'s ID', reason: 'optional: why' },
-      gives: '`id`, `declined`',
+      gives: '`id`, `declined`, and `unchanged` when it was declined already',
       run: async ({ body, moves, did }) => moves.decline(did, await body()),
     },
     'com.ohmmmm.vault.recordMove': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'The member\'s cockpit records a move it made, after the member approved it: a request it answers, a hidden block it sealed, or a move to or from public it handed to Publish. Only the member, signed in to ohm, records a move.',
-      takes: { block: 'the block\'s ID before the move', from: 'its layer before', to: 'its layer after', request: 'optional: the request this answers', sealedAs: 'optional: its opaque ID in the private layer', cleanupPending: 'optional: true when the old copy could not be removed', reason: 'optional: why' },
-      gives: '`block`, `from`, `to`, `state` (done, cleanup-pending, or previewed for Publish), and `approved` with the request',
+      about: 'The member\'s cockpit records a move it made, after the member approved it: a request it answers, a hidden block it sealed, or a move to or from public it handed to Publish. Only the member, signed in to ohm, records a move. Sent again with the same `moveId` (or `sealedAs`, or `request`), it changes nothing more and answers as the first time.',
+      takes: { block: 'the block\'s ID before the move', from: 'its layer before', to: 'its layer after', request: 'optional: the request this answers', sealedAs: 'optional: its opaque ID in the private layer', cleanupPending: 'optional: true when the old copy could not be removed', reason: 'optional: why', moveId: 'optional: the cockpit\'s own ID for this move, so sending it again records nothing more' },
+      gives: '`block`, `from`, `to`, `state` (done, cleanup-pending, or previewed for Publish), `approved` with the request, and `unchanged` when this move was recorded already',
       run: async ({ body, moves, did }) => moves.record(did, await body()),
     },
     'com.ohmmmm.vault.listMoves': {

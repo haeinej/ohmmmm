@@ -7,9 +7,10 @@ Human guide: [friends](../friends.md). Code: [service/src/friendship.mjs](../../
   - Used by `blocks.shared`/`readShared` (a block out of scope gives `NotFound`) and by content's `audienceOf`/`sees` (Friends entries filtered by `channel`/`channels`).
   - A friend's agents read as the friend: with the friend's PDS token (friends tools) or the friend's viewer token (sites).
 - **Requests:**
-  - `askFriend {owner | email, message?}` asks `member`: an ohm session, or the member's PDS token (their agent). The asker's `name`/`email` come from the session, else from `links` for that DID. With a token and no `links.email`, it is refused `NotConnected`, as is a session with no connected DID. It is idempotent, and always answers `{asked: true}`.
+  - `askFriend {owner | email, message?}` asks `member`: an ohm session, or the member's PDS token (their agent). The asker's `name`/`email` come from the session, else from `links` for that DID. With a token and no `links.email`, it is refused `NotConnected`, as is a session with no connected DID. It is idempotent, and always answers `{asked: true}`: the partial unique index `friend_requests_one_waiting` (`did, friend` where `state = 'waiting'`) and `ON CONFLICT DO NOTHING` keep one waiting request, even for asks at the same moment.
   - `listFriendRequests` asks `member`.
   - `approveFriend {id, channels?: '*' | paths}`, `declineFriend {id}` and `setFriendChannels {friend, channels}` ask `ohm`: never an agent's token.
+  - Approve and decline change only a request still `waiting` (the friend is inserted only when the approval's own `answered_at` is on the request), so a decline and an approval never both land. A retry answers as the first did: approve with the same channels (compared with `friends.channels`), decline when declined; anything else is `Answered` (409).
   - `listFriends` gives `channels` (`'*'` or a list), `name` and `email`.
   - The existing `addFriend` (`ohm`, by DID) adds every channel.
 - **Storage:** `friends.channels` (JSON, or NULL for every channel), `friends.name`, `friends.email`, and the `friend_requests` table. Migration [0008_friend_access.sql](../../service/migrations/0008_friend_access.sql).

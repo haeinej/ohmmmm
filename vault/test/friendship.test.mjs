@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { blockStore } from '../service/src/blocks.mjs';
 import { contentStore } from '../service/src/content.mjs';
-import { friendshipStore } from '../service/src/friendship.mjs';
+import { friendScope as friendScopeOf, friendshipStore } from '../service/src/friendship.mjs';
 import { links } from '../service/src/ohm.mjs';
 import { createService } from '../service/src/worker.mjs';
 import { newPostId } from '../vault/file.mjs';
@@ -65,6 +65,9 @@ test('someone signed in asks; the member sees who, by name and email, and approv
   // Only the member, signed in to ohm, approves: not with a token, as an agent holds one.
   await assert.rejects(ask('approveFriend', { body: { id: requests[0].id }, as: ada }), { code: 'SignInRequired' });
   assert.deepEqual(await ask('approveFriend', { body: { id: requests[0].id, channels: ['walks'] }, cookie: 'session=ada' }), { did: bo, channels: ['walks'] });
+  // Sent again with the same channels, say after the answer was lost, it answers the same; other channels are refused.
+  assert.deepEqual(await ask('approveFriend', { body: { id: requests[0].id, channels: ['walks'] }, cookie: 'session=ada' }), { did: bo, channels: ['walks'] });
+  await assert.rejects(ask('declineFriend', { body: { id: requests[0].id }, cookie: 'session=ada' }), { code: 'Answered' });
   await assert.rejects(ask('approveFriend', { body: { id: requests[0].id }, cookie: 'session=ada' }), { code: 'Answered' });
   assert.deepEqual((await ask('listFriends', { as: ada })).friends.map(friend => [friend.did, friend.name, friend.email, friend.channels]), [[bo, 'Bo', 'bo@example.test', ['walks']]]);
 
@@ -91,6 +94,10 @@ test('declining lets no one in; a friend added before sees every channel', async
   await ask('askFriend', { body: { owner: ada }, cookie: 'session=bo' });
   const [request] = (await ask('listFriendRequests', { as: ada })).requests;
   assert.deepEqual(await ask('declineFriend', { body: { id: request.id }, cookie: 'session=ada' }), { id: request.id, declined: true });
+  // Sent again it answers the same; approving it now is refused.
+  assert.deepEqual(await ask('declineFriend', { body: { id: request.id }, cookie: 'session=ada' }), { id: request.id, declined: true });
+  await assert.rejects(ask('approveFriend', { body: { id: request.id }, cookie: 'session=ada' }), { code: 'Answered' });
+  await assert.rejects(ask('declineFriend', { body: { id: 'f-none' }, cookie: 'session=ada' }), { code: 'NotFound' });
   assert.deepEqual((await ask('listFriendRequests', { as: ada })).requests, []);
   await assert.rejects(ask('listShared', { query: { owner: ada }, as: bo }), { code: 'NotFound' });
   await blockStore(env.DB).addFriend(ada, bo);
@@ -206,4 +213,29 @@ test('a member\'s agent asks by email with the member\'s token, named from their
   assert.deepEqual([sent.length, sent[0].from.name, sent[0].replyTo], [1, 'Bo via ohm', 'bo@example.test']);
   // Approving stays the member's alone, in ohm.
   await assert.rejects(ask('approveFriend', { body: { id: request.id }, as: ada }), { code: 'SignInRequired' });
+});
+
+test('asks at the same moment keep one request waiting, and the database holds no second one', async () => {
+  const db = await testDatabase();
+  const friendship = friendshipStore(db);
+  await Promise.all(Array.from({ length: 5 }, () => friendship.ask(ada, { viewer: bo, name: 'Bo' })));
+  const { requests } = await friendship.requests(ada);
+  assert.equal(requests.length, 1);
+  assert.throws(() => db.sqlite.prepare("INSERT INTO friend_requests (did, id, friend, asked_at, state) VALUES (?, 'f-second', ?, '2026-11-24T00:00:00Z', 'waiting')").run(ada, bo), /UNIQUE/);
+  // Once it is answered, Bo may ask again.
+  await friendship.decline(ada, { id: requests[0].id });
+  await friendship.ask(ada, { viewer: bo, name: 'Bo' });
+  assert.equal((await friendship.requests(ada)).requests.length, 1);
+});
+
+test('a decline that lands while an approval is being written wins, and no friend is added', async () => {
+  const db = await testDatabase();
+  const friendship = friendshipStore(db);
+  await friendship.ask(ada, { viewer: bo, name: 'Bo' });
+  const [request] = (await friendship.requests(ada)).requests;
+  // The approval has read the request as waiting; the decline is written before its batch.
+  const racing = { ...db, batch: async statements => { await friendship.decline(ada, { id: request.id }); return db.batch(statements); } };
+  await assert.rejects(friendshipStore(racing).approve(ada, { id: request.id, channels: ['walks'] }), { code: 'Answered' });
+  assert.equal(await friendScopeOf(db, ada, bo), null);
+  assert.equal(db.sqlite.prepare('SELECT state FROM friend_requests WHERE id = ?').get(request.id).state, 'declined');
 });

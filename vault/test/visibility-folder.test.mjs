@@ -66,6 +66,10 @@ test('an agent never changes who can see a block, even with a write grant: it as
   assert.deepEqual(requests.map(each => [each.status, each.to, each.why]), [['declined', 'private', 'It mentions a friend by name.']]);
   assert.equal((await readRequests(vault)).length, 1);
   await assert.rejects(decideRequest(vault, asked.request, 'approved'), /declined already/);
+  // Deciding it the same way again, as when the answer was lost, returns it as it was decided.
+  const { decided } = (await readRequests(vault))[0];
+  const again = await decideRequest(vault, asked.request, 'declined');
+  assert.deepEqual([again.status, again.decided], ['declined', decided]);
 });
 
 test('asking needs no grant: approval is the gate', async t => {

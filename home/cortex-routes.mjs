@@ -20,7 +20,7 @@ import { Refused } from '../cortex/src/core.mjs';
 
 const PERSON = 'member';
 const MAX_TEXT = 128 * 1024;
-const STATUS = { Changed: 412, NotFound: 404, PersonOnly: 403, InvalidRequest: 400, InvalidSkill: 400, SkillNotApproved: 409, NameTaken: 409, AlreadyDeclined: 409 };
+const STATUS = { Changed: 412, NotFound: 404, PersonOnly: 403, InvalidRequest: 400, InvalidSkill: 400, SkillNotApproved: 409, NameTaken: 409, AlreadyDeclined: 409, Busy: 503 };
 const versionIn = header => String(header).replace(/^W\//, '').replace(/^"|"$/g, '');
 
 /** Everything the app shows of the cortex, read through its folder operations. */

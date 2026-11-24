@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createTools } from '../mcp/tools.mjs';
 import { blockStore } from '../service/src/blocks.mjs';
 import { links } from '../service/src/ohm.mjs';
+import { visibilityStore } from '../service/src/visibility.mjs';
 import { createService } from '../service/src/worker.mjs';
 import { newPostId } from '../vault/file.mjs';
 import { planMove, whyNot } from '../vault/visibility.mjs';
@@ -110,7 +111,9 @@ test('without a grant, or to show a block to more people, an agent only asks; on
   // A record must be the move asked for.
   await assert.rejects(ask('recordMove', { body: { block: walk, from: 'friends', to: 'public', request: requests[0].id }, cookie: 'session=ada' }), { code: 'NotThisMove' });
   assert.deepEqual(await ask('declineMoveRequest', { body: { id: requests[0].id, reason: 'Keep sharing it.' }, cookie: 'session=ada' }), { id: requests[0].id, declined: true });
-  await assert.rejects(ask('declineMoveRequest', { body: { id: requests[0].id }, cookie: 'session=ada' }), { code: 'Answered' });
+  // Declining it again changes nothing more; approving it now is too late.
+  assert.deepEqual(await ask('declineMoveRequest', { body: { id: requests[0].id }, cookie: 'session=ada' }), { id: requests[0].id, declined: true, unchanged: true });
+  await assert.rejects(ask('recordMove', { body: { block: walk, from: 'friends', to: 'private', request: requests[0].id }, cookie: 'session=ada' }), { code: 'Answered' });
   assert.deepEqual((await ask('listMoveRequests')).requests, []);
 
   // A request to show it to everyone waits too, and approving it is recorded with who asked.
@@ -134,4 +137,80 @@ test('a hidden block is not on a site either, and saving it again keeps it hidde
   assert.ok(saved.version);
   assert.deepEqual((await ask('listShared', { query: { owner: ada }, as: bo })).blocks, []);
   await assert.rejects(ask('hideBlock', { body: { id: walk, replaces: 'old', by: 'agent:helper' } }), { code: 'Changed' });
+});
+
+// A database whose next statement matching `pattern` fails once, as a dropped connection would.
+const failingOnce = (db, pattern) => {
+  let failed = false;
+  const wrap = (sql, statement) => ({
+    ...statement,
+    bind: (...values) => wrap(sql, statement.bind(...values)),
+    ...Object.fromEntries(['first', 'all', 'run', 'runNow'].map(name => [name, (...args) => {
+      if (!failed && pattern.test(sql)) { failed = true; throw new Error('The database went away'); }
+      return statement[name](...args);
+    }])),
+  });
+  return { ...db, prepare: sql => wrap(sql, db.prepare(sql)) };
+};
+
+test('a hide whose journal line fails is undone, so sending it again hides the block and journals it', async () => {
+  const { env, ask, walk } = await setUp();
+  const { version } = await ask('getBlock', { query: { id: walk } });
+  const moves = visibilityStore(failingOnce(env.DB, /INSERT INTO moves/));
+  await assert.rejects(moves.hide(ada, { id: walk, replaces: version, by: 'agent:helper' }), /went away/);
+  assert.equal((await ask('listShared', { query: { owner: ada }, as: bo })).blocks.length, 1, 'nothing hidden without its journal line');
+  const hidden = await moves.hide(ada, { id: walk, replaces: version, by: 'agent:helper' });
+  assert.equal(hidden.unchanged, undefined);
+  assert.deepEqual((await ask('listShared', { query: { owner: ada }, as: bo })).blocks, []);
+  // Sent once more, it is hidden already: the same answer, and one journal line.
+  assert.deepEqual(await moves.hide(ada, { id: walk, replaces: version, by: 'agent:helper' }), { id: walk, hidden: hidden.hidden, unchanged: true });
+  assert.deepEqual((await ask('listMoves')).moves.map(move => [move.block, move.state]), [[walk, 'hidden']]);
+});
+
+test('an approval or a decline whose journal line fails answers nothing, and sending it again answers it once', async () => {
+  const { env, ask, tools, walk } = await setUp();
+  const first = await twice(tools, { key: walk, to: 'private' });
+  const moves = visibilityStore(failingOnce(env.DB, /INSERT INTO moves/));
+  await assert.rejects(moves.record(ada, { block: walk, from: 'friends', to: 'private', request: first.request, sealedAs: 'opaque-2', moveId: 'm-ada-1' }), /went away/);
+  assert.equal((await ask('listMoveRequests')).requests[0].state, 'waiting', 'still waiting without its journal line');
+  const recorded = await moves.record(ada, { block: walk, from: 'friends', to: 'private', request: first.request, sealedAs: 'opaque-2', moveId: 'm-ada-1' });
+  assert.deepEqual([recorded.state, recorded.approved, recorded.unchanged], ['done', true, undefined]);
+  // The same move sent again (its answer was lost): the first answer, and nothing more journalled.
+  const again = await moves.record(ada, { block: walk, from: 'friends', to: 'private', request: first.request, sealedAs: 'opaque-2', moveId: 'm-ada-1' });
+  assert.deepEqual([again.state, again.approved, again.unchanged], ['done', true, true]);
+  // Another move cannot answer it.
+  await assert.rejects(moves.record(ada, { block: walk, from: 'friends', to: 'private', request: first.request, moveId: 'm-ada-2' }), { code: 'Answered' });
+
+  const second = await twice(tools, { key: walk, to: 'public' });
+  const declining = visibilityStore(failingOnce(env.DB, /INSERT INTO moves/));
+  await assert.rejects(declining.decline(ada, { id: second.request }), /went away/);
+  assert.deepEqual((await ask('listMoveRequests')).requests.map(request => request.id), [second.request]);
+  assert.deepEqual(await declining.decline(ada, { id: second.request }), { id: second.request, declined: true });
+  assert.deepEqual(await declining.decline(ada, { id: second.request }), { id: second.request, declined: true, unchanged: true });
+  const journal = (await ask('listMoves')).moves.filter(move => move.state !== 'requested');
+  assert.deepEqual(journal.map(move => [move.block, move.state, move.request]), [[walk, 'declined', second.request], ['opaque-2', 'done', first.request]]);
+});
+
+test('the cockpit sending the same move twice journals it once', async () => {
+  const { ask, walk } = await setUp();
+  const move = { block: walk, from: 'friends', to: 'private', sealedAs: 'opaque-3', cleanupPending: true, moveId: 'm-ada-3' };
+  const first = await ask('recordMove', { body: move, cookie: 'session=ada' });
+  const again = await ask('recordMove', { body: move, cookie: 'session=ada' });
+  assert.deepEqual([first.state, again.state, again.unchanged], ['cleanup-pending', 'cleanup-pending', true]);
+  // Without a moveId, its opaque ID names the move.
+  await ask('recordMove', { body: { block: walk, from: 'friends', to: 'private', sealedAs: 'opaque-4' }, cookie: 'session=ada' });
+  await ask('recordMove', { body: { block: walk, from: 'friends', to: 'private', sealedAs: 'opaque-4' }, cookie: 'session=ada' });
+  assert.deepEqual((await ask('listMoves')).moves.map(line => [line.block, line.state]), [['opaque-4', 'done'], ['opaque-3', 'cleanup-pending']]);
+  await assert.rejects(ask('recordMove', { body: { ...move, moveId: 'not an id!' }, cookie: 'session=ada' }), { code: 'InvalidRequest' });
+});
+
+test('two agents asking for the same move at once leave one request waiting', async () => {
+  const { env, ask, walk } = await setUp();
+  const moves = visibilityStore(env.DB);
+  const ask2 = by => moves.request(ada, { block: walk, store: 'block', from: 'friends', to: 'public', by, reason: `${by} thinks it is ready.` });
+  const [one, two] = await Promise.all([ask2('agent:helper'), ask2('agent:scribe')]);
+  assert.equal(one.request.id, two.request.id);
+  assert.equal([one, two].filter(answer => answer.unchanged).length, 1);
+  assert.equal((await ask('listMoveRequests')).requests.length, 1);
+  assert.equal((await ask('listMoves')).moves.length, 1, 'one request journalled');
 });

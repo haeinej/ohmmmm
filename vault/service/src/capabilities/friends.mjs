@@ -118,14 +118,14 @@ export default {
     },
     'com.ohmmmm.vault.approveFriend': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend\'s own agents read with the friend\'s access.',
+      about: 'The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend\'s own agents read with the friend\'s access. Sent again with the same channels, it answers the same; a request already declined, or approved for other channels, is `Answered`.',
       takes: { id: 'the request\'s ID', channels: 'optional: `*`, or a list of channel paths' },
       gives: '`did`, `channels`',
       run: async ({ body, friendships, did }) => friendships.approve(did, await body()),
     },
     'com.ohmmmm.vault.declineFriend': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'The member declines someone who asked. They are not told.',
+      about: 'The member declines someone who asked. They are not told. Sent again, it answers the same; a request already approved is `Answered`.',
       takes: { id: 'the request\'s ID' },
       gives: '`id`, `declined`',
       run: async ({ body, friendships, did }) => friendships.decline(did, await body()),

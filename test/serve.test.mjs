@@ -354,12 +354,18 @@ test('the person edits files through the bridge only over the version they read,
   assert.equal(stale.status, 412);
   assert.equal(stale.json.version, walk.version);
   const edited = '---\ntitle: Slow walk\norigin: /Users/mira/notes/walk.md\n---\n\nYanaka in the rain.\n';
+  // A version of it cut off by a crash long ago is not taken for the whole one: it is written again.
+  await writeFile(join(layout.vault, '.vault/history', await blobCid(Buffer.from(edited, 'utf8'))), edited.slice(0, 12));
   const saved = await put('notes/walk.md', edited, { 'If-Match': `"${walk.version}"` });
   assert.equal(saved.status, 200);
   assert.equal(saved.json.version, await blobCid(Buffer.from(edited, 'utf8')));
   assert.equal(saved.headers.etag, `"${saved.json.version}"`);
   assert.equal(await readFile(join(layout.vault, 'notes/walk.md'), 'utf8'), edited);
   assert.equal(await readFile(join(layout.vault, '.vault/history', walk.version), 'utf8'), walk.text, 'the version before is kept');
+  assert.equal(await readFile(join(layout.vault, '.vault/history', saved.json.version), 'utf8'), edited, 'and the version after, whole');
+  // The same save tried again, its answer lost: the file says it already, so it is not refused.
+  const retried = await put('notes/walk.md', edited, { 'If-Match': `"${walk.version}"` });
+  assert.deepEqual([retried.status, retried.json.version, retried.json.unchanged], [200, saved.json.version, true]);
 
   // A new file only where none is; and only Markdown the vault can read, in an ordinary place.
   assert.equal((await put('notes/new.md', '---\ntitle: New\n---\n\nHello.\n', { 'If-None-Match': '*' })).status, 201);
@@ -372,6 +378,8 @@ test('the person edits files through the bridge only over the version they read,
   const removed = await call('DELETE', '/vault/file?path=notes%2Fnew.md', { headers: { ...signed, 'If-Match': `"${await blobCid(Buffer.from('---\ntitle: New\n---\n\nHello.\n', 'utf8'))}"` } });
   assert.equal(removed.status, 200);
   assert.ok(removed.json.removed);
+  const removedAgain = await call('DELETE', '/vault/file?path=notes%2Fnew.md', { headers: { ...signed, 'If-Match': `"${await blobCid(Buffer.from('---\ntitle: New\n---\n\nHello.\n', 'utf8'))}"` } });
+  assert.deepEqual([removedAgain.status, removedAgain.json.removed, removedAgain.json.unchanged], [200, true, true]);
 
   // Journaled once, as the person; the next scan adds nothing of its own.
   const { events } = await readEvents(layout.vault);
@@ -429,6 +437,9 @@ test('who sees a block is changed by the person, over the version read; an agent
   const moved = await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'friends', why: 'For June.' }, { 'If-Match': `"${version}"` });
   assert.equal(moved.status, 200);
   assert.deepEqual([moved.json.layer, moved.json.was], ['friends', 'private']);
+  // The same move tried again over the version read first: it is there already, not refused.
+  const movedAgain = await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'friends', why: 'For June.' }, { 'If-Match': `"${version}"` });
+  assert.deepEqual([movedAgain.status, movedAgain.json.unchanged, movedAgain.json.version], [200, true, moved.json.version]);
   assert.equal(readNode('notes/walk.md', await readFile(join(layout.vault, 'notes/walk.md'), 'utf8')).node.visibility, 'friends');
   assert.equal((await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'private', asked: 'someone else' }, { 'If-Match': `"${moved.json.version}"` })).status, 400, 'asked names an agent');
   const public_ = await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'public' }, { 'If-Match': `"${moved.json.version}"` });
@@ -444,6 +455,10 @@ test('who sees a block is changed by the person, over the version read; an agent
   const approved = await json('POST', `/vault/requests/${asked.request}`, { approve: true });
   assert.equal(approved.json.request.status, 'approved');
   assert.equal(approved.json.file.layer, 'private');
+  // Approved again, its answer lost: the request as it was decided, and nothing moves twice.
+  const approvedAgain = await json('POST', `/vault/requests/${asked.request}`, { approve: true });
+  assert.deepEqual([approvedAgain.status, approvedAgain.json.request.status, approvedAgain.json.request.decided], [200, 'approved', approved.json.request.decided]);
+  assert.equal((await json('POST', `/vault/requests/${asked.request}`, { approve: false })).status, 409);
   assert.equal(layerOf('notes/walk.md', await readFile(join(layout.vault, 'notes/walk.md'), 'utf8')), 'private');
   const { events } = await readEvents(layout.vault);
   assert.deepEqual(events.filter(event => event.via === 'visibility').map(event => [event.by, event.layer, event.was, event.asked, event.why]), [
