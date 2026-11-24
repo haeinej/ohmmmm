@@ -25,6 +25,8 @@ export type SessionLine = Common & { type: "session"; done: string; changes: str
 /** A named point in history. It changes nothing. */
 export type SaveLine = Common & { type: "save"; name: string; note?: string }
 export type Line = ChangeLine | SessionLine | SaveLine
+/** A change the vault's journal holds from before the workspace read the home, as a history line takes it. */
+export type PastChange = { at: string; node: string; actor: Actor; op?: ChangeOp; before?: Snapshot; after: Snapshot }
 
 export const snap = (d: Doc): Snapshot => ({
   title: d.title, body: d.body, kind: d.kind, homeChannel: d.homeChannel,
@@ -69,10 +71,10 @@ export function diffWords(a: string, b: string): DiffPart[] {
 
 /**
  * The workspace's history of its blocks. The sample seeds a few days of it (`fixtureIds`). A home
- * read from disk starts with each block as it is (`baseline`): no lines, so only what changes now
- * is written down, and it is compared with how the block was when it was read.
+ * read from disk starts with the vault journal's changes (`past`), and with each block as it is
+ * (`baseline`): what changes now is compared with how the block was when it was read.
  */
-export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>, { baseline = false }: { baseline?: boolean } = {}) {
+export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>, { baseline = false, past = [] }: { baseline?: boolean; past?: readonly PastChange[] } = {}) {
   const byId = (id: string) => all.find(doc => doc.id === id)
   const journals: Record<HistoryOwner, Line[]> = { vault: [], cortex: [] }
   const historyLines = (owner?: HistoryOwner): readonly Line[] =>
@@ -99,8 +101,9 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
 
   const changeById = (id: string) => historyLines().find((l): l is ChangeLine => l.type === "change" && l.id === id)
   const linesFor = (node: string) => historyLines().filter((l): l is ChangeLine => l.type === "change" && l.node === node)
+  // How each block was when the home was read; it gives way to the first change made since.
   const bases = new Map<string, string>()
-  const currentVersion = (node: string) => linesFor(node).at(-1)?.after ?? bases.get(node)
+  const currentVersion = (node: string) => bases.get(node) ?? linesFor(node).at(-1)?.after
   const snapshotAt = (version: string) => versions.get(version)
 
   const words = (s: string) => s.split(/\s+/).filter(Boolean).length
@@ -143,8 +146,10 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     versions.set(version, after)
     const owner = isBlock(doc) ? "vault" : "cortex"
     const last = linesFor(doc.id).at(-1)
-    const joins = last && op === "edit" && last.op === "edit" && last.actor.kind === who.kind && last.actor.name === who.name
+    // A change since the home was read never joins a line from the vault's journal.
+    const joins = last && !bases.has(doc.id) && op === "edit" && last.op === "edit" && last.actor.kind === who.kind && last.actor.name === who.name
       && journals[owner].at(-1) === last && at.getTime() - Date.parse(last.at) < 5 * 60_000 && !opts.reason
+    bases.delete(doc.id)
     if (joins) {
       Object.assign(last, { after: version, at: at.toISOString(), ...describe(last.before ? versions.get(last.before) : undefined, after, "edit") })
       return last
@@ -225,6 +230,18 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     recordSession(muse, "Looked for blocks that belong together", [
       { tried: "Connecting Reading list to Tokyo walks, day one", why: "Nothing on the list is about the walks" },
     ], day("2026-11-19", "09:12"))
+  }
+  for (const change of past) {
+    const before = change.before && versionOf(change.before)
+    if (change.before) versions.set(before!, change.before)
+    const after = versionOf(change.after)
+    versions.set(after, change.after)
+    const op = change.op ?? opOf(change.before, change.after)
+    push<ChangeLine>({
+      owner: "vault", at: change.at, actor: change.actor, type: "change", node: change.node, op,
+      ...(before ? { before } : {}), after, ...describe(change.before, change.after, op),
+      ...(op === "remove" ? { summary: "Removed it", fields: [] } : {}),
+    })
   }
   if (baseline) {
     for (const doc of all) {

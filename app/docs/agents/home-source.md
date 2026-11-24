@@ -73,8 +73,9 @@ typecheck includes test files. Adapter tests cover
 the selected workspace, compare-and-set, XRPC routing and a synthetic keys
 fixture. Live sign-in, the account app's unlock screens, and publishing
 await app integration and live verification. Kept versions in the service
-adapter currently cover private files. The local source keeps its history from
-when the home was read; the vault's own journal through the bridge comes next.
+adapter currently cover private files. The local source's history starts from
+the vault's own journal (`/vault/journal`, `pastChanges`), and it moves blocks and
+channels through the bridge's rename.
 
 ## Workspace vocabulary
 

@@ -10,14 +10,14 @@
 // an unchanged vault scans in the time it takes to list it. A file in a root that keeps only a
 // reference is never opened at all, because opening a Google Drive file that is kept online
 // downloads it.
-import { copyFile, lstat, mkdir, readdir, readFile, rename, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { blobCid, FILE_TYPES, kindOf as mediaKind } from './core.mjs';
 import { slugOf } from './file.mjs';
 import { formerNames, nameKey, renamesBetween } from './names.mjs';
 import { evidence, nodeKey, originKind, readVault, SOURCES } from './node.mjs';
-import { appendEvents, downloadedFrom, readEvents } from './journal.mjs';
+import { appendEvents, downloadedFrom, HISTORY, readEvents } from './journal.mjs';
 import { CANONICAL, CONFIG, readConfig } from './roots.mjs';
 import { words } from './words.mjs';
 
@@ -216,6 +216,20 @@ export async function scan({ vault, db, home = homedir(), now = new Date() }) {
   return report;
 }
 
+// Each version of the vault's own Markdown the scan finds, kept in .vault/history/ by its content
+// address, as the tools keep theirs: so a change made outside ohm (in Obsidian, in a text editor) can
+// be shown and restored too. Only text that hashes to the event's address is kept.
+async function keepVersions(vault, db, events) {
+  const text = db.prepare('SELECT text FROM files WHERE root = ? AND path = ?');
+  for (const event of events) {
+    if (event.root !== CANONICAL || !['added', 'changed'].includes(event.op) || !event.hash || !event.path.endsWith('.md')) continue;
+    const held = text.get(event.root, event.path)?.text;
+    if (typeof held !== 'string' || await blobCid(Buffer.from(held, 'utf8')) !== event.hash) continue;
+    await mkdir(join(vault, HISTORY), { recursive: true });
+    await writeFile(join(vault, HISTORY, event.hash), held, { flag: 'wx' }).catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
+  }
+}
+
 // The moves a tool journaled since the last scan, by where each file is now: root + path → from.
 async function movesSince(vault, lastScan) {
   const { events } = await readEvents(vault);
@@ -272,6 +286,7 @@ async function journal(vault, db, report, lastScan) {
   for (const { root, path } of report.removed) {
     if (!recorded(said(root, path), 'removed')) events.push({ at, op: 'removed', root, path, by: said(root, path)?.by ?? 'unknown', via: 'scan' });
   }
+  await keepVersions(vault, db, events);
   await appendEvents(vault, events);
   report.journaled = events.length;
   db.exec('DELETE FROM events');

@@ -9,12 +9,12 @@ import { allowed, GRANTS, readGrants } from '../vault/grants.mjs';
 import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
-import { appendEvents, JOURNAL, readEvents } from '../vault/journal.mjs';
+import { appendEvents, HISTORY, JOURNAL, readEvents } from '../vault/journal.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
 
 // Every version an agent replaced or wrote, by content address, so any agent change can be undone.
-export const HISTORY = '.vault/history';
+export { HISTORY };
 const CID = /^b[a-z2-7]{20,}$/;
 import { CANONICAL, CONFIG, readConfig } from '../vault/roots.mjs';
 import { createServer, serve } from './protocol.mjs';

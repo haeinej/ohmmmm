@@ -149,6 +149,8 @@ Because the renames are in the journal, not only in the index, deleting the inde
 
 Once a file has been copied into a folder, nothing in it says where it was copied from. So the vault writes down where things came from at the moment they arrive, in `.vault/journal.jsonl`: one line for each file added, changed, moved or removed, with who did it and how. Unlike the index, the journal cannot be made again from your files, so it is only ever added to, and it stays with the vault.
 
+Each version of your notes the vault sees is kept too, in `.vault/history/`: what ohm and agents write, and what `vault index` finds you changed in another app. So the app's history can show what a note said before, and `ohm vault restore` can bring it back.
+
 **Adding through ohm** records everything. An agent, or you, can bring in a file or an address:
 
 ```sh

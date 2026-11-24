@@ -207,3 +207,40 @@ test('the person edits files through the bridge only over the version they read,
   const indexed = JSON.parse((await vault.send('tools/call', { name: 'vault_index' })).json.result.content[0].text);
   assert.equal(indexed.journaled, 0);
 });
+
+test('the app reads the vault\'s recent changes with their versions, and renames as the person', async t => {
+  const { layout, call, signed } = await setUp(t);
+  const json = (method, path, value) => call(method, path, { headers: { ...signed, 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  await writeFile(join(layout.vault, 'notes/link.md'), '---\ntitle: Link\n---\n\nSee [[notes/walk]].\n');
+  const first = await call('GET', '/vault/journal', { headers: signed });
+  assert.equal(first.status, 200);
+  // An edit made outside ohm, in a text editor: the next read finds it, journals it and keeps both versions.
+  await writeFile(join(layout.vault, 'notes/walk.md'), '---\ntitle: Slow walk\n---\n\nYanaka, in the rain.\n');
+  const { json: history } = await call('GET', '/vault/journal', { headers: signed });
+  const changed = history.events.filter(event => event.path === 'notes/walk.md');
+  assert.deepEqual(changed.map(event => [event.op, event.via]), [['added', 'scan'], ['changed', 'scan']]);
+  assert.match(history.texts[changed[0].hash], /Yanaka, lanterns, cats\./);
+  assert.match(history.texts[changed[1].hash], /Yanaka, in the rain\./);
+
+  // A rename as the person: the block moves, and a link to it by its path elsewhere is rewritten.
+  const moved = await json('POST', '/vault/rename', { block: 'notes/walk.md', home: 'essays' });
+  assert.equal(moved.status, 200);
+  assert.deepEqual([moved.json.kind, moved.json.from, moved.json.to], ['block', 'notes/walk.md', 'essays/walk.md']);
+  assert.deepEqual(moved.json.files.map(file => file.path).sort(), ['essays/walk.md', 'notes/link.md']);
+  assert.match(await readFile(join(layout.vault, 'notes/link.md'), 'utf8'), /\[\[essays\/walk\]\]/);
+  const back = moved.json.files.find(file => file.path === 'notes/link.md');
+  assert.equal(back.version, await blobCid(Buffer.from(back.text, 'utf8')));
+  const { events } = await readEvents(layout.vault);
+  assert.ok(events.some(event => event.op === 'moved' && event.path === 'essays/walk.md' && event.by === 'me' && event.via === 'rename'));
+
+  // A channel: one folder rename, and it gets an ID.
+  const channel = await json('POST', '/vault/rename', { channel: 'essays', to: 'writing' });
+  assert.equal(channel.status, 200);
+  assert.match(channel.json.id, /^[a-z2-7]{13}$/);
+  assert.ok((await stat(join(layout.vault, 'writing/walk.md'))).isFile());
+  // Refused, with the reason: a channel already there, and anything but a rename.
+  const taken = await json('POST', '/vault/rename', { channel: 'writing', to: 'notes' });
+  assert.equal(taken.status, 409);
+  assert.match(taken.json.error, /already a channel/);
+  assert.equal((await json('POST', '/vault/rename', { block: '../x.md', home: 'y' })).status, 400);
+});

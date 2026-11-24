@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client"
 import "./styles.css"
 import { installWebMcpShim } from "./webmcp-shim"
 import { App } from "./App"
-import { applyDensity, open, setSource } from "./workspace/store"
+import { applyDensity, open, setSource, sourceChanged } from "./workspace/store"
 import { bridgeMedia, currentBridge, pairFromLocation } from "./data/bridge"
 import { createLocalSource } from "./data/local-source"
 import { setMediaRemote } from "./media/cache"
@@ -20,7 +20,7 @@ setMediaRemote(cid => bridgeMedia(cid))
 // Paired, the workspace opens on the home itself (docs/serve.md); otherwise, and if it does not answer, on the sample.
 const bridge = currentBridge()
 if (bridge) {
-  createLocalSource(bridge, { onProblem: message => notify({ message }) })
+  createLocalSource(bridge, { onProblem: message => notify({ message }), onChange: sourceChanged })
     .then(async home => {
       // A change still on its way to disk would be lost by leaving: the browser asks first.
       addEventListener("beforeunload", event => { if (home.unsent()) event.preventDefault() })

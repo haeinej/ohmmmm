@@ -18,7 +18,7 @@ import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds
 import { keep, makeSizes, measure } from "@/media/cache"
 
 const editable = () => {
-  const source: HomeSource<"sync"> | undefined = sampleWorkspace()
+  const source: Workspace | undefined = sampleWorkspace()
   if (!source) throw new DOMException("Editing is available in the sample workspace.", "NotSupportedError")
   return source
 }
@@ -458,6 +458,8 @@ export function moveChannel(path: string, into: string | null) {
   if (into && (into === path || into.startsWith(`${path}/`))) throw new DOMException("A channel can't go inside itself", "DataError")
   if (into && channelRecords.some(c => c.path.startsWith(`${path}/`))) throw new DOMException(`“${name}” holds channels of its own, so it can't go inside another yet`, "DataError")
   if (next === path) return { path, published: 0 }
+  const whole = movedWhole(path, next)
+  if (whole) return { path: next, published: whole.published }
   const records = structuredClone(channelRecords)
   const record = ensureChannel(records, path)
   const there = records.find(channel => channel.path === next)
@@ -606,12 +608,31 @@ export function renameChannel(path: string, name: string) {
   validateChannel(to)
   if (to === path) return { published: 0 }
   if (channelRecords.some(channel => channel.path === to)) throw new DOMException(`There is already a channel “${to.replace("/", " › ")}”`, "DataError")
+  const whole = movedWhole(path, to)
+  if (whole) return whole
   const records = channelRecords.map(channel => ({ ...channel, path: replacePath(channel.path, path, to, true) }))
   const published = refile(path, to, true)
   updateChannels(records)
   set(refresh())
   return { published }
 }
+
+/**
+ * A channel moved as one folder by a source that can (the home on this computer), in place of moving
+ * each block: what used its old path is rewritten there. Null when the source moves block by block.
+ */
+function movedWhole(from: string, to: string) {
+  const source = editable()
+  if (!source.moveChannel) return null
+  const inside = (path?: string) => !!path && (path === from || path.startsWith(`${from}/`))
+  const published = blocks.filter(doc => isBlock(doc) && inside(doc.homeChannel) && doc.visibility !== "private").length
+  source.moveChannel(from, to)
+  set(refresh())
+  return { published }
+}
+
+/** The source changed what it holds by itself (the home's bridge answered): read it again. */
+export const sourceChanged = () => set(refresh())
 
 function validateChannel(path: string) {
   if (!isChannelPath(path) || path.length > 120 || path.split("/").length > 2) {

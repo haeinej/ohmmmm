@@ -90,6 +90,7 @@ How `scan` writes the journal: after walking, and **before** the index transacti
 - `changed`, `moved` and `removed` events;
 - for a new file in the vault folder that has no stated origin, `copied-from` when its content address matches another indexed file (read-only roots preferred);
 - for a new non-`.md` file, `downloaded-from` from macOS;
+- and, before appending, for each `added` or `changed` Markdown file of the vault's own root, its text kept in `.vault/history/<hash>` (`HISTORY` in `journal.mjs`) when it hashes to the event's `hash` (`keepVersions`), so an edit made outside ohm can be shown and restored like a tool's;
 - then, inside the rebuild, `renamed` events for what `renamesBetween` finds (below), appended and loaded into `events` before the vault is read a second time.
 
 ## Former names

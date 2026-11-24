@@ -6,6 +6,8 @@
 //   /media/<cid>    GET an image's bytes by their CID; PUT them to make a media block in the home
 //   /vault/files    GET the home's Markdown, each file with its version
 //   /vault/file     PUT or DELETE one file, as the person, only over the version it was read at
+//   /vault/journal  GET the vault's recent changes, with the kept versions they name, for the app's history
+//   /vault/rename   POST a rename or move of a block or channel, as the person, rewriting what used the old name
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -26,12 +28,12 @@ import { fileURLToPath } from 'node:url';
 import { cortexSessions, httpTransport } from '../cortex/src/http.mjs';
 import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
-import { blobCid, FILE_TYPES, isSlug } from '../vault/vault/core.mjs';
+import { blobCid, FILE_TYPES, isSlug, VaultProblem } from '../vault/vault/core.mjs';
 import { isPostId, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
-import { appendEvents } from '../vault/vault/journal.mjs';
+import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
 import { isChannelPath, newNodeId, readNode, SOURCES } from '../vault/vault/node.mjs';
-import { readVaultFolder } from '../vault/vault/rename.mjs';
+import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
@@ -236,6 +238,47 @@ export async function writeAsPerson({ vault, path, text, replaces }) {
   return { path, version: hash, created: before === undefined };
 }
 
+/**
+ * The vault's recent changes to its Markdown for the app's history: the last `limit` added, changed,
+ * moved and removed events of the vault's own root, oldest first, with the text of every kept version
+ * they name (`texts`, by content address). A version that was never kept is simply absent.
+ */
+export async function recentHistory(vault, { limit = 500 } = {}) {
+  const { events } = await readEvents(vault);
+  const changes = events
+    .filter(event => event.root === 'vault' && ['added', 'changed', 'moved', 'removed'].includes(event.op) && event.path.endsWith('.md'))
+    .slice(-limit);
+  const texts = {};
+  for (const event of changes) {
+    for (const address of [event.before, event.hash]) {
+      if (!address || address in texts || !/^b[a-z2-7]{20,}$/.test(address)) continue;
+      const text = await readFile(join(vault, HISTORY, address), 'utf8').catch(() => undefined);
+      if (text !== undefined) texts[address] = text;
+    }
+  }
+  return { events: changes, texts };
+}
+
+/**
+ * A rename or move as the person (vault/vault/rename.mjs): `{ channel, to }`, or `{ block, slug?,
+ * title?, home? }`. Every file that used the old name is rewritten; all of it is journaled `by: me`,
+ * `via: rename`. Answers what the rename did, and each file it moved or wrote as it is on disk now.
+ */
+export async function renameAsPerson({ vault, change }) {
+  const { files, paths } = await readVaultFolder(vault, { open: path => inVault(vault, path) });
+  const plan = planRename(files, change.block === undefined
+    ? { channel: change.channel, to: change.to }
+    : { block: change.block, ...(change.slug === undefined ? {} : { slug: change.slug }), ...(change.title === undefined ? {} : { title: change.title }), ...(change.home === undefined ? {} : { channel: change.home }) }, { paths });
+  const done = await applyRename({ vault, plan, by: 'me', keep: text => keep(vault, text) });
+  const touched = [...new Set([...plan.moves.map(move => move.to), ...plan.writes.map(write => write.path)])].filter(path => path.endsWith('.md'));
+  const now = [];
+  for (const path of touched) {
+    const text = await readFile(join(vault, path), 'utf8').catch(() => undefined);
+    if (text !== undefined) now.push({ path, text, version: await versionOf(text) });
+  }
+  return { ...done, moves: plan.moves, files: now };
+}
+
 // ---- The bridge ----
 
 const digest = value => createHash('sha256').update(value).digest();
@@ -330,6 +373,23 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
       }
+      if (url.pathname === '/vault/journal' && req.method === 'GET') {
+        const limit = Number(url.searchParams.get('limit') ?? 500);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 5000) return said(res, 400, 'limit is a whole number from 1 to 5000');
+        // Changes made outside ohm since the last scan are found, journaled and kept first.
+        await withCollectLock(layout.vault, DatabaseSync, () => withIndex(db => scan({ vault: layout.vault, db })));
+        return send(res, 200, await recentHistory(layout.vault, { limit }));
+      }
+      if (url.pathname === '/vault/rename' && req.method === 'POST') {
+        if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return said(res, 415, 'Send the rename as JSON');
+        let change;
+        try { change = JSON.parse((await body(req, 64 * 1024)).toString('utf8')); } catch { return said(res, 400, 'Send the rename as one JSON object'); }
+        const text = value => value === undefined || (typeof value === 'string' && value.length <= 1000);
+        if (!change || typeof change !== 'object' || !['block', 'channel', 'to', 'slug', 'title', 'home'].every(key => text(change[key]))) return said(res, 400, 'A rename is { channel, to } or { block, slug?, title?, home? }, each a string');
+        if (change.block !== undefined && !editablePath(change.block)) return said(res, 400, 'Give the block as its file\'s path in the vault');
+        const done = await withCollectLock(layout.vault, DatabaseSync, () => renameAsPerson({ vault: layout.vault, change }));
+        return send(res, 200, done);
+      }
       if (url.pathname === '/vault/files' && req.method === 'GET') {
         const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });
         return send(res, 200, { home: layout.handle, files: await Promise.all(files.map(async file => ({ ...file, version: await versionOf(file.text) }))) });
@@ -371,12 +431,13 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename' },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename and /media/<cid>');
     } catch (problem) {
-      if (!res.headersSent) said(res, problem?.name === 'VaultProblem' ? 409 : 500, problem?.name === 'VaultProblem' ? problem.message : 'Internal error');
+      // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
+      if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');
       else res.destroy();
     }
   };

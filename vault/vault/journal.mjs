@@ -23,6 +23,9 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 export const JOURNAL = '.vault/journal.jsonl';
+// Kept versions of the vault's Markdown, each by its content address: what a journal event's `before`
+// and `hash` point at, so a change can be shown and undone. Written by the tools, the bridge, and the scan.
+export const HISTORY = '.vault/history';
 export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed'];
 export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;

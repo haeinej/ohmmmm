@@ -9,7 +9,11 @@ export * from "./workspace-model"
  * A source the workspace edits as it goes: the sample, or the home on this computer (local-source.ts).
  * It answers at once, and carries the workspace's own part (`demo`: owner, entities, cortex, inbox, history).
  */
-export type Workspace = HomeSource<"sync"> & { demo: SampleSource["demo"] }
+export type Workspace = HomeSource<"sync"> & {
+  demo: SampleSource["demo"]
+  /** Renames or moves a channel as one folder, where the source can (the home on this computer). */
+  moveChannel?(from: string, to: string): void
+}
 type Selection = HomeSource | Workspace
 const emptyJournal = createJournal([])
 const defaultOwner = { did: "", handle: "", name: "" }

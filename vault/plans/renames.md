@@ -39,7 +39,7 @@ Renaming a folder, a file, a slug or a title can break any of these. A channel m
 | `vault/mcp/local.mjs`, `vault/scripts/vault.mjs` | Built: `vault_rename` (needs `write` where the node is and where it goes; references in files without a grant are left, listed, and keep working) and `ohm vault rename` |
 | `contract/vault-reader.mjs`, `vault/vault/cortex.mjs`, `cortex/src/vault.mjs` | Channels carry their `id` when they have one. Nothing is removed; `test/home.test.mjs` keeps the three together |
 | Lexicon `com.ohmmmm.vault.channel` | `order` items may be IDs |
-| `app/` | `ChannelRecord.id` stays and comes from `_channel.md`; the tree, the graph and links key channels by ID; a rename in the app goes through the same handler as the agent tool |
+| `app/` | `ChannelRecord.id` stays and comes from `_channel.md`; the tree, the graph and links key channels by ID; a rename in the app goes through the same handler as the agent tool. Built for the home on this computer: the app's moves and channel renames go through `POST /vault/rename` (`planRename`/`applyRename`, [docs/serve.md](../../docs/serve.md)) |
 | `docs/words.md` | Channel: named by its path, known by its ID. A new word, **former name** |
 | `vault/docs/vault-format.md` and `vault/docs/agents/vault-format.md` | These rules |
 

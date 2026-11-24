@@ -5,14 +5,16 @@
 //
 // What the workspace writes is merged into the file as it is on disk: only the properties the
 // workspace knows are set, and every other property, the order of the properties and the file's name
-// stay as they were. What this source cannot do yet is said, and the file left as it is: moving a
-// block or a channel to another folder (`ohm vault rename` does), changing who sees a block, the cortex.
+// stay as they were. Moving a block or a channel to another folder goes through the bridge's rename
+// (vault/vault/rename.mjs), which rewrites what used the old path. History starts from the vault's
+// own journal. What this source cannot do yet is said, and the file left as it is: changing who sees
+// a block, the cortex.
 import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { heldNow, original } from "@/media/cache"
 import { docOf, fileOf } from "./block-document"
 import { bridgeFetch, type Bridge } from "./bridge"
-import { createJournal } from "./journal"
+import { createJournal, snap, YOU, type Actor, type PastChange } from "./journal"
 import { createSampleSearch } from "./sample-search"
 import {
   emptyPlan, visibilityMove, type BlockHead, type BlockRef, type HomeFile, type HomeSource, type Layer, type VaultEvidence,
@@ -54,22 +56,74 @@ export function mergeFile(original: string, path: string, written: string, layer
 }
 
 type Held = { text: string; version: string | null; sent?: string }
-export type LocalOptions = { onProblem?: (message: string) => void }
+/** `onProblem`: what could not be done, for the person. `onChange`: files changed after the bridge answered, for the workspace to read again. */
+export type LocalOptions = { onProblem?: (message: string) => void; onChange?: () => void }
+
+const folderOf = (path: string) => path.split("/").slice(0, -1).join("/")
+const refOf = (path: string, node: Node): BlockRef => {
+  const layer = (node.visibility ?? "private") as Layer
+  return { id: node.id ?? `path:${path}`, layer, store: layer === "private" ? "sealed" : node.kind === "post" ? "post" : "block" }
+}
+const snapOf = (path: string, text: string) => {
+  const node = nodeOf(path, text)
+  return node?.type === "block" ? snap(docOf(refOf(path, node), { path, text }).doc) : undefined
+}
+
+export type JournalEvent = { at: string; op: string; path: string; from?: string; by: string; via?: string; before?: string; hash?: string }
+const actorOf = (by: string): Actor => (by === "me" ? YOU : by.startsWith("agent:") ? { kind: "agent", name: by.slice(6) } : { kind: "human", name: "outside ohm" })
+
+/**
+ * The vault journal's changes as history lines (`/vault/journal`): each on the block it is now, by
+ * its ID, or by following its file's moves to where it is. A change whose version was never kept is
+ * left out, since there is nothing to show of it; a move and a removal carry the last version known.
+ */
+export function pastChanges({ events, texts }: { events: readonly JournalEvent[]; texts: Record<string, string> }, nodeAt: (path: string) => string | undefined): PastChange[] {
+  const forward = new Map<string, string>()
+  for (const event of events) if (event.op === "moved" && event.from) forward.set(event.from, event.path)
+  const nodeFor = (path: string) => {
+    let at = path
+    for (const seen = new Set([at]); forward.has(at) && !seen.has(forward.get(at)!);) { at = forward.get(at)!; seen.add(at) }
+    return nodeAt(at) ?? `path:${at}`
+  }
+  const last = new Map<string, NonNullable<ReturnType<typeof snapOf>>>()
+  const out: PastChange[] = []
+  for (const event of events) {
+    const text = event.hash ? texts[event.hash] : undefined
+    const node = (text && nodeOf(event.path, text)?.id) || nodeFor(event.path)
+    const known = last.get(node)
+    const actor = actorOf(event.by)
+    if (event.op === "added" || event.op === "changed") {
+      const after = text === undefined ? undefined : snapOf(event.path, text)
+      if (!after) continue
+      const before = (event.before && texts[event.before] !== undefined ? snapOf(event.path, texts[event.before]) : undefined) ?? known
+      if (before && JSON.stringify(before) === JSON.stringify(after)) continue
+      out.push({ at: event.at, node, actor, ...(before ? { before } : { op: "create" as const }), after })
+      last.set(node, after)
+    } else if (event.op === "moved" && known) {
+      const after = { ...known, homeChannel: folderOf(event.path) }
+      out.push({ at: event.at, node, actor, op: "move", before: known, after })
+      last.set(node, after)
+    } else if (event.op === "removed" && known) {
+      out.push({ at: event.at, node, actor, op: "remove", before: known, after: known })
+      last.delete(node)
+    }
+  }
+  return out
+}
 
 /** Reads the home through the bridge, and gives the workspace its working copy. */
-export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }: LocalOptions = {}) {
+export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, onChange = () => {} }: LocalOptions = {}) {
   const answer = await bridgeFetch("/vault/files", {}, bridge)
   if (!answer.ok) throw new DOMException(`Your home did not answer (HTTP ${answer.status}).`, "NetworkError")
   const listed = await answer.json() as { home: string; files: { path: string; text: string; version: string }[] }
+  // The vault's own history; without it the workspace still opens, with history from now.
+  const journaled = await bridgeFetch("/vault/journal?limit=500", {}, bridge)
+    .then(response => (response.ok ? response.json() : undefined)).catch(() => undefined) as { events: JournalEvent[]; texts: Record<string, string> } | undefined
   const files = new Map<string, Held>(listed.files.map(file => [file.path, { text: file.text, version: file.version, sent: file.text }]))
 
-  // Blocks as the workspace knows them. A block with no ID is known by its path.
+  // Blocks as the workspace knows them. A block with no ID is known by the path it was read at.
   const pathOf = new Map<string, string>()
   const blocks: Doc[] = []
-  const refOf = (path: string, node: Node): BlockRef => {
-    const layer = (node.visibility ?? "private") as Layer
-    return { id: node.id ?? `path:${path}`, layer, store: layer === "private" ? "sealed" : node.kind === "post" ? "post" : "block" }
-  }
   for (const [path, held] of files) {
     const node = nodeOf(path, held.text)
     if (node?.type !== "block") continue
@@ -84,7 +138,8 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
     handle: entity.aliases?.[0] ?? entity.slug, name: entity.name ?? entity.slug,
   }))
   const owner: Entity = { did: "", handle: listed.home, name: listed.home }
-  const journal = createJournal(all, undefined, { baseline: true })
+  const idAt = (path: string) => [...pathOf].find(([, at]) => at === path)?.[0]
+  const journal = createJournal(all, undefined, { baseline: true, past: journaled ? pastChanges(journaled, idAt) : [] })
   const versions = new Map<string, number>()
   let sequence = 0
   const versionOf = (id: string) => `local-${versions.get(id) ?? 0}`
@@ -144,6 +199,40 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
     if (edited) writeBack(path)
   })
 
+  // What the bridge says is on disk now, after a rename: each file's text and version, with any change
+  // the workspace made meanwhile merged onto it; then the workspace reads its blocks again.
+  const settle = (changed: { path: string; text: string; version: string }[]) => {
+    for (const file of changed) {
+      const held = files.get(file.path)
+      if (!held) { files.set(file.path, { text: file.text, version: file.version, sent: file.text }); continue }
+      const edited = held.text !== held.sent
+      const layer = (nodeOf(file.path, held.text)?.visibility ?? "private") as Layer
+      held.version = file.version
+      held.sent = file.text
+      held.text = edited ? mergeFile(file.text, file.path, held.text, layer) : file.text
+      const id = idAt(file.path)
+      const doc = id && blocks.find(each => each.id === id)
+      if (doc) { Object.assign(doc, docOf({ ...refOf(file.path, nodeOf(file.path, held.text)!), id: doc.id }, { path: file.path, text: held.text }).doc); touch(doc.id) }
+      if (edited) writeBack(file.path)
+    }
+    onChange()
+  }
+  const renameBack = (path: string, change: Record<string, string>) => later(path, async () => {
+    const response = await bridgeFetch("/vault/rename", { method: "POST", body: JSON.stringify(change), headers: { "Content-Type": "application/json" } }, bridge)
+    if (!response.ok) throw await failed(response)
+    const done = await response.json() as { files: { path: string; text: string; version: string }[]; left?: { path: string }[] }
+    if (done.left?.length) onProblem(`${done.left.length === 1 ? "One file" : `${done.left.length} files`} still use the old name, and go on working through it: ${done.left.map(each => each.path).join(", ")}`)
+    settle(done.files)
+  })
+  // Moves a file in the working copy, keeping what was read of it, so the rename's answer settles it.
+  const moveHeld = (from: string, to: string) => {
+    const held = files.get(from)!
+    files.delete(from)
+    files.set(to, held)
+    const id = idAt(from)
+    if (id) pathOf.set(id, to)
+  }
+
   const findDoc = (ref: BlockRef) => {
     const doc = blocks.find(each => each.id === ref.id)
     if (!doc) throw missing()
@@ -167,7 +256,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
     listBlocks(layers: readonly Layer[] = visibleLayers) {
       return blocks.filter(doc => layers.includes(doc.visibility)).map((doc): BlockHead => {
         const path = pathOf.get(doc.id)!
-        return { ...refOf(path, nodeOf(path, files.get(path)!.text)!), path, title: doc.title, version: versionOf(doc.id) }
+        return { ...refOf(path, nodeOf(path, files.get(path)!.text)!), id: doc.id, path, title: doc.title, version: versionOf(doc.id) }
       })
     },
     readBlock(ref: BlockRef) {
@@ -183,9 +272,20 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
         if (versionOf(ref.id) !== replaces) throw stale()
         const held = files.get(path)!
         const was = nodeOf(path, held.text)!
-        // Not yet: these would rename the file. The block stays as it is, and the person is told how.
+        // Another home channel moves the file, through the bridge's rename, which rewrites what used its old path.
         if (written.home !== was.home) {
-          onProblem(`Moving a block to another channel in your home is not built here yet. Run: ohmmmm vault rename ${was.slug} --channel ${written.home}`)
+          const to = `${written.home ? `${written.home}/` : ""}${path.split("/").at(-1)}`
+          if (files.has(to)) {
+            onProblem(`There is already a file at ${to}, so the block stays where it is.`)
+            return { version: versionOf(ref.id) }
+          }
+          const text = mergeFile(held.text, to, file.text, ref.layer)
+          moveHeld(path, to)
+          files.get(to)!.text = text
+          touch(ref.id)
+          Object.assign(blocks.find(each => each.id === ref.id)!, docOf(ref, { path: to, text }).doc)
+          renameBack(path, { block: path, home: written.home ?? "" })
+          journal.syncJournal(change)
           return { version: versionOf(ref.id) }
         }
         if ((written.visibility ?? "private") !== (was.visibility ?? "private")) {
@@ -263,6 +363,20 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
         }
       }
     },
+    /**
+     * Renames or moves a channel as one folder (the store calls this in place of moving each block),
+     * through the bridge's rename: what used its old path is rewritten, and the channel gets an ID.
+     */
+    moveChannel(from: string, to: string) {
+      if ([...files.keys()].some(path => path.startsWith(`${to}/`))) throw new DOMException(`There is already a channel “${to}” in your home.`, "DataError")
+      for (const path of [...files.keys()]) if (path.startsWith(`${from}/`)) moveHeld(path, `${to}${path.slice(from.length)}`)
+      for (const doc of blocks) {
+        const path = pathOf.get(doc.id)!
+        if (path.startsWith(`${to}/`)) { Object.assign(doc, docOf({ ...refOf(path, nodeOf(path, files.get(path)!.text)!), id: doc.id }, { path, text: files.get(path)!.text }).doc); touch(doc.id) }
+      }
+      renameBack(`${to}/${CHANNEL_FILE}`, { channel: from, to })
+      journal.syncJournal()
+    },
     markVisibility() {
       onProblem("Who sees a block in your home is changed through Publish, which is not built here yet.")
     },
@@ -303,7 +417,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {} }
     async listShared() { return [] },
     async readShared(): Promise<never> { throw missing() },
     async publishPlan() { return emptyPlan() },
-  } satisfies HomeSource<"sync"> & { demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean }
+  } satisfies HomeSource<"sync"> & { demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean; moveChannel(from: string, to: string): void }
   return source
 }
 

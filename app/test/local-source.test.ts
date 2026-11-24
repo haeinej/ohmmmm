@@ -6,9 +6,9 @@ import test from "node:test"
 import { blobCid } from "../../vault/vault/core.mjs"
 import { readProperties, splitFile } from "../../vault/vault/file.mjs"
 import { createLocalSource, mergeFile } from "../src/data/local-source"
-import { byId, bySlug, channelRecords } from "../src/data/workspace-data"
+import { byId, bySlug, channelRecords, demoJournal } from "../src/data/workspace-data"
 import { memoryBackend, setMediaBackend } from "../src/media/cache"
-import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, saveDraft, setSource } from "../src/workspace/store"
+import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, sourceChanged } from "../src/workspace/store"
 
 const TID = "3m2zx5u6ifk2a"
 const bridge = { url: "http://127.0.0.1:8766", token: "QexdqYGJ2FZs7RkxcsaXaQMMXE0wJv3TqcHALTiddso" }
@@ -16,7 +16,7 @@ const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 const props = (text: string) => readProperties(splitFile(text).head).properties as Record<string, unknown>
 
 /** A bridge over files kept in memory, answering as home/serve.mjs does, with real versions. */
-function fakeHome(initial: Record<string, string>) {
+function fakeHome(initial: Record<string, string>, journal: { events: unknown[]; texts: Record<string, string> } = { events: [], texts: {} }) {
   const disk = new Map(Object.entries(initial))
   const calls: string[] = []
   const version = (text: string) => blobCid(new TextEncoder().encode(text))
@@ -27,6 +27,24 @@ function fakeHome(initial: Record<string, string>) {
     assert.equal(headers.Authorization, `Bearer ${bridge.token}`)
     const method = init.method ?? "GET"
     calls.push(`${method} ${url.pathname}${url.search ? `?${url.searchParams.get("path") ?? url.searchParams.get("channel")}` : ""}`)
+    if (url.pathname === "/vault/journal") return json(200, journal)
+    if (url.pathname === "/vault/rename") {
+      // As vault/vault/rename.mjs does it for these cases: files move, and a path link elsewhere is rewritten.
+      const change = JSON.parse(String(init.body)) as { block?: string; home?: string; channel?: string; to?: string }
+      const moves: [string, string][] = change.block
+        ? [[change.block, `${change.home}/${change.block.split("/").at(-1)}`]]
+        : [...disk.keys()].filter(path => path.startsWith(`${change.channel}/`)).map(path => [path, `${change.to}${path.slice(change.channel!.length)}`])
+      if (moves.some(([, to]) => disk.has(to))) return json(409, { error: "There is already a file there" })
+      const from = change.block ? change.block.replace(/\.md$/, "") : change.channel!
+      const to = change.block ? moves[0][1].replace(/\.md$/, "") : change.to!
+      for (const [a, b] of moves) { disk.set(b, disk.get(a)!); disk.delete(a) }
+      const written = new Set(moves.map(([, b]) => b))
+      for (const [path, text] of disk) {
+        const next = text.replaceAll(`[[${from}`, `[[${to}`)
+        if (next !== text) { disk.set(path, next); written.add(path) }
+      }
+      return json(200, { kind: change.block ? "block" : "channel", left: [], files: await Promise.all([...written].filter(path => path.endsWith(".md")).map(async path => ({ path, text: disk.get(path)!, version: await version(disk.get(path)!) }))) })
+    }
     if (url.pathname === "/vault/files") {
       return json(200, { home: "mira.example.com", files: await Promise.all([...disk].filter(([path]) => path.endsWith(".md")).map(async ([path, text]) => ({ path, text, version: await version(text) }))) })
     }
@@ -62,15 +80,17 @@ const HOME = {
   "essays/on-rain.md": "---\ntitle: On rain\nvisibility: public\n---\n\nA published essay.\n",
 }
 
-async function withHome(t: test.TestContext, files: Record<string, string> = HOME) {
-  const home = fakeHome(files)
+async function withHome(t: test.TestContext, files: Record<string, string> = HOME, journal?: Parameters<typeof fakeHome>[1]) {
+  const home = fakeHome(files, journal)
   const realFetch = globalThis.fetch
   globalThis.fetch = home.fetch
   const problems: string[] = []
-  const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) } })
+  let changed = 0
+  // Wired as src/main.tsx wires it: the workspace reads again when the bridge's answer changed files.
+  const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) }, onChange: () => { changed++; sourceChanged() } })
   await setSource(source)
   t.after(async () => { globalThis.fetch = realFetch; await setSource() })
-  return { ...home, source, problems }
+  return { ...home, source, problems, changes: () => changed }
 }
 
 test("the merge keeps every property the workspace does not know, their order, and the file's own form", () => {
@@ -117,8 +137,8 @@ test("the home is read through the bridge, and an edit is written back merged, o
   assert.match(problems[0], /notes\/walk\.md was not saved to your home: it changed on disk since it was read/)
 })
 
-test("new blocks, images, channel order and deletes reach the home; moves are not built here yet, and say so", async t => {
-  const { disk, calls, source, problems } = await withHome(t)
+test("new blocks, images, channel order, moves and deletes reach the home", async t => {
+  const { disk, calls, source, problems, changes } = await withHome(t, { ...HOME, "essays/link.md": "---\ntitle: Link\n---\n\nSee [[notes/lantern-shop]].\n" })
   setMediaBackend(memoryBackend())
   t.after(() => setMediaBackend(memoryBackend()))
 
@@ -151,17 +171,58 @@ test("new blocks, images, channel order and deletes reach the home; moves are no
   await source.settled()
   assert.deepEqual(props(disk.get("notes/lantern-shop.md")!).channels, ["essays"])
 
-  // Moving a block to another folder is not built here: the block stays, and the person is told how.
-  const before = disk.get("notes/lantern-shop.md")
+  // Moving a block to another folder goes through the bridge's rename: the file moves, a link to its
+  // old path elsewhere is rewritten, and the workspace reads what changed again.
   moveBlock(draft.id, "notes", "essays")
+  assert.equal(byId(draft.id)!.homeChannel, "essays", "the workspace has it at once")
   await source.settled()
-  assert.equal(byId(draft.id)!.homeChannel, "notes")
-  assert.equal(disk.get("notes/lantern-shop.md"), before)
-  assert.match(problems.at(-1)!, /ohmmmm vault rename lantern-shop --channel essays/)
-  assert.ok(channelRecords.some(channel => channel.path === "notes"))
+  assert.equal(disk.has("notes/lantern-shop.md"), false)
+  assert.match(disk.get("essays/lantern-shop.md")!, new RegExp(`id: ${draft.id}`))
+  assert.match(disk.get("essays/link.md")!, /\[\[essays\/lantern-shop\]\]/)
+  assert.ok(changes() > 0)
+  assert.ok(calls.includes("POST /vault/rename"))
+
+  // A channel renamed is one folder renamed, not a move per block.
+  const before = calls.length
+  renameChannel("notes", "journal")
+  await source.settled()
+  assert.deepEqual(calls.slice(before).filter(call => call.startsWith("POST")), ["POST /vault/rename"])
+  assert.ok(disk.has("journal/walk.md") && !disk.has("notes/walk.md"))
+  assert.equal(byId(TID)!.homeChannel, "journal")
+  assert.ok(channelRecords.some(channel => channel.path === "journal"))
+  // Afterwards the moved block is still edited over the version the rename left.
+  autosave(TID, { body: "After the move." })
+  await source.settled()
+  assert.match(disk.get("journal/walk.md")!, /mood: calm[\s\S]*After the move\./)
 
   deleteDoc(draft.id)
   await source.settled()
-  assert.equal(disk.has("notes/lantern-shop.md"), false)
-  assert.equal(problems.length, 1)
+  assert.equal(disk.has("essays/lantern-shop.md"), false)
+  assert.deepEqual(problems, [])
+})
+
+test("history starts from the vault's journal: who changed what, and the versions kept", async t => {
+  const was = HOME["notes/walk.md"].replace("Yanaka, lanterns, cats.", "Yanaka.")
+  const cid = async (text: string) => blobCid(new TextEncoder().encode(text))
+  const journal = {
+    events: [
+      { at: "2026-11-20T09:00:00.000Z", op: "added", path: "notes/walk.md", by: "me", via: "add", hash: await cid(was) },
+      { at: "2026-11-21T10:00:00.000Z", op: "changed", path: "notes/walk.md", by: "agent:claude-code", via: "write", before: await cid(was), hash: await cid(HOME["notes/walk.md"]) },
+      { at: "2026-11-22T11:00:00.000Z", op: "changed", path: "notes/no-id.md", by: "unknown", via: "scan", hash: "bafkreinotkeptnotkeptnotkeptnotkept" },
+    ],
+    texts: { [await cid(was)]: was, [await cid(HOME["notes/walk.md"])]: HOME["notes/walk.md"] },
+  }
+  const { source } = await withHome(t, HOME, journal)
+  const versions = source.history({ id: TID, layer: "private", store: "sealed" })
+  assert.equal(versions.length, 2, "both kept versions; a change never kept is left out")
+  const lines = demoJournal().linesFor(TID)
+  assert.deepEqual(lines.map(line => [line.op, line.actor.kind, line.actor.name]), [["create", "human", "you"], ["edit", "agent", "claude-code"]])
+  assert.equal(demoJournal().snapshotAt(lines[0].after)!.body, "Yanaka.")
+  // A change made now follows on from the block as it was read, by you.
+  open(TID, "edit")
+  autosave(TID, { body: "Yanaka, now." })
+  const now = demoJournal().linesFor(TID)
+  assert.deepEqual(now.map(line => line.op), ["create", "edit", "edit"])
+  assert.equal(demoJournal().snapshotAt(now[2].before!)!.body, "Yanaka, lanterns, cats.")
+  await source.settled()
 })
