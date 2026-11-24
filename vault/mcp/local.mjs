@@ -9,7 +9,7 @@ import { allowed, GRANTS, readGrants } from '../vault/grants.mjs';
 import { lint } from '../vault/lint.mjs';
 import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
-import { appendEvents, HISTORY, JOURNAL, readEvents } from '../vault/journal.mjs';
+import { appendEvents, HISTORY, JOURNAL, keepVersion, readEvents } from '../vault/journal.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 import { layerOf, LAYERS, readRequests, requestVisibility, THROUGH_PUBLISH } from '../vault/visibility-folder.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
@@ -191,13 +191,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   const agent = by.startsWith('agent:') ? by.slice('agent:'.length) : by;
   const rescan = db => scan({ vault, db });
   // A version kept once, by its address. Two writes of the same text keep one file.
-  const keep = async text => {
-    const address = await addressOf(text);
-    await mkdir(join(vault, HISTORY), { recursive: true });
-    await writeFile(await ordinaryFile(vault, [...HISTORY.split('/'), address]), text, { flag: 'wx' })
-      .catch(problem => { if (problem.code !== 'EEXIST') throw problem; });
-    return address;
-  };
+  const keep = text => keepVersion(vault, text, { file: address => ordinaryFile(vault, [...HISTORY.split('/'), address]) });
   const recordChange = async (path, before, after, via = 'collect') => {
     if (before === after) return;
     const kept = via === 'collect' ? {} : {
@@ -305,14 +299,22 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content) > 600_000) refuse('Give the file\'s text, at most 600 KB.');
       await mayChange('write', path);
       const before = await current(parts);
-      await checkReplaces(before, replaces);
-      let after = content;
-      const node = readable(path, after);
-      if (before === undefined && node.type === 'block') {
-        // A new block from an agent says so and starts private: only the person shows a block to more people.
-        if (!node.post && !node.by) after = setProperty(after, 'by', by);
-        if ((node.post?.visibility ?? node.visibility) !== 'private') after = setProperty(after, 'visibility', 'private');
+      const node = readable(path, content);
+      // A new block from an agent says so and starts private: only the person shows a block to more people.
+      const asNew = () => {
+        let made = content;
+        if (node.type !== 'block') return made;
+        if (!node.post && !node.by) made = setProperty(made, 'by', by);
+        if ((node.post?.visibility ?? node.visibility) !== 'private') made = setProperty(made, 'visibility', 'private');
+        return made;
+      };
+      // The file says this already, as when the same write is tried again after its answer was lost.
+      if (before !== undefined && (before === content || before === asNew())) {
+        const hash = await addressOf(before);
+        return { path, made: false, unchanged: true, hash, before: hash };
       }
+      await checkReplaces(before, replaces);
+      const after = before === undefined ? asNew() : content;
       readable(path, after);
       sameLayer(path, before, after);
       await mkdir(dirname(join(vault, path)), { recursive: true });

@@ -23,14 +23,39 @@
 //   before the content address of the file as it was, kept in .vault/history/ (agent writes only)
 //   hash   the content address of the file as it is now
 import { execFile, spawn } from 'node:child_process';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { blobCid } from './core.mjs';
 
 export const JOURNAL = '.vault/journal.jsonl';
 // Kept versions of the vault's Markdown, each by its content address: what a journal event's `before`
 // and `hash` point at, so a change can be shown and undone. Written by the tools, the bridge, and the scan.
 export const HISTORY = '.vault/history';
+
+/**
+ * Keeps a version of a file in HISTORY under its content address, and answers the address. It is
+ * written whole, through a temporary file beside it and a rename, so a crash never leaves part of
+ * one under an address; one already there is read back, and written again unless it hashes to its
+ * address (cut off by a crash before versions were kept this way).
+ *   file(address): where it goes, after any checks the caller makes; defaults to joining
+ */
+export async function keepVersion(vault, text, { file = address => join(vault, HISTORY, address) } = {}) {
+  const address = await blobCid(Buffer.from(text, 'utf8'));
+  await mkdir(join(vault, HISTORY), { recursive: true });
+  const at = await file(address);
+  const held = await readFile(at).catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  if (held && await blobCid(held) === address) return address;
+  const temp = join(dirname(at), `.keep-${randomUUID()}`);
+  try {
+    await writeFile(temp, text, { flag: 'wx' });
+    await rename(temp, at);
+  } finally {
+    await rm(temp, { force: true });
+  }
+  return address;
+}
 export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed', 'published', 'unpublished'];
 export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename', 'visibility', 'publish'];
 // Events about a file's post, not the file: a scan reads past them.
