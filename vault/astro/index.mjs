@@ -27,11 +27,14 @@ export function pdsSource({ did, origin, channels, get = fetch, maxPages = 200 }
         if (!post) throw new Error(`Invalid ohm post ${id}`);
         return { id, value, post };
       });
-      const paths = new Map(posts.map(({ id, post }) => [encodeURIComponent(id), post.permalink]));
+      const selected = posts.filter(({ post }) => post.label === selector.label &&
+        (selector.sublabel === undefined || (post.sublabel ?? '') === selector.sublabel));
+      const selectedIds = new Set(selected.map(({ id }) => id));
+      const paths = new Map(posts.map(({ id, post }) => [
+        encodeURIComponent(id), selectedIds.has(id) ? post.permalink : post.canonicalUrl,
+      ]));
       const entries = [];
-      for (const { id, value, post } of posts) {
-        if (post.label !== selector.label ||
-            (selector.sublabel !== undefined && post.sublabel !== selector.sublabel)) continue;
+      for (const { id, value, post } of selected) {
         const { body, media, ...fields } = post;
         const rendered = renderArchivePost(post, { did, collection: CONTENT });
         entries.push({
@@ -46,7 +49,7 @@ export function pdsSource({ did, origin, channels, get = fetch, maxPages = 200 }
           },
           body,
           rendered: {
-            // The feed renderer emits short own-post links. Static sites need their full route.
+            // Only this collection's posts are guaranteed local routes. Other posts keep their canonical URL.
             html: rendered.bodyHtml.replace(/href="\/posts\/([^/" ]+)"/g, (attribute, key) => {
               const path = paths.get(key);
               return path ? `href="${path}"` : attribute;

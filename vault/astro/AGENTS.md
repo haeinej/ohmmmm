@@ -20,7 +20,8 @@ returns the wire document URI in `data.uri`.
 post, and resolves blob URLs. `renderArchivePost` in `../feed/render.mjs`
 supplies the canonical Markdown, footnote and media rendering. Owned short
 post links are expanded to the referenced post's normalized permalink using the
-complete inventory. Keep the site's routes compatible with these permalinks.
+complete inventory. Posts outside this collection keep their canonical URL.
+Keep the site's routes compatible with these permalinks.
 
 `build.mjs` copies these canonical feed modules and `forms.mjs` into `dist/feed`
 and the loader into `dist/astro`. Their relative imports remain valid inside an

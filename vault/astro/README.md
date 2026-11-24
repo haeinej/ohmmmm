@@ -63,7 +63,8 @@ and `data` containing the title, subtitle, dates, slug, label, canonical URL,
 permalink, document URI and media references. `data.media` contains each
 attachment's ID, kind, URL, alt text, caption and poster. Images and attachments
 are read from the public PDS blob endpoint. The supplied HTML resolves
-`media:` references and links to the member's own posts.
+`media:` references and links to the member's own posts. Links within the
+collection use local permalinks. Links to other public posts use their canonical URL.
 
 Query and render an entry in an Astro page.
 
