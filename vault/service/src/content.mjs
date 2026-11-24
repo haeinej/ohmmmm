@@ -18,6 +18,7 @@ import { DOCUMENT } from '../../feed/standard.mjs';
 import { CHANNEL_FILE, readNode } from '../../vault/node.mjs';
 import { postFile } from '../../vault/file.mjs';
 import { published } from './member.mjs';
+import { friendScope, inScope } from './friendship.mjs';
 import { Refused } from './store.mjs';
 
 export const PAGE = 200;
@@ -27,17 +28,14 @@ const KEEP_PUBLIC = 60_000;
 // The layers a viewer may see of an owner's content. `viewer` is a DID proved by a viewer token, or
 // null for anyone. A viewer the member has not let in sees exactly what anyone sees.
 export async function audienceOf(db, owner, viewer) {
-  const layers = ['public'];
-  if (viewer && viewer !== owner) {
-    const friend = await db.prepare('SELECT 1 AS yes FROM friends WHERE did = ?1 AND friend = ?2').bind(owner, viewer).first();
-    if (friend) layers.push('friends');
-  }
-  return { owner, viewer: viewer ?? null, layers };
+  const scope = await friendScope(db, owner, viewer);
+  return { owner, viewer: viewer ?? null, layers: scope ? ['public', 'friends'] : ['public'], ...(scope ? { channels: scope.channels } : {}) };
 }
 
-// Whether an audience may see one entry. Today an entry is seen by its layer; a block shown to named
-// people would say so on the entry and be checked here.
-export const sees = (audience, entry) => entry.layer !== 'private' && audience.layers.includes(entry.layer);
+// Whether an audience may see one entry: by its layer, and for Friends, by the channels the member
+// approved this friend for (src/friendship.mjs).
+export const sees = (audience, entry) => entry.layer !== 'private' && audience.layers.includes(entry.layer)
+  && (entry.layer !== 'friends' || inScope({ channels: audience.channels ?? null }, [entry.channel, ...(entry.channels ?? [])]));
 
 const channelOf = ({ label, sublabel }) => [label || 'other', sublabel].filter(Boolean).join('/');
 const under = (path, root) => path === root || path.startsWith(`${root}/`);

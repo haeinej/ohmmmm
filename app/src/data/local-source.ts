@@ -735,6 +735,13 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     async agenda(): Promise<never> { throw notHere("The agenda") },
     async listFriends() { return [] },
     async removeFriend() { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
+    /** Friends ask and are approved on the vault service; the home on this computer keeps none. */
+    friendRequests: {
+      async list() { return [] },
+      async approve(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
+      async decline(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
+      async setChannels(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
+    },
     async listShared() { return [] },
     async readShared(): Promise<never> { throw missing() },
     async publishPlan() { return emptyPlan() },

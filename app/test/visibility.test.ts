@@ -130,6 +130,26 @@ test("a block that is not a post becomes one when it goes public, at the address
   }
 })
 
+test("someone asking to be a friend waits for the member, who approves them for every channel or only some", async () => {
+  const { approveFriend, declineFriend, waitingFriends } = await import("../src/workspace/store")
+  const fixture = createFixtureSource()
+  const bo = fixture.askFriend({ did: "did:web:pds.bo.example.test", name: "Bo", email: "bo@example.test" })
+  const cy = fixture.askFriend({ did: "did:web:pds.cy.example.test", name: "Cy" })
+  await setSource(fixture)
+  try {
+    assert.deepEqual(waitingFriends().map(each => each.name), ["Bo", "Cy"])
+    await assert.rejects(approveFriend(bo.id, []), { name: "DataError" })
+    await approveFriend(bo.id, ["writing"])
+    await declineFriend(cy.id)
+    assert.deepEqual(waitingFriends(), [])
+    const friends = await fixture.listFriends()
+    assert.deepEqual(friends.find(each => each.did === bo.did), { did: bo.did, added: "2026-11-24", channels: ["writing"], name: "Bo", email: "bo@example.test" })
+    assert.equal(friends.some(each => each.did === cy.did), false)
+  } finally {
+    await setSource(null)
+  }
+})
+
 test("a move to private that sealed its copy but failed after finishes only what is left when moved again: one sealed copy", async () => {
   const fixture = createFixtureSource()
   await setSource(fixture)

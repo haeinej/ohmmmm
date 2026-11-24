@@ -93,6 +93,13 @@ Who builds which, and the prompts to start them: [docs/handoff/content-layer-spl
 
 See the standard.site plan › Visibility moves: decided. That plan also leaves room for an audience of named people: a later rule in the shared visibility rules and in content's `audienceOf`/`sees`.
 
+## Friends approved like devices: decided (24 November 2026)
+
+- Friends are approved the way Tailscale approves devices. Someone signed in to ohm asks; the member sees their name and email (their DID is their ohm account) and approves them for every channel, or only some.
+- Rights are given per channel. A friend's own agents act for the friend, with the same access.
+- An approval lasts until the member removes it. Only the member approves or changes a friend, signed in to ohm.
+- The screen for asking (on a member's site, or in the cockpit) comes next.
+
 ## Open: the owner's calls
 
 - ~~Where an agent's new block starts~~: **private**, always (decided 24 November 2026). `addToVault`, `vault_capture` and a new block through `vault_write` all write `visibility: private`.

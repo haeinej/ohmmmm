@@ -126,6 +126,7 @@ How to read each path:
 | F1 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
 | F2 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
 | F3 | **Answer an agent's request** | Bell → Agent → *Waiting for you* → **Review** → **Approve**, or **Decline** | Approve: the same move as C2/C3, by the same handler, journalled as asked by the agent and approved by you. Decline: nothing moves. A block changed since the agent asked is refused, to be reviewed again | Only you show a block to more people | *UI only*: an agent asks with `vault_set_visibility` |
+| F3a | **Let someone in as a friend** | Bell → Agent → *Asking to be friends* → **Review** → Every channel, or choose channels → **Approve**, or **Decline** | They (and their agents) read your friends-only blocks in those channels, until you remove them. Declined: they see nothing, and aren't told | Choose who sees what | *UI only*: only you, signed in to ohm |
 | F4 | What an agent hid | Opening the home with the private layer unlocked | Blocks an agent with a grant hid on their way to private are sealed into the private layer and journalled | Finish narrowing an agent started | *automatic* |
 
 ## G. Profile and settings

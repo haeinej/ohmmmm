@@ -2,6 +2,8 @@
 // posts are kept with the Posts requests), who their friends are, and what a friend may read.
 // The service can read everything in this layer, so it can show it to those friends; private blocks
 // are never sent here; they are kept as ciphertext by the Private requests (plans/encryption.md).
+import { Refused } from '../store.mjs';
+
 export default {
   name: 'Friends',
   about: 'The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here.',
@@ -44,7 +46,7 @@ export default {
       verb: 'GET', asks: 'member', changes: false,
       about: 'Who may read the member\'s friends layer.',
       takes: {},
-      gives: '`friends` (did, added)',
+      gives: '`friends` (did, added, channels: `*` or a list, name, email)',
       run: ({ blocks, did }) => blocks.friends(did),
     },
     'com.ohmmmm.vault.addFriend': {
@@ -60,6 +62,45 @@ export default {
       takes: { did: 'the friend\'s DID' },
       gives: '`did`, `removed`, and `unchanged` when they were not a friend',
       run: async ({ body, blocks, did }) => blocks.removeFriend(did, (await body()).did),
+    },
+    'com.ohmmmm.vault.askFriend': {
+      verb: 'POST', asks: 'ohm', changes: true,
+      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend. The member sees their name and email from their ohm account, and their DID, and answers in the cockpit. Asking again, or asking someone who already let them in, changes nothing, and the answer is the same either way.',
+      takes: { owner: 'the DID of the member asked', message: 'optional: a line for the member' },
+      gives: '`asked`',
+      run: async ({ body, friendships, did, user }) => {
+        if (!did) throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first');
+        const { owner, message } = await body();
+        return friendships.ask(owner, { viewer: did, name: user?.name, email: user?.email, message });
+      },
+    },
+    'com.ohmmmm.vault.listFriendRequests': {
+      verb: 'GET', asks: 'member', changes: false,
+      about: 'Who has asked to be the member\'s friend and is waiting for an answer, oldest first.',
+      takes: {},
+      gives: '`requests` (id, did, name, email, message, asked, state)',
+      run: ({ friendships, did }) => friendships.requests(did),
+    },
+    'com.ohmmmm.vault.approveFriend': {
+      verb: 'POST', asks: 'ohm', changes: true,
+      about: 'The member lets someone who asked into their friends layer, for every channel (`*`, the default) or only the channels named, each covering the channels inside it. It lasts until the member removes them. Only the member, signed in to ohm, approves; an agent cannot. The friend\'s own agents read with the friend\'s access. Sent again with the same channels, it answers the same; a request already declined, or approved for other channels, is `Answered`.',
+      takes: { id: 'the request\'s ID', channels: 'optional: `*`, or a list of channel paths' },
+      gives: '`did`, `channels`',
+      run: async ({ body, friendships, did }) => friendships.approve(did, await body()),
+    },
+    'com.ohmmmm.vault.declineFriend': {
+      verb: 'POST', asks: 'ohm', changes: true,
+      about: 'The member declines someone who asked. They are not told. Sent again, it answers the same; a request already approved is `Answered`.',
+      takes: { id: 'the request\'s ID' },
+      gives: '`id`, `declined`',
+      run: async ({ body, friendships, did }) => friendships.decline(did, await body()),
+    },
+    'com.ohmmmm.vault.setFriendChannels': {
+      verb: 'POST', asks: 'ohm', changes: true,
+      about: 'Changes which channels one friend sees: `*` for every channel, or a list of channel paths. Only the member, signed in to ohm.',
+      takes: { friend: 'the friend\'s DID', channels: '`*`, or a list of channel paths' },
+      gives: '`did`, `channels`',
+      run: async ({ body, friendships, did }) => friendships.setChannels(did, await body()),
     },
     'com.ohmmmm.vault.listShared': {
       verb: 'GET', asks: 'token', changes: false,

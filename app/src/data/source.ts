@@ -10,7 +10,10 @@ export type BlockHead = BlockRef & { path?: string; title?: string; version?: st
 export type HomeFile = { path: string; text: string }
 export type BlockFile = HomeFile & { version: string }
 export type Account = { did: string | null; user: { name: string }; mirrored: boolean; service: string | null }
-export type Friend = { did: string; added: string }
+/** A friend: their DID (their ohm account), and the channels they see, `*` for every one. */
+export type Friend = { did: string; added: string; channels?: "*" | string[]; name?: string; email?: string }
+/** Someone signed in to ohm asking to be a friend, waiting for the member. */
+export type FriendRequest = { id: string; did: string; name?: string; email?: string; message?: string; asked: string }
 export type PublishPlan = {
   changes: number
   create: unknown[]
@@ -110,6 +113,13 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   moveVisibility(ref: BlockRef, to: MoveTarget, version: string): Promise<MoveResult>
   listFriends(): Promise<Friend[]>
   removeFriend(did: string): Promise<void>
+  /** Friends approved like devices: who asked, and which channels each friend sees. */
+  friendRequests: {
+    list(): Promise<FriendRequest[]>
+    approve(id: string, channels: "*" | string[]): Promise<void>
+    decline(id: string): Promise<void>
+    setChannels(did: string, channels: "*" | string[]): Promise<void>
+  }
   listShared(owner: string): Promise<BlockHead[]>
   readShared(owner: string, id: string): Promise<BlockFile>
   publishPlan(prepare?: boolean): Promise<PublishPlan>

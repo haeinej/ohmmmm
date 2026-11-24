@@ -4,7 +4,7 @@ import { words } from "../../../vault/vault/words.mjs"
 import {
   blockOf, CORTEX_CONTEXT, mediaName, moveVisibility, readEvidence, searchInput, visibilityMove,
   type Account, type Agenda, type BlockFile, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove,
-  type CortexEntry, type CortexFile, type Friend, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
+  type CortexEntry, type CortexFile, type Friend, type FriendRequest, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
 } from "./source"
 import { isBlockKind } from "./block-kind"
 import type { SearchHit } from "./search"
@@ -330,6 +330,12 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
     moveVisibility: (ref, to, version) => moveVisibility(source, ref, to, version),
     async listFriends() { return (await vaultAsk<{ friends: Friend[] }>("listFriends")).friends },
     async removeFriend(id) { await vaultAsk("removeFriend", { body: { did: id } }) },
+    friendRequests: {
+      list: async () => (await vaultAsk<{ requests: FriendRequest[] }>("listFriendRequests")).requests,
+      async approve(id, channels) { await vaultAsk("approveFriend", { body: { id, channels } }) },
+      async decline(id) { await vaultAsk("declineFriend", { body: { id } }) },
+      async setChannels(did, channels) { await vaultAsk("setFriendChannels", { body: { friend: did, channels } }) },
+    },
     async listShared(owner) {
       return (await vaultAsk<{ blocks: RemoteBlock[] }>("listShared", { query: { owner }, token: await sharedToken("listShared") })).blocks.map(friendsHead)
     },

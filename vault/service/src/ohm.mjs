@@ -28,7 +28,7 @@ export async function ohmUser(request, env, get = fetch) {
   } catch {
     throw new Refused(503, 'SignInUnavailable', 'ohm sign-in could not be reached. Try again in a moment.');
   }
-  const user = typeof data?.user?.id === 'string' && data.user.id ? { id: data.user.id, name: typeof data.user.name === 'string' ? data.user.name : '' } : null;
+  const user = typeof data?.user?.id === 'string' && data.user.id ? { id: data.user.id, name: typeof data.user.name === 'string' ? data.user.name : '', ...(typeof data.user.email === 'string' && data.user.email ? { email: data.user.email } : {}) } : null;
   if (asked.size > 500) asked.clear();
   asked.set(cookie, { user, until: Date.now() + 60_000 });
   return user;

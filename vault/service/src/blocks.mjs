@@ -11,6 +11,7 @@
 import { recordVersion } from '../../vault/core.mjs';
 import { isPostId, postFile } from '../../vault/file.mjs';
 import { readNode } from '../../vault/node.mjs';
+import { filedIn, friendScope, inScope } from './friendship.mjs';
 import { Refused } from './store.mjs';
 
 const PAGE = 1000;
@@ -48,12 +49,13 @@ export function blockStore(db) {
     if (typeof value !== 'string' || !DID.test(value)) throw new Refused(400, 'InvalidRequest', 'A friend is named by their DID');
     return value;
   };
-  const isFriend = async (did, friend) => Boolean(await db.prepare('SELECT 1 AS yes FROM friends WHERE did = ?1 AND friend = ?2').bind(did, friend).first());
   // To someone the member has not let in, the friends layer does not exist: the same answer whether
   // or not there is anything in it, so asking reveals nothing.
   const allowed = async (owner, reader) => {
     friendDid(owner);
-    if (owner === reader || !(await isFriend(owner, reader))) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
+    const scope = await friendScope(db, owner, reader);
+    if (!scope) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
+    return scope;
   };
 
   return {
@@ -129,8 +131,11 @@ export function blockStore(db) {
     // ---- Friends ----
 
     async friends(did) {
-      const { results } = await db.prepare('SELECT friend, added_at FROM friends WHERE did = ?1 ORDER BY added_at, friend').bind(did).all();
-      return { friends: results.map(row => ({ did: row.friend, added: row.added_at })) };
+      const { results } = await db.prepare('SELECT friend, added_at, channels, name, email FROM friends WHERE did = ?1 ORDER BY added_at, friend').bind(did).all();
+      return { friends: results.map(row => ({
+        did: row.friend, added: row.added_at, channels: row.channels ? JSON.parse(row.channels) : '*',
+        ...(row.name ? { name: row.name } : {}), ...(row.email ? { email: row.email } : {}),
+      })) };
     },
 
     async addFriend(did, friend, { now = new Date() } = {}) {
@@ -152,29 +157,31 @@ export function blockStore(db) {
     // Everything in `owner`'s friends layer, for `reader`, who must be on owner's friend list:
     // friends-only blocks, and friends-only posts as the files the post code writes.
     async shared(owner, reader) {
-      await allowed(owner, reader);
-      const { results: blocks } = await db.prepare('SELECT id, version, path, kind, title FROM blocks WHERE did = ?1 AND version IS NOT NULL AND leaving_at IS NULL ORDER BY path').bind(owner).all();
+      const scope = await allowed(owner, reader);
+      const { results: blocks } = await db.prepare('SELECT id, version, path, kind, title, text FROM blocks WHERE did = ?1 AND version IS NOT NULL AND leaving_at IS NULL ORDER BY path').bind(owner).all();
       const { results: posts } = await db.prepare("SELECT id, version, post FROM posts WHERE did = ?1 AND version IS NOT NULL AND visibility = 'friends' AND leaving_at IS NULL ORDER BY label, sublabel, slug").bind(owner).all();
       return {
         owner,
         blocks: [
-          ...blocks.map(row => ({ id: row.id, version: row.version, path: row.path, kind: row.kind, ...(row.title ? { title: row.title } : {}) })),
-          ...posts.map(row => {
-            const post = JSON.parse(row.post);
-            return { id: row.id, version: row.version, path: postFile(post).path, kind: 'post', ...(post.title ? { title: post.title } : {}) };
-          }),
+          ...blocks.filter(row => inScope(scope, filedIn(row.path, row.text)))
+            .map(row => ({ id: row.id, version: row.version, path: row.path, kind: row.kind, ...(row.title ? { title: row.title } : {}) })),
+          ...posts.map(row => ({ row, post: JSON.parse(row.post) })).map(({ row, post }) => ({ row, post, file: postFile(post) }))
+            .filter(({ file }) => inScope(scope, filedIn(file.path, file.text)))
+            .map(({ row, post, file }) => ({ id: row.id, version: row.version, path: file.path, kind: 'post', ...(post.title ? { title: post.title } : {}) })),
         ],
       };
     },
 
     async readShared(owner, reader, id) {
-      await allowed(owner, reader);
+      const scope = await allowed(owner, reader);
       known(id);
       const block = await db.prepare('SELECT version, path, text FROM blocks WHERE did = ?1 AND id = ?2 AND version IS NOT NULL AND leaving_at IS NULL').bind(owner, id).first();
-      if (block) return { block: { id, path: block.path, text: block.text }, version: block.version };
+      if (block && inScope(scope, filedIn(block.path, block.text))) return { block: { id, path: block.path, text: block.text }, version: block.version };
+      if (block) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
       const post = await db.prepare("SELECT version, post FROM posts WHERE did = ?1 AND id = ?2 AND version IS NOT NULL AND visibility = 'friends' AND leaving_at IS NULL").bind(owner, id).first();
       if (!post) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
       const file = postFile(JSON.parse(post.post));
+      if (!inScope(scope, filedIn(file.path, file.text))) throw new Refused(404, 'NotFound', 'Nothing here is shared with you');
       return { block: { id, path: file.path, text: file.text }, version: post.version };
     },
   };

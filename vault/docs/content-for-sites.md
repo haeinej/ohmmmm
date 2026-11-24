@@ -11,7 +11,7 @@ You write in your vault, with your coding agent. Your site shouldn't have to kee
 | Who is looking | What your site can show them |
 | --- | --- |
 | Anyone | What you **published**: the posts on your own PDS. Marking a post public doesn't publish it, so nothing shows here until you approve Publish |
-| A friend, signed in to ohm | Also your **Friends** layer: friends-only blocks and posts, and the pictures in them |
+| A friend, signed in to ohm | Also your **Friends** layer, in the channels you approved them for ([friends](friends.md)): friends-only blocks and posts, and the pictures in them |
 | Anyone else signed in to ohm | Exactly what anyone sees. They can't tell whether you share anything with friends |
 | Anyone at all | Never your private layer. It is sealed on your devices, and these reads never open it |
 

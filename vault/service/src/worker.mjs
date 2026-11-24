@@ -12,6 +12,7 @@ import { blockStore } from './blocks.mjs';
 import { channelStore } from './channels.mjs';
 import { contentStore } from './content.mjs';
 import { visibilityStore } from './visibility.mjs';
+import { friendshipStore } from './friendship.mjs';
 import { mediaStore } from './media.mjs';
 import { privateStore } from './private.mjs';
 import { postStore, Refused } from './store.mjs';
@@ -103,6 +104,7 @@ export function createService({ whoIs, get = fetch } = {}) {
         content: contentStore(env.DB, { get, pdsFor: did => identify.pdsFor?.(did) ?? null }),
         sites: siteStore(env.DB),
         moves: visibilityStore(env.DB),
+        friendships: friendshipStore(env.DB),
         // Who is signed in to ohm, for content.view: asked only there, and never required.
         viewers: {
           signedIn: () => ohmUser(request, env, get),
