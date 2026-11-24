@@ -13,6 +13,7 @@ import { bodyFacts } from '../feed/render.mjs';
 import { servePrivate } from '../feed/private.mjs';
 import { upgradePost } from '../feed/upgrade.mjs';
 import worker, { refreshNotes, servePost } from '../feed/worker.mjs';
+import { CONTENT, DOCUMENT, fromDocument, onWire, PUBLICATION, PUBLICATION_KEY, toDocument } from './standard.mjs';
 
 const example = JSON.parse(await readFile(new URL('../examples/image-text-image-video.json', import.meta.url), 'utf8'));
 const did = 'did:web:pds.example.test';
@@ -32,8 +33,8 @@ test('the scheduled feed displays an archive post without a Bluesky copy', async
     get: async () => cached,
   } };
   await refreshNotes(env, async url => {
-    assert.equal(url.searchParams.get('collection'), POST);
-    return Response.json({ records: [{ uri, value: { ...example, tags: ['Photographs', '  Daily notes  ', 'Photographs'] } }] });
+    assert.equal(url.searchParams.get('collection'), DOCUMENT);
+    return Response.json({ records: [onWire({ uri, value: { ...example, tags: ['Photographs', '  Daily notes  ', 'Photographs'] } })] });
   });
   const response = await worker.fetch(new Request('https://example.test/notes.json'), env);
   const { notes } = await response.json();
@@ -48,12 +49,12 @@ test('an individual post resolves its record and escapes untrusted content', asy
   const request = new Request('https://example.test/posts/other/test-post');
   const filed = new Request('https://example.test/posts/things-i-make/script/test-post');
   const result = await servePost(filed, config, 'test-post', async url => {
-    assert.equal(url.searchParams.get('collection'), POST);
-    const record = { uri, value: {
+    assert.equal(url.searchParams.get('collection'), DOCUMENT);
+    const record = onWire({ uri, value: {
       ...example, title: '<script>alert(1)</script>', subtitle: 'einmal ist <keinmal>', form: 'writing', label: 'Things I make',
       sublabel: '<script>', body: example.body + '\n\n' +
         '<img src=x onerror=alert(1)> [link](javascript:alert(1)) ![External](https://other.example/pixel.png)',
-    } };
+    } });
     return Response.json(url.pathname.endsWith('listRecords') ? { records: [record] } : record);
   });
   const html = await result.text();
@@ -62,20 +63,21 @@ test('an individual post resolves its record and escapes untrusted content', asy
   assert.match(html, /Things I make · &lt;script&gt;/);
   assert.match(html, /data-form="writing"/);
   assert.match(html, /<\/h1><p class="post-subtitle">einmal ist &lt;keinmal&gt;<\/p>/);
-  assert.match(html, /<link rel="alternate" href="at:\/\/did:web:pds\.example\.test\/com\.ohmmmm\.post\/test-post">/);
+  // The page names the record it shows: the document the post is kept as.
+  assert.match(html, /<link rel="alternate" href="at:\/\/did:web:pds\.example\.test\/site\.standard\.document\/test-post">/);
   assert.doesNotMatch(html, /<script|<img src=x|href="javascript:|src="https:\/\/other\.example/);
-  const linkedRecord = { uri, value: {
+  const linkedRecord = onWire({ uri, value: {
     ...example, media: [], body: '<https://example.org/a>', form: 'link',
     link: { uri: 'https://www.example.org/a', title: 'A <b>page</b>', description: 'About it.', image: example.media[0].file },
-  } };
+  } });
   const linked = await servePost(request, config, 'test-post', async url => Response.json(url.pathname.endsWith('listRecords') ? { records: [linkedRecord] } : linkedRecord));
   const card = await linked.text();
   assert.match(card, /<title>A &lt;b&gt;page&lt;\/b&gt;<\/title>/);
   assert.match(card, /class="link-card" href="https:\/\/www\.example\.org\/a"><img src="https:\/\/pds\.example\.test\/xrpc\/com\.atproto\.sync\.getBlob[^"]*" alt=""/);
   assert.match(card, /<strong>A &lt;b&gt;page&lt;\/b&gt;<\/strong><span>About it\.<\/span><small>example\.org<\/small>/);
-  const notedRecord = { uri, value: {
+  const notedRecord = onWire({ uri, value: {
     ...example, media: [], body: 'Discovery[^1] demands disclosure[^2].\n\n[^1]: Testing whether alignment exists.\n[^2]: Revealing private context.',
-  } };
+  } });
   const noted = await servePost(request, config, 'test-post', async url => Response.json(url.pathname.endsWith('listRecords') ? { records: [notedRecord] } : notedRecord));
   const footnoted = await noted.text();
   assert.match(footnoted, /Discovery<sup class="footnote-ref"><a href="#fn-test-post-1" id="fnref-test-post-1">1<\/a><\/sup>/);
@@ -96,7 +98,7 @@ test('quoted passages and ordered groups link to the same record addresses', asy
 
 [Source](${first}) · [Bluesky](${bluesky})`;
   const snapshot = await refreshNotes({ ...config, NOTES: { put: async () => {} } },
-    async () => Response.json({ records: [{ uri, value: { ...example, body } }] }));
+    async () => Response.json({ records: [onWire({ uri, value: { ...example, body } })] }));
   const [post] = snapshot.notes;
   assert.deepEqual(post.links, [first, second, bluesky]);
   assert.match(post.bodyHtml, /<ol>.*href="\/posts\/trap-of-independency".*href="\/posts\/just-buy-that-jacket".*<blockquote>/s);
@@ -133,23 +135,28 @@ test('every site reads the one shared post type, whatever an older configuration
   } };
   const feedRequest = new Request('https://example.test/notes.json');
   await refreshNotes(env, async url => {
-    assert.equal(url.searchParams.get('collection'), POST);
-    return Response.json({ records: [{ uri, value }] });
+    assert.equal(url.searchParams.get('collection'), DOCUMENT);
+    return Response.json({ records: [onWire({ uri, value })] });
   });
   const result = await worker.fetch(feedRequest, env);
   assert.equal(result.status, 200);
   const feed = await result.json();
   assert.deepEqual([feed.collection, feed.notes[0].links], [POST, [linkedUri]]);
   assert.match(feed.notes[0].bodyHtml, /<img.*href="\/posts\/earlier"/s);
-  // A record of any other type is not a post, and a snapshot built from an older type is not served.
-  await refreshNotes(env, async () => Response.json({ records: [{ uri, value: { ...value, $type: older } }] }));
+  // A document whose content is of any other type is not a post, nor is a record kept under its
+  // older post type, and a snapshot built from an older type is not served.
+  const foreign = onWire({ uri, value });
+  foreign.value = { ...foreign.value, content: { ...foreign.value.content, $type: older } };
+  await refreshNotes(env, async () => Response.json({ records: [foreign] }));
+  assert.deepEqual((await (await worker.fetch(feedRequest, env)).json()).notes, []);
+  await refreshNotes(env, async () => Response.json({ records: [{ uri: `at://${did}/${DOCUMENT}/test-post`, value: { ...value, $type: older } }] }));
   assert.deepEqual((await (await worker.fetch(feedRequest, env)).json()).notes, []);
   snapshot = { ...snapshot, collection: older };
   assert.equal((await worker.fetch(feedRequest, env)).status, 503);
 
   const page = await servePost(new Request('https://example.test/posts/other/test-post'), env, 'test-post', async url => {
-    assert.equal(url.searchParams.get('collection'), POST);
-    return Response.json(url.pathname.endsWith('listRecords') ? { records: [{ uri, value }] } : { uri, value });
+    assert.equal(url.searchParams.get('collection'), DOCUMENT);
+    return Response.json(url.pathname.endsWith('listRecords') ? { records: [onWire({ uri, value })] } : onWire({ uri, value }));
   });
   assert.equal(page.status, 200);
   assert.match(await page.text(), /<img.*href="\/posts\/earlier"/s);
@@ -188,10 +195,13 @@ test('a post saved under an older post type is brought to the shared one', async
   assert.deepEqual(upgradePost(old, { did, key: 'a-walk' }).left, ['summary', 'mood', 'source.author', 'media a.credit']);
   // A post already in the shared schema is left exactly as it is.
   assert.equal(upgradePost(record, { did, key: 'a-walk' }).record, record);
-  // The schema file agrees with what the upgrade writes.
+  // The schema file agrees with what the upgrade writes: the post becomes a document, whose content
+  // holds only what the content schema declares.
   const lexicon = JSON.parse(await readFile(new URL('../lexicons/com/ohmmmm/post.json', import.meta.url), 'utf8'));
   assert.equal(lexicon.id, POST);
-  for (const field of Object.keys(record)) assert.ok(field === '$type' || field in lexicon.defs.main.record.properties, field);
+  const document = toDocument(record, { did, site: 'https://example.test' });
+  assert.deepEqual([document.title, document.publishedAt, document.content.$type], ['A walk', '2026-01-01T00:00:00Z', CONTENT]);
+  for (const field of Object.keys(document.content)) assert.ok(field === '$type' || field in lexicon.defs.main.properties, field);
   for (const [part, value] of [['link', record.link], ['source', record.source], ['image', record.media[0]]]) {
     for (const field of Object.keys(value)) assert.ok(field === '$type' || field in lexicon.defs[part].properties, `${part}.${field}`);
   }
@@ -220,7 +230,7 @@ test('connections stay off the pages and shape the tree view', async () => {
       ...example, media: [], title: 'Later', body: 'It rained again.', publishedAt: '2025-02-01T00:00:00Z', form: 'made-up',
       connect: [earlier, 'https://www.example.org/article/', 'javascript:alert(1)', later, earlier],
     } },
-  ];
+  ].map(record => onWire(record));
   const stored = new Map();
   const env = { ...config, NOTES: {
     put: async (key, value) => { stored.set(key, JSON.parse(value)); },
@@ -338,7 +348,7 @@ test('private posts stay off the PDS and are served only to a signed-in owner', 
 test('the form is checked and its list can grow, while labels are the author\'s own', async () => {
   const lexicon = JSON.parse(await readFile(new URL('../lexicons/com/ohmmmm/post.json', import.meta.url), 'utf8'));
   const guide = await readFile(new URL('../docs/labels.md', import.meta.url), 'utf8');
-  const { form, label, sublabel } = lexicon.defs.main.record.properties;
+  const { form, label, sublabel } = lexicon.defs.main.properties;
   // The schema lists the forms these tools write without closing the list, so one can be added later.
   assert.deepEqual([form.knownValues, form.enum], [Object.keys(FORMS), undefined]);
   assert.equal(label.enum ?? sublabel.enum, undefined);
@@ -508,14 +518,20 @@ test('addresses follow labels in any script, and a folder address shows the list
 });
 
 test('the post schema is fixed, and a site adds its own fields only through its optional layer', async () => {
-  const schema = JSON.parse(await readFile(new URL('../lexicons/com/ohmmmm/post.json', import.meta.url), 'utf8')).defs.main.record;
-  // Adding a field here is a change to the shared schema for every site. A field one site needs
-  // belongs in that site's optional schema instead.
+  const schema = JSON.parse(await readFile(new URL('../lexicons/com/ohmmmm/post.json', import.meta.url), 'utf8')).defs.main;
+  // The post is the content of a standard.site document, not a record type of its own: the document
+  // holds the title and dates, and the content the rest. Adding a field here is a change to the
+  // shared schema for every site. A field one site needs belongs in that site's optional schema instead.
+  assert.deepEqual([schema.type, schema.record, schema.required], ['object', undefined, ['body', 'canonicalUrl']]);
   assert.deepEqual(Object.keys(schema.properties), [
-    'title', 'subtitle', 'body', 'publishedAt', 'updatedAt', 'canonicalUrl', 'slug', 'form', 'label', 'sublabel', 'connect', 'link',
-    'source', 'site', 'media',
+    'subtitle', 'body', 'canonicalUrl', 'slug', 'form', 'label', 'sublabel', 'connect', 'link', 'source', 'site', 'media', 'untitled',
   ]);
-  assert.deepEqual(Object.keys(schema.properties).sort(), [...POST_FIELDS].sort());
+  // Every field of a post is in the content, except what the document itself holds; `untitled` says
+  // a document's title was made from the post's first words.
+  const held = ['title', 'publishedAt', 'updatedAt'];
+  assert.deepEqual([...Object.keys(schema.properties).filter(field => field !== 'untitled'), ...held].sort(), [...POST_FIELDS].sort());
+  for (const field of held) assert.equal(field in schema.properties, false, field);
+  assert.equal(schema.properties.untitled.type, 'boolean');
   assert.equal(schema.properties.site.type, 'unknown');
 
   // The site's layer reaches the site's own pages through the feed, and nothing else shows it.
@@ -523,11 +539,11 @@ test('the post schema is fixed, and a site adds its own fields only through its 
   let stored;
   const env = { ...config, NOTES: { put: async (_key, value) => { stored = JSON.parse(value); }, get: async () => stored } };
   await refreshNotes(env, async url => url.pathname.endsWith('listRecords')
-    ? Response.json({ records: [{ uri, value: { ...example, media: [], site: own } }] }) : Response.json({ error: 'RecordNotFound' }, { status: 400 }));
+    ? Response.json({ records: [onWire({ uri, value: { ...example, media: [], site: own } })] }) : Response.json({ error: 'RecordNotFound' }, { status: 400 }));
   const get = async path => (await worker.fetch(new Request(`https://example.test${path}`), env)).text();
   assert.deepEqual(JSON.parse(await get('/notes.json')).notes[0].site, own);
   assert.doesNotMatch(await get('/notes/graph.json'), /eyebrow|ep\.01/);
-  const record = { uri, value: { ...example, media: [], site: own } };
+  const record = onWire({ uri, value: { ...example, media: [], site: own } });
   const page = await servePost(new Request('https://example.test/posts/other/test-post'), config, 'test-post', async url =>
     Response.json(url.pathname.endsWith('listRecords') ? { records: [record] } : record));
   assert.equal(page.status, 200);
@@ -606,6 +622,7 @@ test('a post with no title and no words is named by its folder and a number', as
   const photo = (key, publishedAt, filing) => ({ uri: `at://${did}/${POST}/${key}`, value: {
     ...example, body: '![](media:media-1)', media: [example.media[0]], publishedAt, ...filing,
   } });
+  const wire = list => list.map(record => onWire(record));
   const records = [
     photo('b', '2025-01-01T00:00:00Z', { label: 'photographs', sublabel: 'Lisboa' }),
     photo('a', '2025-01-01T00:00:00Z', { label: 'photographs', sublabel: 'Lisboa' }),
@@ -620,12 +637,12 @@ test('a post with no title and no words is named by its folder and a number', as
   ];
   let stored;
   const env = { ...config, NOTES: { put: async (_key, value) => { stored = JSON.parse(value); }, get: async () => stored } };
-  await refreshNotes(env, async url => url.pathname.endsWith('listRecords') ? Response.json({ records }) : Response.json({ error: 'RecordNotFound' }, { status: 400 }));
+  await refreshNotes(env, async url => url.pathname.endsWith('listRecords') ? Response.json({ records: wire(records) }) : Response.json({ error: 'RecordNotFound' }, { status: 400 }));
   const graph = await (await worker.fetch(new Request('https://example.test/notes/graph.json'), env)).json();
   const names = Object.fromEntries(Object.entries(graph).map(([address, post]) => [address.split('/').at(-1), post.name]));
   // Numbered oldest first within each folder; posts on the same day keep a fixed order.
   assert.deepEqual(names, { a: 'Lisboa 1', b: 'Lisboa 2', c: 'Lisboa 3', d: '서울 1', e: 'photographs 1', f: 'A tram at dusk' });
-  const page = await servePost(new Request('https://example.test/posts/photographs/lisboa/c'), env, 'c', async url => Response.json(url.pathname.endsWith('listRecords') ? { records } : records[2]));
+  const page = await servePost(new Request('https://example.test/posts/photographs/lisboa/c'), env, 'c', async url => Response.json(url.pathname.endsWith('listRecords') ? { records: wire(records) } : onWire(records[2])));
   assert.match(await page.text(), /<title>Lisboa 3<\/title>/);
 });
 
@@ -666,7 +683,13 @@ test('migrate copies posts from an older post type, and changes nothing until to
     canonicalUrl: `https://example.test/writing/${key}.html`, tags: ['Writings'], summary: 'Short.',
     media: [{ $type: `${from}#image`, id: 'a', original: { ...blob, original: { $type: 'blob', ...blob } } }],
   } });
-  const repository = { [from]: [older('one'), older('two'), older('three')], [POST]: [{ uri: `at://${did}/${POST}/two`, value: { $type: POST } }] };
+  // `two` is kept as a document already. `four` is under com.ohmmmm.post itself, from before posts
+  // were documents: an older type of its own, read only when asked for.
+  const repository = {
+    [from]: [older('one'), older('two'), older('three')],
+    [DOCUMENT]: [{ uri: `at://${did}/${DOCUMENT}/two`, value: toDocument({ $type: POST, body: 'Already.', canonicalUrl: 'https://example.test/posts/other/two' }, { did, site: 'https://example.test' }) }],
+    [POST]: [{ uri: `at://${did}/${POST}/four`, value: { $type: POST, title: 'four', body: 'Before documents.', publishedAt: '2025-01-01T00:00:00Z', canonicalUrl: 'https://example.test/posts/writings/four', label: 'Writings' } }],
+  };
   const written = [];
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
@@ -681,6 +704,11 @@ test('migrate copies posts from an older post type, and changes nothing until to
     }
     if (url.pathname.endsWith('createSession')) {
       return JSON.parse(sent).password === 'app-password' ? send({ did, accessJwt: 'token' }) : send({}, 401);
+    }
+    // The member's publication is not there until migrate makes it.
+    if (url.pathname.endsWith('getRecord')) {
+      const made = written.find(write => write.collection === url.searchParams.get('collection') && write.rkey === url.searchParams.get('rkey'));
+      return made ? send({ uri: `at://${did}/${made.collection}/${made.rkey}`, cid: 'cid-1', value: made.record }) : send({ error: 'RecordNotFound' }, 400);
     }
     if (url.pathname.endsWith('createRecord') && request.headers.authorization === 'Bearer token') {
       const { collection, rkey, record } = JSON.parse(sent);
@@ -703,7 +731,7 @@ test('migrate copies posts from an older post type, and changes nothing until to
 
     const preview = await run();
     assert.deepEqual(preview, {
-      from, to: POST, repository: `at://${did}`, found: 3, toCopy: 2, copied: 0, alreadyThere: 1, cannotBeCopied: 0,
+      from, to: DOCUMENT, repository: `at://${did}`, found: 3, toCopy: 2, copied: 0, alreadyThere: 1, cannotBeCopied: 0,
       movedToSite: { summary: 3 }, leftBehind: {}, problems: {}, written: false,
     });
     assert.deepEqual(written, []);
@@ -714,17 +742,26 @@ test('migrate copies posts from an older post type, and changes nothing until to
       media: [{ $type: `${POST}#image`, id: 'a', file: { $type: 'blob', ...blob } }],
       site: { summary: 'Short.', $type: 'com.example.postSite' }, label: 'Writings',
     });
+    // What is written is that post as a document of the member's publication.
+    assert.deepEqual(fromDocument(one.document, { did }), one.record);
+    assert.deepEqual([one.document.$type, one.document.site, one.document.path, one.document.content.$type],
+      [DOCUMENT, `at://${did}/${PUBLICATION}/${PUBLICATION_KEY}`, '/writing/one.html', CONTENT]);
     assert.match(await run(['--key', 'missing']), /No post "missing"/);
-    assert.match(await run(['--from', POST]), /already where they belong/);
+    // Posts already kept as documents are where they belong; posts under com.ohmmmm.post itself are
+    // an older type like any other.
+    assert.match(await run(['--from', DOCUMENT]), /already where they belong/);
+    assert.deepEqual(await run(['--from', POST]).then(found => [found.from, found.to, found.found, found.toCopy]), [POST, DOCUMENT, 1, 1]);
     // Writing needs the account's app password, and nothing is written without it.
     assert.match(await run(['--publish']), /Set ATPROTO_APP_PASSWORD/);
     assert.deepEqual(written, []);
 
     const done = await run(['--publish'], { ATPROTO_APP_PASSWORD: 'app-password' });
     assert.deepEqual([done.copied, done.toCopy, done.alreadyThere, done.written], [2, 0, 1, true]);
-    // The posts keep their keys, the one already there is left alone, and nothing is deleted.
-    assert.deepEqual(written.map(({ collection, rkey }) => [collection, rkey]), [[POST, 'one'], [POST, 'three']]);
-    assert.deepEqual(written[0].record, one.record);
+    // The publication comes first. The posts keep their keys, the one already there is left alone,
+    // and nothing is deleted.
+    assert.deepEqual(written.map(({ collection, rkey }) => [collection, rkey]), [[PUBLICATION, PUBLICATION_KEY], [DOCUMENT, 'one'], [DOCUMENT, 'three']]);
+    assert.deepEqual([written[0].record.$type, written[0].record.url], [PUBLICATION, 'https://example.test']);
+    assert.deepEqual(written[1].record, one.document);
   } finally {
     server.close();
     await rm(folder, { recursive: true, force: true });

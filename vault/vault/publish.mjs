@@ -3,7 +3,9 @@
 // member, signed in at their own PDS, from the list this returns.
 //
 // Three rules keep it safe to run against a repository that other software also writes to:
-//   1. Only the shared post type is ever touched. A record of any other type is not looked at.
+//   1. Only posts are ever touched: standard.site documents holding an ohm post, and the member's
+//      publication the first time. A record of any other type, or a document another application
+//      wrote, is not looked at.
 //   2. A record is removed only when it is known to be a post of this vault: one that is no longer
 //      for everyone, or one the member removed. A record the vault knows nothing about is left
 //      where it is and named, so the member can bring it in first.
@@ -44,7 +46,7 @@ function changes(before, after, attachments, { did, origin }) {
 
 //   posts      every post in the vault, in full
 //   removed    the IDs of posts the member has removed from the vault
-//   published  the records of the shared post type in the member's repository, by their key
+//   published  the posts in the member's repository, read from their documents, by their key
 // Returns the summary a person reads (create, replace, remove, unchanged, cannot, notInVault) and
 // `writes`: the changes themselves, each with the record to write and the attachments it places.
 export function publishPlan({ did, site, origin, collection = POST, posts, removed = [], published = new Map(), now = new Date() }) {

@@ -8,6 +8,7 @@ import { listRecords, recordBySlug } from '../feed/repository.mjs';
 import { pdsStore } from '../vault/stores.mjs';
 import { createVault } from '../vault/vault.mjs';
 import publishCapability from '../service/src/capabilities/publish.mjs';
+import { DOCUMENT, PUBLICATION, toDocument } from './standard.mjs';
 
 const did = 'did:web:pds.example.test', origin = 'https://pds.example.test', site = 'https://example.test', collection = 'com.ohmmmm.post';
 const id = '3aaaaaaaaaaaa';
@@ -90,7 +91,7 @@ test('renderer refuses list cardinality changes, link row changes and older side
 });
 
 test('full inventories follow empty pages, deduplicate records and reject broken or capped cursors', async () => {
-  const record = { uri: `at://${did}/${collection}/${id}`, value: postRecord(post, { did, site }).record };
+  const record = { uri: `at://${did}/${DOCUMENT}/${id}`, value: toDocument(postRecord(post, { did, site }).record, { did, site }) };
   let requests = 0;
   const get = async () => Response.json(++requests === 1 ? { records: [], cursor: 'next' } : { records: [record, record] });
   assert.equal((await listRecords({ did, origin, collection, get })).records.length, 1); assert.equal(requests, 2);
@@ -104,11 +105,11 @@ test('full inventories follow empty pages, deduplicate records and reject broken
 });
 
 test('slug resolution refuses owner-local ambiguity and foreign record injection', async () => {
-  const value = postRecord(post, { did, site }).record;
+  const value = toDocument(postRecord(post, { did, site }).record, { did, site });
   const pds = { did, origin, collection };
-  const row = key => ({ uri: `at://${did}/${collection}/${key}`, value });
+  const row = key => ({ uri: `at://${did}/${DOCUMENT}/${key}`, value });
   await assert.rejects(recordBySlug(pds, 'hello', async () => Response.json({ records: [row(id), row('3bbbbbbbbbbbb')] })), /More than one/);
-  assert.equal(await recordBySlug(pds, 'hello', async () => Response.json({ records: [{ ...row(id), uri: `at://did:web:other.test/${collection}/${id}` }] })), null);
+  assert.equal(await recordBySlug(pds, 'hello', async () => Response.json({ records: [{ ...row(id), uri: `at://did:web:other.test/${DOCUMENT}/${id}` }] })), null);
 });
 
 test('partial visibility moves preserve both copies and require direct-store versioned reconciliation', async () => {
@@ -131,9 +132,13 @@ test('prepared publication keeps retained blob metadata but clears an intentiona
   const answer = await publishCapability.requests['com.ohmmmm.vault.getPublishPlan'].run({
     url: new URL('https://vault.example.test/xrpc/com.ohmmmm.vault.getPublishPlan?prepare=1'), did,
     identify: { pdsFor: async () => origin }, posts: { all: async () => [current], removed: async () => [] },
-    get: async url => new URL(url).pathname.endsWith('listRecords') ? Response.json({ records: [{ uri: `at://${did}/${collection}/${id}`, value: before }] }) : new Response('', { status: 404 }),
+    get: async url => new URL(url).pathname.endsWith('listRecords') ? Response.json({ records: [{ uri: `at://${did}/${DOCUMENT}/${id}`, value: toDocument(before, { did, site }) }] }) : new Response('', { status: 404 }),
   });
-  const media = answer.writes[0].record.media[0];
+  // The publication is missing, so it is made first; the post follows as a document.
+  assert.deepEqual(answer.writes.map(write => write.collection), [PUBLICATION, undefined]);
+  const write = answer.writes[1];
+  assert.equal(write.record.$type, DOCUMENT);
+  const media = write.record.content.media[0];
   assert.equal(media.alt, ''); assert.equal(media.caption, 'Kept'); assert.equal(media.id, 'renamed');
-  assert.equal(answer.writes[0].upload, undefined);
+  assert.equal(write.upload, undefined);
 });

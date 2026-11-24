@@ -3,7 +3,7 @@
 // Three steps, each its own function: find what is there (`source`), read it as posts (`read`),
 // and save them (`apply`, in the request). Reading the PDS needs no credential: a repository's
 // records are public.
-import { POST } from '../../../feed/pds.mjs';
+import { CONTENT, DOCUMENT } from '../../../feed/standard.mjs';
 import { importVault, saveImported } from '../../../vault/import.mjs';
 import { published, whereabouts } from '../member.mjs';
 import { Refused } from '../store.mjs';
@@ -14,14 +14,15 @@ const NOT_POSTS = /^(?:app\.bsky|chat\.bsky|com\.atproto|tools\.ozone)\./;
 // A redirect is not followed: the answer has to come from the address that was asked.
 const asking = () => ({ redirect: 'manual', signal: AbortSignal.timeout(20_000) });
 
-// The types of post in a member's repository other than the shared one: any type of their own
-// whose records read as posts, which is to say have a body and a date. Nobody has to name them.
+// The types of post in a member's repository other than documents: any type of their own whose
+// records read as posts, which is to say have a body and a date, and com.ohmmmm.post from before
+// posts were documents. Nobody has to name them.
 async function olderPostTypes(get, pds, did) {
   const url = new URL('/xrpc/com.atproto.repo.describeRepo', pds);
   url.search = new URLSearchParams({ repo: did });
   const response = await get(url, asking());
   if (!response.ok) throw new Refused(502, 'RepositoryUnreachable', `Your PDS would not describe your repository (HTTP ${response.status})`);
-  const named = ((await response.json()).collections ?? []).filter(name => typeof name === 'string' && NSID.test(name) && name !== POST && !NOT_POSTS.test(name));
+  const named = ((await response.json()).collections ?? []).filter(name => typeof name === 'string' && NSID.test(name) && name !== DOCUMENT && !NOT_POSTS.test(name));
   const found = [];
   for (const collection of named.slice(0, 20)) {
     const look = new URL('/xrpc/com.atproto.repo.listRecords', pds);
@@ -30,21 +31,22 @@ async function olderPostTypes(get, pds, did) {
     const first = listed.ok ? (await listed.json()).records?.[0]?.value : null;
     if (first && typeof first.body === 'string' && Number.isFinite(Date.parse(first.publishedAt))) found.push(collection);
   }
-  return found;
+  // com.ohmmmm.post came after any type of a site's own, so where both hold a post it is the one kept.
+  return [...found.filter(type => type !== CONTENT), ...found.filter(type => type === CONTENT)];
 }
 
 // Where to mirror from: the PDS, the member's website, and the types of post to read. Nothing
 // has to be told: the website is the one their handle names, and the types are the shared one and
 // any of their own that read as posts. `site` and `from` say either outright.
 async function source(context, { site, from }) {
-  if (from !== undefined && (typeof from !== 'string' || !NSID.test(from) || from === POST)) throw new Refused(400, 'InvalidRequest', 'An older post type is written like com.example.post');
+  if (from !== undefined && (typeof from !== 'string' || !NSID.test(from) || from === DOCUMENT)) throw new Refused(400, 'InvalidRequest', 'An older post type is written like com.example.post');
   const where = await whereabouts(context, { site });
-  return { ...where, types: [...(from ? [from] : await olderPostTypes(context.get, where.pds, context.did)), POST] };
+  return { ...where, types: [...(from ? [from] : await olderPostTypes(context.get, where.pds, context.did)), DOCUMENT] };
 }
 
 // Every record at the source, as the posts they would be in the vault, with what would be lost.
 async function read({ get, did }, { pds, site, types }) {
-  // An older type is read first, so a post already in the shared type is the one kept.
+  // An older type is read first, so a post already kept as a document is the one kept.
   const found = new Map();
   for (const type of types) for (const [key, value] of await published(get, pds, did, type)) found.set(key, value);
   const { posts, skipped } = importVault([...found].map(([key, value]) => ({ key, value })), { did, origin: pds, site });

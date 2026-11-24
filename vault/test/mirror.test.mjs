@@ -4,6 +4,7 @@ import { htmlToMarkdown } from '../mirror/html-to-markdown.mjs';
 import { readFeed } from '../mirror/sources.mjs';
 import { keyFor, mirror } from '../mirror/sync.mjs';
 import { handle } from '../mirror/worker.mjs';
+import { CONTENT, DOCUMENT, fromDocument, notFound, PUBLICATION, PUBLICATION_KEY, toDocument } from './standard.mjs';
 
 test('HTML from a platform becomes a post body, and what has no Markdown is named', () => {
   const { markdown, images, simplified } = htmlToMarkdown(`
@@ -45,9 +46,14 @@ test('a feed in any of the three common formats reads the same', async () => {
   await assert.rejects(readFeed({ feed: 'https://example.com/gone' }, async () => new Response('', { status: 404 })), /answered HTTP 404/);
 });
 
-// A stand-in for the owner's PDS and the platforms the mirror reads.
+// A stand-in for the owner's PDS and the platforms the mirror reads. The PDS keeps posts as
+// standard.site documents (`documents`, as written); `records` holds the posts inside them, which is
+// what a test reads and changes, and the PDS serves each as a document again.
 function world() {
+  const did = 'did:web:pds.example.test', site = 'https://example.com';
   const records = new Map();
+  const documents = new Map();
+  const publication = { record: null, made: 0 };
   const versions = new Map();
   const blobs = [];
   const kv = new Map();
@@ -68,17 +74,29 @@ function world() {
     }
     if (/\/com.atproto.repo\.(putRecord|createRecord)$/.test(address)) {
       if (options.headers.Authorization !== 'Bearer pds-token') return Response.json({}, { status: 401 });
-      const { rkey, record, swapRecord } = JSON.parse(options.body);
+      const { collection, rkey, record, swapRecord } = JSON.parse(options.body);
+      if (collection === PUBLICATION) {
+        if (!address.endsWith('createRecord') || rkey !== PUBLICATION_KEY || publication.record) return Response.json({ error: 'InvalidRequest' }, { status: 400 });
+        publication.record = record; publication.made++;
+        return Response.json({ uri: `at://${did}/${PUBLICATION}/${PUBLICATION_KEY}`, cid: 'cid-publication' });
+      }
+      // Posts are written only as documents of the member's publication, which is there first.
+      assert.deepEqual([collection, record.$type, record.content.$type, record.site, Boolean(publication.record)], [DOCUMENT, DOCUMENT, CONTENT, `at://${did}/${PUBLICATION}/${PUBLICATION_KEY}`, true]);
       if (address.endsWith('createRecord') && records.has(rkey)) return Response.json({ error: 'RecordAlreadyExists' }, { status: 400 });
       if (address.endsWith('putRecord') && swapRecord !== versions.get(rkey)) return Response.json({ error: 'InvalidSwap' }, { status: 400 });
-      records.set(rkey, record);
+      documents.set(rkey, record);
+      records.set(rkey, fromDocument(record, { did }));
       const cid = `cid-${versions.size}-${JSON.stringify(record).length}`;
       versions.set(rkey, cid);
-      return Response.json({ uri: `at://did:web:pds.example.test/com.ohmmmm.post/${rkey}`, cid });
+      return Response.json({ uri: `at://${did}/${DOCUMENT}/${rkey}`, cid });
     }
     if (address.includes('/xrpc/com.atproto.repo.getRecord')) {
-      const key = new URL(address).searchParams.get('rkey');
-      return records.has(key) ? Response.json({ uri: `at://did:web:pds.example.test/com.ohmmmm.post/${key}`, cid: versions.get(key), value: records.get(key) }) : Response.json({ error: 'RecordNotFound' }, { status: 400 });
+      const query = new URL(address).searchParams, key = query.get('rkey');
+      if (query.get('collection') === PUBLICATION) {
+        return publication.record && key === PUBLICATION_KEY ? Response.json({ uri: `at://${did}/${PUBLICATION}/${key}`, cid: 'cid-publication', value: publication.record }) : notFound();
+      }
+      if (query.get('collection') !== DOCUMENT) return notFound();
+      return records.has(key) ? Response.json({ uri: `at://${did}/${DOCUMENT}/${key}`, cid: versions.get(key), value: toDocument(records.get(key), { did, site }) }) : notFound();
     }
     if (address === 'https://example.com/media/street.jpg') return new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/jpeg' } });
     if (address in feeds) return typeof feeds[address] === 'string' ? new Response(feeds[address]) : Response.json(feeds[address]);
@@ -93,12 +111,16 @@ function world() {
     ]),
     MIRROR: { get: async key => (kv.has(key) ? JSON.parse(kv.get(key)) : null), put: async (key, value) => { kv.set(key, value); } },
   };
-  return { records, versions, blobs, feeds, get, env, kv };
+  return { records, documents, publication, versions, blobs, feeds, get, env, kv };
 }
 
 test('one run mirrors every connected platform, and the next run writes only what changed', async () => {
-  const { records, blobs, feeds, get, env } = world();
+  const { records, documents, publication, blobs, feeds, get, env } = world();
   const first = await mirror(env, { get, now: new Date('2026-06-04T00:00:00Z') });
+  // The first write made the member's publication, once, for their website.
+  assert.deepEqual([publication.made, publication.record.$type, publication.record.url], [1, PUBLICATION, 'https://example.com']);
+  // Each post is kept as a document of it, with the post inside.
+  assert.deepEqual([documents.get('a-walk').title, documents.get('a-walk').path, documents.get('a-walk').content.$type], ['A walk', '/writing/a-walk.html', CONTENT]);
   assert.deepEqual(first.sources.map(source => [source.platform, source.seen, source.written.map(post => post.key), source.problems]), [
     ['website', 2, ['a-walk', 'second'], []], ['substack', 1, ['substack-a-letter'], []],
   ]);
@@ -118,7 +140,7 @@ test('one run mirrors every connected platform, and the next run writes only wha
 
   // Nothing changed: nothing is written, and no image is fetched again.
   const second = await mirror(env, { get });
-  assert.deepEqual([second.sources.map(source => source.unchanged), records.size, blobs.length], [[2, 1], 3, 1]);
+  assert.deepEqual([second.sources.map(source => source.unchanged), records.size, blobs.length, publication.made], [[2, 1], 3, 1, 1]);
 
   // One post is edited on the website: only that record is replaced.
   feeds['https://example.com/feed.json'].items[1].content_html = '<p>More, revised.</p>';
@@ -128,10 +150,10 @@ test('one run mirrors every connected platform, and the next run writes only wha
   assert.equal(records.get('second').updatedAt, third.at);
 
   // What an earlier version wrote under another post type is written again under the shared one.
-  const { records: moved, get: fetchMoved, env: older } = world();
+  const { records: moved, documents: movedDocuments, get: fetchMoved, env: older } = world();
   await older.MIRROR.put('mirror:website:second', JSON.stringify({ hash: 'any', at: '2026-01-01T00:00:00.000Z' }));
   const again = await mirror(older, { get: fetchMoved });
-  assert.deepEqual([again.sources[0].written.map(post => post.key), moved.get('second').$type, 'updatedAt' in moved.get('second')], [['a-walk', 'second'], 'com.ohmmmm.post', false]);
+  assert.deepEqual([again.sources[0].written.map(post => post.key), movedDocuments.get('second').$type, moved.get('second').$type, 'updatedAt' in moved.get('second')], [['a-walk', 'second'], DOCUMENT, 'com.ohmmmm.post', false]);
 });
 
 test('a run does a bounded amount of work, and a problem with one post does not stop the rest', async () => {

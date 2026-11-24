@@ -8,6 +8,7 @@ import { htmlToMarkdown } from './html-to-markdown.mjs';
 import { reader } from './sources.mjs';
 import { recordByKey } from '../feed/repository.mjs';
 import { recordVersion } from '../vault/core.mjs';
+import { DOCUMENT, PUBLICATION, PUBLICATION_KEY, publicationRecord, toDocument } from '../feed/standard.mjs';
 
 const escape = text => text.replace(/([\\`*_[\]<>])/g, '\\$1').replace(/^(#{1,6} |[-+>] )/gm, '\\$1').replace(/^(\d+)([.)] )/gm, '$1\\$2');
 const IMAGE = /^image\/(?:jpeg|png|webp|gif|avif)$/;
@@ -49,6 +50,18 @@ async function call(pds, token, method, { body, mime = 'application/json' } = {}
   return data;
 }
 
+// The member's publication, made the first time the mirror writes a post. Posts are kept as
+// standard.site documents of it; one already there is left as the member made it.
+async function ensurePublication(pds, token, site, get) {
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', pds.origin);
+  url.search = new URLSearchParams({ repo: pds.did, collection: PUBLICATION, rkey: PUBLICATION_KEY });
+  const response = await get(url, { redirect: 'error', signal: AbortSignal.timeout(10_000) });
+  if (response.ok) return;
+  const data = await response.json().catch(() => ({}));
+  if (response.status !== 404 && data.error !== 'RecordNotFound') throw new Error(`Reading the publication failed (HTTP ${response.status})`);
+  await call(pds, token, 'com.atproto.repo.createRecord', { body: { repo: pds.did, collection: PUBLICATION, rkey: PUBLICATION_KEY, record: publicationRecord({ site }) } }, get);
+}
+
 // One post from a source, as the body and attachments of a record.
 function draft(source, item) {
   const converted = item.html ? htmlToMarkdown(item.html, item.url) : { markdown: escape(item.text ?? ''), images: [], simplified: [] };
@@ -67,6 +80,7 @@ export async function mirror(env, { get = fetch, now = new Date(), budget = Numb
   if (!site || !env.PDS_AUTH_TOKEN) throw new Error('The mirror needs SITE_ORIGIN and the PDS_AUTH_TOKEN secret');
   if (!Number.isSafeInteger(budget) || budget < 0 || budget > 1000) throw new Error('MIRROR_BUDGET must be an integer from 0 to 1000');
   const report = { at: now.toISOString(), sources: [] };
+  let publicationReady = false;
   const tasks = [];
   const legacyGroups = new Map();
   let left = budget;
@@ -199,10 +213,12 @@ export async function mirror(env, { get = fetch, now = new Date(), budget = Numb
           ...(media.length ? { media } : {}),
         };
         await env.MIRROR.put(stateKey, JSON.stringify({ ...last, binding, identity, key, phase: 'pending', intended: record, intendedHash: hash }));
+        if (!publicationReady) { await ensurePublication(pds, env.PDS_AUTH_TOKEN, site, get); publicationReady = true; }
+        // Kept as a standard.site document of the member's publication, with the post inside it.
         const written = await call(pds, env.PDS_AUTH_TOKEN, held ? 'com.atproto.repo.putRecord' : 'com.atproto.repo.createRecord', {
-          body: { repo: pds.did, collection: pds.collection, rkey: key, record, ...(held ? { swapRecord: held.cid } : {}) },
+          body: { repo: pds.did, collection: DOCUMENT, rkey: key, record: toDocument(record, { did: pds.did, site }), ...(held ? { swapRecord: held.cid } : {}) },
         }, get);
-        if (written.uri !== `at://${pds.did}/${pds.collection}/${key}` || typeof written.cid !== 'string' || !written.cid) throw new Error('PDS returned an invalid write acknowledgement; retry to reconcile it');
+        if (written.uri !== `at://${pds.did}/${DOCUMENT}/${key}` || typeof written.cid !== 'string' || !written.cid) throw new Error('PDS returned an invalid write acknowledgement; retry to reconcile it');
         await env.MIRROR.put(stateKey, JSON.stringify({ binding, identity, key, phase: 'complete', hash, recordHash: await recordVersion(record), cid: written.cid, at: report.at }));
         await env.MIRROR.put(errorKey, 'null');
         result.written.push({ key, form, ...(post.simplified.length ? { simplified: post.simplified } : {}) });

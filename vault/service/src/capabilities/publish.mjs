@@ -4,6 +4,7 @@
 // repository: the member, signed in at their own PDS, makes the changes from the list this gives
 // them. The working out is in ../../../vault/publish.mjs, with the rules that keep it safe.
 import { POST } from '../../../feed/pds.mjs';
+import { DOCUMENT, PUBLICATION, PUBLICATION_KEY, publicationRecord, toDocument } from '../../../feed/standard.mjs';
 import { kindOf } from '../../../vault/core.mjs';
 import { recordBody } from '../../../vault/file.mjs';
 import { publishPlan } from '../../../vault/publish.mjs';
@@ -50,26 +51,48 @@ async function withAttachments(write, { get, pds, did, collection }) {
   return { ...rest, record: { ...rest.record, ...(media.length ? { media } : {}) }, ...(upload.length ? { upload } : {}) };
 }
 
+// Whether the member's repository already holds their publication record.
+async function hasPublication(get, pds, did) {
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', pds);
+  url.search = new URLSearchParams({ repo: did, collection: PUBLICATION, rkey: PUBLICATION_KEY });
+  const response = await get(url, { redirect: 'manual', signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  if (response?.ok) return true;
+  const data = response ? await response.json().catch(() => ({})) : {};
+  if (response?.status === 404 || data.error === 'RecordNotFound') return false;
+  throw new Refused(502, 'RepositoryUnreachable', 'Your PDS would not say whether your publication record exists');
+}
+
 export default {
   name: 'Publish',
-  about: 'Work out what would have to change in the member\'s own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only the shared post type is touched, and a record the vault knows nothing about is never removed.',
+  about: 'Work out what would have to change in the member\'s own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only standard.site documents holding an ohm post are touched, with the member\'s publication made the first time; a record the vault knows nothing about is never removed.',
   requests: {
     'com.ohmmmm.vault.getPublishPlan': {
       verb: 'GET', asks: 'member', changes: false,
       about: 'What publishing would do: the posts it would publish for the first time, replace and take down, the ones that cannot be published and why, and the published records the vault knows nothing about. With `prepare`, also the changes themselves, ready to be made.',
       takes: { prepare: 'optional: `1` to include `writes`, the changes to make' },
-      gives: '`repository`, `pds`, `collection`, `create`, `replace`, `remove`, `unchanged`, `cannot`, `notInVault`, `changes` (how many); and with `prepare`, `writes` and `plan`, a name for exactly these changes',
+      gives: '`repository`, `pds`, `collection` (`site.standard.document`), `contentType` (`com.ohmmmm.post`), `publication` when it is to be made, `create`, `replace`, `remove`, `unchanged`, `cannot`, `notInVault`, `changes` (how many); and with `prepare`, `writes` and `plan`, a name for exactly these changes',
       run: async context => {
         const { url, get, did, posts } = context;
         const { pds, site } = await whereabouts(context);
         const plan = publishPlan({
-          did, site, origin: pds, collection: POST, posts: await posts.all(did), removed: await posts.removed(did), published: await published(get, pds, did, POST),
+          did, site, origin: pds, collection: POST, posts: await posts.all(did), removed: await posts.removed(did), published: await published(get, pds, did, DOCUMENT),
         });
         const { writes, ...summary } = plan;
-        const answer = { repository: did, pds, collection: POST, ...summary, changes: plan.create.length + plan.replace.length + plan.remove.length };
+        // Posts are written as standard.site documents of the member's publication, their website.
+        // The publication is made the first time anything is published.
+        const publishing = plan.create.length + plan.replace.length > 0;
+        const publication = publishing && !(await hasPublication(get, pds, did)) ? publicationRecord({ site }) : null;
+        const answer = {
+          repository: did, pds, collection: DOCUMENT, contentType: POST, ...summary,
+          ...(publication ? { publication: { create: true, url: publication.url, name: publication.name } } : {}),
+          changes: plan.create.length + plan.replace.length + plan.remove.length + (publication ? 1 : 0),
+        };
         if (url.searchParams.get('prepare') !== '1') return answer;
-        const ready = [];
-        for (const write of writes) ready.push(await withAttachments(write, { get, pds, did, collection: POST }));
+        const ready = publication ? [{ action: 'create', collection: PUBLICATION, rkey: PUBLICATION_KEY, record: publication }] : [];
+        for (const write of writes) {
+          const done = await withAttachments(write, { get, pds, did, collection: POST });
+          ready.push(done.record ? { ...done, record: toDocument(done.record, { did, site }) } : done);
+        }
         // The name stands for exactly these changes, so a yes given to one list is not a yes to another.
         return { ...answer, writes: ready, plan: `p${await named(ready)}` };
       },

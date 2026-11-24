@@ -16,8 +16,8 @@ import { vaultClient } from './vault-client.mjs';
 import { listRecords } from '../feed/repository.mjs';
 
 // Every record of one type, as the repository lists them. A PDS may repeat one across a page boundary.
-async function list(pds, collection) {
-  const { records } = await listRecords({ ...pds, collection, maxPages: 500 });
+async function list(pds, collection, raw = false) {
+  const { records } = await listRecords({ ...pds, collection, maxPages: 500, raw });
   return new Map(records.map(record => [record.uri.split('/').at(-1), record.value]));
 }
 
@@ -33,8 +33,10 @@ try {
   const site = webUrl(vars.SITE_ORIGIN);
   if (!site) throw new Error('Set SITE_ORIGIN in the site configuration');
   const from = values.from ?? pds.olderCollection;
-  // A post kept under the shared type is the one that counts, when an older copy of it is still there.
-  const found = new Map(from && from !== POST ? await list(pds, from) : []);
+  // A post kept as a document is the one that counts, when an older copy of it is still there:
+  // under an older type of the site's own, or under com.ohmmmm.post from before posts were documents.
+  const found = new Map(from && from !== POST ? await list(pds, from, true) : []);
+  for (const [key, value] of await list(pds, POST, true)) found.set(key, value);
   for (const [key, value] of await list(pds, POST)) found.set(key, value);
   const { posts, skipped } = importVault([...found].map(([key, value]) => ({ key, value })), { did: pds.did, origin: pds.origin, site, namespace: pds.namespace });
 

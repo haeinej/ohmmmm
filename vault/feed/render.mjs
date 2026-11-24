@@ -2,6 +2,7 @@ import MarkdownIt from 'markdown-it';
 import footnotes from 'markdown-it-footnote';
 import { identifyForm } from './forms.mjs';
 import { postLink } from './pds.mjs';
+import { asDocumentUri } from './standard.mjs';
 
 const markdown = new MarkdownIt('commonmark', { html: false }).use(footnotes);
 // A footnote is written [^1] in the text and [^1]: … for the note. It shows as a small number that
@@ -155,7 +156,8 @@ export function postPage(post) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escape(post.name || post.sublabel || post.label || 'Post')}</title>
   <link rel="canonical" href="${escape(post.canonicalUrl)}">
-  ${post.uri ? `<link rel="alternate" href="${escape(post.uri)}">` : ''}
+  ${post.uri ? `<link rel="alternate" href="${escape(asDocumentUri(post.uri))}">
+  <link rel="site.standard.document" href="${escape(asDocumentUri(post.uri))}">` : ''}
   <link rel="stylesheet" href="/notes/notes.css">
   ${hidden ? '<meta name="robots" content="noindex">' : ''}
 </head>
