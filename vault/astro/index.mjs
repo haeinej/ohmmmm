@@ -52,7 +52,7 @@ export function pdsSource({ did, origin, channels, get = fetch, maxPages = 200 }
             // Only this collection's posts are guaranteed local routes. Other posts keep their canonical URL.
             html: rendered.bodyHtml.replace(/href="\/posts\/([^/" ]+)"/g, (attribute, key) => {
               const path = paths.get(key);
-              return path ? `href="${path}"` : attribute;
+              return path ? `href="${path.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"` : attribute;
             }),
           },
         });

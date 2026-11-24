@@ -44,10 +44,10 @@ test('channel mapping selects labels and sublabels and rejects unmapped channels
 test('links to posts outside the collection retain their canonical URL', async t => {
   const pds = await fakePds(t, () => ({ records: [
     document('essay', { body: `[Note](at://${did}/com.ohmmmm.post/note)` }),
-    document('note', { label: 'notes', canonicalUrl: 'https://alice.example.com/posts/notes/note' }),
+    document('note', { label: 'notes', canonicalUrl: 'https://alice.example.com/posts/notes/note?a=1&copy=yes' }),
   ] }));
   const [entry] = await sourceAt(pds.origin).read({ channel: 'essays' });
-  assert.match(entry.rendered.html, /href="https:\/\/alice.example.com\/posts\/notes\/note"/);
+  assert.match(entry.rendered.html, /href="https:\/\/alice.example.com\/posts\/notes\/note\?a=1&amp;copy=yes"/);
 });
 
 test('loader stages schema validation, uses stable keys and deletes withdrawn posts on success', async t => {
