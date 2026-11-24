@@ -6,7 +6,7 @@ One list for the vault, the cortex and the account app. When a part needs a word
 
 - **Home:** a person's folder `ohmmmm.<handle>`, holding `vault/` and `cortex/`.
 - **Handle:** the person's AT Protocol handle, which names the home. The DID is in the cortex's identity, not in folder names.
-- **Bridge:** `ohmmmm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohmmmm pair`) prints, which holds that browser's **app key**. Agents use the **agent key**, which reaches only the MCP endpoints ([docs/serve.md](serve.md)).
+- **Bridge:** `ohmmmm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohmmmm pair`) prints, which holds that browser's **app key**. Each agent has its own **agent key** (`ohmmmm agents add <name>`), which reaches only the MCP endpoints and makes every session it opens that agent ([docs/serve.md](serve.md)).
 
 ## In the vault
 

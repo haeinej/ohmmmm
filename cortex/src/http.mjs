@@ -92,9 +92,11 @@ export function cortexSessions(dir, { agent: fixed } = {}) {
 const digest = value => createHash('sha256').update(value).digest();
 const failure = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
 
-// The request handler for node:http. `open` makes the handler of a new session. `token`, when
-// given, is required of every request. `origins` are browser origins allowed besides this machine.
-export function httpTransport({ open, token, origins = [], endpoint = ENDPOINT, maxSessions = 100 }) {
+// The request handler for node:http. `open(req)` makes the handler of a new session, given the
+// request that initializes it. `token`, when given, is required of every request. `origins` are
+// browser origins allowed besides this machine. `owner(req)`, when given, says who is asking (such as
+// which key signed the request): a session answers only who opened it, and is not found by anyone else.
+export function httpTransport({ open, token, origins = [], endpoint = ENDPOINT, maxSessions = 100, owner }) {
   const expected = token ? digest(`Bearer ${token}`) : null;
   // Oldest first, so the session used least recently is the one let go when there are too many.
   const sessions = new Map();
@@ -149,7 +151,7 @@ export function httpTransport({ open, token, origins = [], endpoint = ENDPOINT, 
     const id = req.headers['mcp-session-id'];
     if (typeof id !== 'string' || !id) return { status: 400, message: 'Send initialize first, then the Mcp-Session-Id header its answer gave, with every request' };
     const held = sessions.get(id);
-    if (!held) return { status: 404, message: 'There is no such session. Send initialize again to start a new one' };
+    if (!held || (owner && held.owner !== owner(req))) return { status: 404, message: 'There is no such session. Send initialize again to start a new one' };
     sessions.delete(id);
     sessions.set(id, held);
     return { id, held };
@@ -178,11 +180,11 @@ export function httpTransport({ open, token, origins = [], endpoint = ENDPOINT, 
     const isRequest = typeof message.method === 'string' && message.id !== undefined;
 
     if (isRequest && message.method === 'initialize') {
-      const handle = open();
+      const handle = open(req);
       const answer = await Promise.resolve().then(() => handle(message)).catch(() => failure(message.id, -32603, 'Internal error'));
       if (!answer?.result) return send(res, 200, answer);
       const id = randomUUID();
-      sessions.set(id, { handle, last: Promise.resolve() });
+      sessions.set(id, { handle, last: Promise.resolve(), ...(owner ? { owner: owner(req) } : {}) });
       while (sessions.size > maxSessions) sessions.delete(sessions.keys().next().value);
       return send(res, 200, answer, { 'Mcp-Session-Id': id });
     }

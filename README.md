@@ -43,10 +43,11 @@ cd ~/ohmmmm.alice.example.com
 npx github:haeinej/ohmmmm vault index               # the vault finds ./vault by itself
 npx github:haeinej/ohmmmm cortex status             # the cortex finds ./cortex, and reads ./vault
 npx github:haeinej/ohmmmm serve                     # the bridge for the app and local agents: open the link it prints
-npx github:haeinej/ohmmmm pair                      # a link that pairs one more browser; agents use .ohmmmm/agent-key
+npx github:haeinej/ohmmmm pair                      # a link that pairs one more browser
+npx github:haeinej/ohmmmm agents add claude-code    # a key of its own for an agent, shown once
 ```
 
-`npx github:haeinej/ohmmmm` runs `bin/ohmmmm.mjs`: `init` and `where` are its own, `serve` starts the home's bridge on this machine and `pair` pairs another browser with it ([docs/serve.md](docs/serve.md)), `cortex …` goes to the cortex, and every other command to the vault's `ohm` (`vault`, `publish`, `sync`, `mcp`…), so commands written for ohm-vault still work. From a checkout, use `node bin/ohmmmm.mjs`, or `node vault/bin/ohm.mjs` and `node cortex/bin/cortex.mjs` directly.
+`npx github:haeinej/ohmmmm` runs `bin/ohmmmm.mjs`: `init` and `where` are its own, `serve` starts the home's bridge on this machine, `pair` pairs another browser with it, and `agents` gives each agent its own key ([docs/serve.md](docs/serve.md)), `cortex …` goes to the cortex, and every other command to the vault's `ohm` (`vault`, `publish`, `sync`, `mcp`…), so commands written for ohm-vault still work. From a checkout, use `node bin/ohmmmm.mjs`, or `node vault/bin/ohm.mjs` and `node cortex/bin/cortex.mjs` directly.
 
 Inside a home, or with `OHMMMM_HOME` set, the vault and the cortex each find their own folder, and a cortex reads its sibling vault through the vault's reader unless `.cortex/vault.json` names another. Either folder still works on its own.
 
