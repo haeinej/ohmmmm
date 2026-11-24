@@ -15,7 +15,7 @@ The vault cannot judge meaning; you can. `vault_lint` finds candidates from the 
    - **contradicting**: they disagree; say which is newer and what each says;
    - **unrelated**: shared words, nothing more. Drop it.
 4. **Record conclusions in the cortex.** One `cortex_observe` per finding, `about` the blocks it concerns. A contradiction or a stale note says so plainly ("out of date: …"). Search with `cortex_recall` first so you do not repeat one.
-5. **Fix only within the grant.** With a link grant, `vault_link` a connected pair with a one-line note. With a write grant, fix a missing link target or merge a duplicate with `vault_write` (pass `replaces`). Never resolve a contradiction yourself: ask. Outside your grant, propose in words.
+5. **Fix only within the grant.** With a link grant, `vault_link` a connected pair with a one-line note. With a write grant, fix a missing link target with `vault_write` (pass `replaces`). Do not merge a duplicate, move a block or change a label or channel: that is the [curator](../../agents/curator.md)'s, so flag it with `cortex_observe` and `needs: curator`. Never resolve a contradiction yourself: ask. Outside your grant, propose in words.
 6. **Say what is missing.** End with at most five questions for the person: notes the vault should hold, roots without a note, proposals to keep or drop.
 
 Every change you make is journaled and its old version kept; the person can undo it with `ohm vault restore`.
