@@ -9,11 +9,11 @@ import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelReco
 import { fileOf } from "@/data/block-document"
 import { cortexFileOf } from "@/data/cortex-document"
 import { docOf } from "@/data/block-document"
-import { setProperty, writeNoteFile } from "../../../vault/vault/file.mjs"
-import { inferKind, isChannelPath, newNodeId } from "../../../vault/vault/node.mjs"
+import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
+import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
 import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
 import { type BlockRef, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
-import { planMove } from "../../../vault/vault/visibility.mjs"
+import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
@@ -321,10 +321,10 @@ export function setVisibility(id: string, visibility: Visibility, { request, rea
     const { from } = preview
     if (preview.via === "publish") {
       // Public is the PDS's. A post is marked here, then published or taken down on the Publish page.
-      if (held.ref.store !== "post") {
-        throw new DOMException(from === "public" ? "Move it to friends first; Publish then takes it down." : "Only a post goes to the Publish page from here. Move a private post to friends first; a block becomes a post when it is published as one, which is not built yet.", "NotSupportedError")
-      }
       if (visibility === "private") throw new DOMException("Move it to friends first; Publish then takes it down.", "NotSupportedError")
+      // Every block is a post once it is public: one that is not yet is made one, at the address its
+      // home channel gives, and the old copy removed (copy, then remove, as between the other layers).
+      if (held.ref.store !== "post") return publishBlock(held, doc(id), { request, reason })
       const file = await live().readBlock(held.ref)
       if (file.version !== held.version) throw new DOMException("The block changed. Review it again before moving it.", "InvalidStateError")
       const ref = { ...held.ref, layer: visibility }
@@ -349,6 +349,29 @@ export function setVisibility(id: string, visibility: Visibility, { request, rea
     set(bump())
     return { id: moved.ref.id, visibility, cleanupPending: moved.cleanupPending }
   })
+}
+
+const doc = (id: string) => { const found = byId(id); if (!isBlock(found)) throw new DOMException("Only blocks have visibility", "DataError"); return found }
+/** A friends-only or private block made a post marked public, ready for the Publish page. Runs inside `serial`. */
+async function publishBlock(held: { ref: BlockRef; version: string }, block: Doc, { request, reason }: { request?: string; reason?: string }) {
+  const file = await live().readBlock(held.ref)
+  if (file.version !== held.version) throw new DOMException("The block changed. Review it again before moving it.", "InvalidStateError")
+  const node = readNode(file.path, file.text)?.node
+  const vaultId = held.ref.store === "sealed" ? block.vaultId ?? node?.id : held.ref.id
+  if (!vaultId) throw new DOMException("Only a block with a vault ID can be published.", "DataError")
+  let post
+  try { post = blockAsPost(node, { id: vaultId, slugOf }) } catch (err) { throw new DOMException((err as Error).message, "DataError") }
+  const ref: BlockRef = { id: vaultId, layer: "public", store: "post" }
+  const made = postFile(post)
+  const saved = await live().saveBlock(ref, made, null)
+  // Separate stores have no joint transaction: a failed removal leaves both copies, and says so.
+  let cleanupPending = false
+  try { await live().deleteBlock(held.ref, held.version) } catch { cleanupPending = true }
+  if (!cleanupPending) dropBlock(block.id)
+  landBlock(ref, made, saved.version)
+  await live().moves.record({ block: held.ref.id, from: block.visibility, to: "public", ...(cleanupPending ? { cleanupPending: true } : {}), ...(request ? { request } : {}), ...(reason ? { reason } : {}) })
+  set(bump())
+  return { id: vaultId, visibility: "public" as const, cleanupPending, publish: live().moves.publishPage(vaultId) }
 }
 
 // Agents' requests for moves they may not finish, waiting for the member.

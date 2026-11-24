@@ -63,7 +63,9 @@ A visibility change is a move between places, never an edit of a field. One hand
 - **Only the member shows a block to more people.** An agent with a write grant on the channel may start Friends → Private: the block is hidden from friends at once and sealed on the device when it is next unlocked. Public → anything is always the member's.
 - An agent's other moves are **requests in the cockpit's notifications**. Each waits until the member answers it, pinned to the version the agent read.
 - Grants are checked in the **local `.vault/grants.json`**, which the agent tools read with `--home`.
-- **To public:** the post is marked, and the Publish page previews that one post (`?publish=<id>`). A block without a title waits for one. A block that is not a post cannot go public from the cockpit yet.
+- **To public:** the post is marked, and the Publish page previews that one post (`?publish=<id>`). A block without a title waits for one. **Every block is a post** once public: one that is not yet is made one at its channel's address. Publishing itself may be done by the member or by an agent (`vault_publish`, preview first), and only publishes what the member marked public.
+- **Agents never create friends-only blocks:** a new block starts private, and sharing it is a move.
+- **Friends reads do not depend on the PDS:** when it is down, the last public copy is served, marked stale.
 - **The journal** is a service table that names blocks by ID only (opaque IDs for private ones). It records who asked, who approved, why and the move's state.
 
 ## Order

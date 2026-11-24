@@ -259,3 +259,11 @@ CREATE TABLE IF NOT EXISTS move_requests (
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS move_requests_waiting ON move_requests (did, state);
+
+-- The last copy of what each member published, as content reads gave it (src/content.mjs): served,
+-- marked stale, when their PDS cannot be reached, so a site keeps working.
+CREATE TABLE IF NOT EXISTS published_copies (
+  did TEXT PRIMARY KEY,
+  entries TEXT NOT NULL,
+  read_at TEXT NOT NULL
+);

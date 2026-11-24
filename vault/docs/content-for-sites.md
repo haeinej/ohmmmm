@@ -19,6 +19,8 @@ What a site gets is cut down to what a page needs: titles, bodies, tags, dates, 
 
 Removing a friend takes effect on their next page load.
 
+If your PDS can't be reached, your site keeps working: friends still see Friends, and everyone sees the last copy of what you published, marked as not fresh.
+
 ## Showing Friends on your site
 
 A site can't see who is signed in to ohm, because that sign-in lives on ohm's own address. So ohm vouches for the viewer:

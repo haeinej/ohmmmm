@@ -354,15 +354,19 @@ test('friends tools preview changes, enforce versions and use the reader’s own
   const { tools, asked, blocks, ask } = await toolsOf();
   const reader = 'did:web:reader.example.test';
   const block = { id: newPostId(), path: 'reading/first.md', text: '---\nkind: text\nvisibility: friends\n---\n\nCollected words.' };
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: 'A private block.' } }), /visibility: friends/);
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text.replace('friends', 'public') } }), /visibility: friends/);
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: 'A private block.' }, replaces: 'v' }), /visibility: friends/);
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text.replace('friends', 'public') }, replaces: 'v' }), /visibility: friends/);
+  // An agent never makes a new friends-only block: a new block starts private.
+  await assert.rejects(tools.call('vault_friends_save', { block }), /A new block starts private/);
   assert.deepEqual(asked, []);
-  const preview = await tools.call('vault_friends_save', { block });
+  assert.deepEqual((await tools.call('vault_friends_list')).blocks, []);
+  // The person shares it; the agent may then change it, from the version it read.
+  const { version: first } = await blocks.write(did, block);
+  const preview = await tools.call('vault_friends_save', { block, replaces: first });
   assert.equal(preview.done, false);
   assert.match(preview.willHappen.warning, /can read/);
-  assert.deepEqual((await tools.call('vault_friends_list')).blocks, []);
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text + ' Changed.' }, confirm: preview.confirm }), /has changed since it was shown/);
-  const { version } = await tools.call('vault_friends_save', { block, confirm: preview.confirm });
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text + ' Changed.' }, replaces: first, confirm: preview.confirm }), /has changed since it was shown/);
+  const version = first;
   const list = await tools.call('vault_friends_list');
   assert.equal(list.blocks[0].id, block.id);
   assert.deepEqual(await tools.call('vault_friends_read', { id: block.id }), { block, version });

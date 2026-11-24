@@ -13,6 +13,7 @@ Human guide: [who can see a block](../visibility.md). Plan: [standard-site.md](.
   - `needs: ['title']` when publishing an untitled block.
   - Throws `MoveProblem('InvalidMove')`.
 - `whyNot(plan, {actor, granted})` returns null when `actor` may finish the move, otherwise a sentence. `me` may always finish one (except `needs`). An agent may finish only `seal`, and only with `granted`.
+- `blockAsPost(node, {id, slugOf})`: a block that is not a post, as the post it becomes when public. `label`/`sublabel` are the first two folders of its home channel (`other` when none), the slug is `slugOf(slug || title)`, `date` is `created`, and `tags` go to properties. A missing title throws `InvalidMove`.
 - A future audience (named people) is added here as another layer or rule.
 
 ## Service ([service/src/visibility.mjs](../../service/src/visibility.mjs))
@@ -42,6 +43,8 @@ The service makes no move inside the private layer.
 - Grants come from `<home>/.vault/grants.json`, read for each call by [mcp/server.mjs](../../mcp/server.mjs) `--home` (or `OHM_VAULT_FOLDER`). `--agent` names `by`. Without `--home`, no grant is held.
 
 ## Cockpit
+
+A move to public from a friends-only or sealed block saves `postFile(blockAsPost(...))` under the block's vault ID (store `post`, layer `public`), then deletes the old copy (`cleanupPending` if that fails). `vault_friends_save` requires `replaces`: agents never create friends-only blocks. `vault_publish` (agent, two calls) publishes what is already marked public.
 
 One handler, `setVisibility` in [app/src/workspace/store.ts](../../../app/src/workspace/store.ts), is used by the control, `approveMoveRequest` and the `visibility.move` WebMCP tool. `previewMove` is the dialog's text and `visibility.preview`. `sealHidden()` runs when the home opens. The flow is in [app/flows/paths.md](../../../app/flows/paths.md) C2, C3 and F3.
 

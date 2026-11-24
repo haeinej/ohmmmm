@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { blockStore } from '../service/src/blocks.mjs';
 import { channelStore } from '../service/src/channels.mjs';
-import { audienceOf, sees } from '../service/src/content.mjs';
+import { audienceOf, forgetPublished, sees } from '../service/src/content.mjs';
 import { links } from '../service/src/ohm.mjs';
 import { postStore } from '../service/src/store.mjs';
 import { makeViewerToken, viewerOf } from '../service/src/viewers.mjs';
@@ -31,12 +31,14 @@ async function setUp() {
   const repository = [[published, toDocument(record, { did: owner, site: SITE })]];
   const sessions = new Map();
   let pdsReads = 0;
+  const pds = { down: false };
   const get = async (url, options) => {
     if (String(url) === `${APP}/api/auth/get-session`) {
       const user = sessions.get(options.headers.Cookie);
       return Response.json(user ? { user } : null);
     }
     if (url.pathname === '/xrpc/com.atproto.repo.listRecords' && url.searchParams.get('collection') === DOCUMENT) {
+      if (pds.down) return new Response('down', { status: 503 });
       pdsReads++;
       return Response.json({ records: repository.map(([key, value]) => ({ uri: `at://${owner}/${DOCUMENT}/${key}`, value })) });
     }
@@ -67,7 +69,7 @@ async function setUp() {
   await posts.write(owner, { id: secret, slug: 'diary', label: 'diary', sublabel: '', visibility: 'private', title: 'Diary', body: 'Mine.', properties: {} });
   await channelStore(env.DB).write(owner, { path: 'walks', text: `---\ntitle: Walks\norder: [lantern, yanaka]\n---\n\nWhere I walked.\n` });
   await blocks.addFriend(owner, friend);
-  return { env, ask, json, sessions, ids: { published, walk, photo, letter, draft, secret }, reads: () => pdsReads };
+  return { env, ask, json, sessions, pds, get, ids: { published, walk, photo, letter, draft, secret }, reads: () => pdsReads };
 }
 
 test('anyone reads only what the member published, by DID, with no session', async () => {
@@ -175,4 +177,28 @@ test('ohm hands a viewer token back only to one of the member\'s own sites, whic
   // Once the site is removed, no token goes there.
   assert.deepEqual(await json('removeSite', { body: { origin: SITE }, bearer: owner }), { status: 200, origin: SITE, removed: true });
   assert.equal((await (await view('session=bo')).json()).error, 'NotTheirSite');
+});
+
+test('when the PDS is down, friends still read Friends, and the last public copy is served as stale', async () => {
+  const { json, pds, get, ids } = await setUp();
+  const asFriend = await makeViewerToken(SECRET, { viewer: friend, owner });
+  // Down before anything was ever read: Friends is served, and the answer says public is not.
+  pds.down = true;
+  const first = await json('listBlocks', { query: { did: owner }, bearer: asFriend });
+  assert.equal(first.status, 200);
+  assert.equal(first.publicUnavailable, true);
+  assert.deepEqual(first.blocks.map(block => block.id).sort(), [ids.walk, ids.photo, ids.letter].sort());
+  assert.deepEqual((await json('listBlocks', { query: { did: owner } })).blocks, []);
+  // Up again: read, and a copy kept.
+  pds.down = false;
+  const fresh = await json('listBlocks', { query: { did: owner } });
+  assert.deepEqual([fresh.blocks.map(block => block.id), fresh.publicStale, fresh.publicUnavailable], [[ids.published], undefined, undefined]);
+  // Down once more, after the minute's memory: the copy, marked with when it was read.
+  pds.down = true;
+  forgetPublished(get);
+  const stale = await json('getBlock', { query: { did: owner, id: ids.published } });
+  assert.equal(stale.block.body, 'It rained.');
+  assert.match(stale.publicStale, /^\d{4}-\d\d-\d\dT/);
+  const both = await json('listBlocks', { query: { did: owner }, bearer: asFriend });
+  assert.equal(both.blocks.length, 4);
 });

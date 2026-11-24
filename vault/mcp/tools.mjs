@@ -124,8 +124,8 @@ export const TOOLS = [
   },
   {
     name: 'vault_friends_save',
-    description: 'Save a friends-only block as a Markdown file with visibility: friends. Friends can read it as soon as it is saved. Preview, then confirm the exact file and version.',
-    inputSchema: fields({ block, replaces: text, confirm: text }, ['block']),
+    description: 'Change a friends-only block that is already shared, as a Markdown file with visibility: friends, from the version read. Friends read the change as soon as it is saved. It never makes a new block: a new block starts private, and vault_set_visibility asks the person to share it. Preview, then confirm the exact file and version.',
+    inputSchema: fields({ block, replaces: text, confirm: text }, ['block', 'replaces']),
     requests: ['putBlock'],
   },
   {
@@ -413,7 +413,9 @@ export function createTools(options) {
         || (parsed.node.id && parsed.node.id !== block.id)) {
         refuse('Give a valid block file with its ID and visibility: friends.');
       }
-      if (replaces !== undefined && (typeof replaces !== 'string' || !replaces)) refuse('Pass the version being replaced, or omit replaces for a new block.');
+      // A new block starts private, on the device: an agent changes friends-only blocks that are already
+      // shared, and moves a block between layers only with vault_set_visibility.
+      if (typeof replaces !== 'string' || !replaces) refuse('Pass the version being replaced. A new block starts private: write it in the local vault, and ask the person to share it with vault_set_visibility.');
       const file = { id: block.id, path: block.path, text: block.text };
       return twoSteps(args, { tool: 'vault_friends_save', file, replaces }, {
         id: file.id, path: file.path, replaces, warning: 'Everyone on the friends list can read this file as soon as it is saved.',

@@ -89,7 +89,8 @@ export function createFixtureSource() {
       return { ...file, version: versionOf(file) }
     },
     saveBlock(ref: BlockRef, file: HomeFile, replaces: string | null) {
-      const held = blocks.find(doc => doc.id === ref.id)
+      // Posts, readable blocks and sealed blocks are separate stores, as on the service.
+      const held = blocks.find(doc => doc.id === ref.id && storeOf(doc) === ref.store)
       // A post changes layer in place (to or from public, through Publish); anything else moves between stores.
       if ((held ? versionOf(fileOf(held)) : null) !== replaces || (held && held.visibility !== ref.layer && storeOf(held) !== "post")) throw stale()
       const { doc } = docOf(ref, { ...file, text: setProperty(file.text, "visibility", ref.layer) })

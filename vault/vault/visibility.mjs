@@ -80,3 +80,23 @@ export function whyNot(plan, { actor, granted = false }) {
   if (plan.action === 'takedown') return 'Only the person takes a published block down, through Publish. Ask them.';
   return 'You have no write grant on this block\'s channel. Ask the person, or for the grant.';
 }
+
+// A block that is not a post, as the post it becomes when it is moved to public. Every block is the
+// same record (a standard.site document); a post is one with an address. The address comes from the
+// block's home channel: its first folder is the label, its second the sublabel. `id` is the block's
+// vault ID (a TID). The slug is the block's, made safe for an address; the title is required.
+export function blockAsPost(node, { id, slugOf }) {
+  if (!node || node.type !== 'block') throw new MoveProblem('InvalidMove', 'Only a block can become a post.');
+  if (node.post) return { ...node.post, visibility: 'public' };
+  const title = typeof node.title === 'string' ? node.title.trim() : '';
+  if (!title) throw new MoveProblem('InvalidMove', 'It needs a title before it can be published.');
+  const [label = 'other', sublabel = ''] = String(node.home ?? '').split('/').filter(Boolean);
+  const slug = slugOf(node.slug || title) || slugOf(title);
+  const tags = Array.isArray(node.tags) ? node.tags.filter(tag => typeof tag === 'string' && tag.trim()) : [];
+  return {
+    id, slug, label, sublabel, visibility: 'public', title,
+    body: String(node.body ?? '').trim(),
+    ...(node.created ? { date: String(node.created).slice(0, 10) } : {}),
+    properties: tags.length ? { tags } : {},
+  };
+}

@@ -86,9 +86,29 @@ test("a post to or from public is marked here and finished on the Publish page, 
     assert.equal(fixture.journalOfMoves.at(-1)?.state, "previewed")
     const up = await setVisibility(fixtureIds.garden, "public")
     assert.ok(up.publish)
-    // A block that is not a post, and public straight to private, are refused plainly.
-    await assert.rejects(setVisibility(fixtureIds.address, "public"), { name: "NotSupportedError" })
+    // Public straight to private is refused plainly: friends first, and Publish takes it down.
     await assert.rejects(setVisibility(fixtureIds.slow, "private"), { name: "NotSupportedError" })
+  } finally {
+    await setSource(null)
+  }
+})
+
+test("a block that is not a post becomes one when it goes public, at the address its channel gives", async () => {
+  const fixture = createFixtureSource()
+  await setSource(fixture)
+  try {
+    const before = byId(fixtureIds.address)!
+    assert.notEqual(before.kind, "post")
+    const moved = await setVisibility(fixtureIds.address, "public")
+    assert.equal(moved.id, fixtureIds.address)
+    assert.equal(moved.publish, `https://vault.example.test/vault/?publish=${fixtureIds.address}`)
+    const after = byId(fixtureIds.address)!
+    assert.deepEqual([after.kind, after.visibility, after.title], ["post", "public", before.title])
+    const file = fixture.readBlock({ id: fixtureIds.address, layer: "public", store: "post" })
+    assert.match(file.path, /^writing\/essays\/owning-your-address\.md$/)
+    assert.deepEqual(fixture.journalOfMoves.at(-1), { block: fixtureIds.address, from: "friends", to: "public", state: "previewed" })
+    // Only one copy is left: the friends-only one is gone.
+    assert.equal(fixture.listBlocks(["friends"]).some(head => head.id === fixtureIds.address), false)
   } finally {
     await setSource(null)
   }

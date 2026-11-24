@@ -82,12 +82,12 @@ const kept = new WeakMap();
 async function publicEntries(get, pds, owner, now) {
   const mine = kept.get(get) ?? kept.set(get, new Map()).get(get);
   const held = mine.get(owner);
-  if (held && held.until > now) return held.entries;
+  if (held && held.until > now) return { entries: held.entries, fresh: false };
   const records = await published(get, pds, owner, DOCUMENT);
   const entries = [...records].map(([key, record]) => publicEntry(key, record));
   if (mine.size > 500) mine.clear();
   mine.set(owner, { entries, until: now + KEEP_PUBLIC });
-  return entries;
+  return { entries, fresh: true };
 }
 export const forgetPublished = get => kept.delete(get);
 
@@ -98,11 +98,31 @@ export function contentStore(db, { get, pdsFor, now = () => Date.now() }) {
   };
 
   // Every entry the audience may see, in one list: published posts first by date, then Friends.
+  // What the member published, from their PDS. When the PDS cannot be reached, the last copy read
+  // from it is served and the answer says since when (`publicStale`); with no copy, nothing public
+  // is served (`publicUnavailable`). Friends never depends on the PDS.
+  async function publicPart(owner) {
+    try {
+      const pds = await pdsFor(owner);
+      if (!pds) throw new Refused(502, 'RepositoryUnreachable', 'The member\'s PDS could not be found');
+      const { entries: list, fresh } = await publicEntries(get, pds, owner, now());
+      if (fresh) {
+        await db.prepare(`INSERT INTO published_copies (did, entries, read_at) VALUES (?1, ?2, ?3)
+          ON CONFLICT (did) DO UPDATE SET entries = excluded.entries, read_at = excluded.read_at`).bind(owner, JSON.stringify(list), new Date(now()).toISOString()).run();
+      }
+      return { list, note: {} };
+    } catch {
+      const copy = await db.prepare('SELECT entries, read_at FROM published_copies WHERE did = ?1').bind(owner).first();
+      if (copy) return { list: JSON.parse(copy.entries), note: { publicStale: copy.read_at } };
+      return { list: [], note: { publicUnavailable: true } };
+    }
+  }
+
+  // Every entry the audience may see, and a note when the public part is not fresh from the PDS.
   async function entries(audience) {
     const { owner } = audience;
-    const pds = await pdsFor(owner);
-    if (!pds) throw new Refused(404, 'NotFound', 'There is nothing here');
-    const all = [...await publicEntries(get, pds, owner, now())];
+    const { list, note } = await publicPart(owner);
+    const all = [...list];
     if (audience.layers.includes('friends')) {
       const { results: blocks } = await db.prepare('SELECT id, path, text FROM blocks WHERE did = ?1 AND version IS NOT NULL AND leaving_at IS NULL ORDER BY path').bind(owner).all();
       for (const row of blocks) {
@@ -118,7 +138,7 @@ export function contentStore(db, { get, pdsFor, now = () => Date.now() }) {
     }
     // A post still on the PDS is public, whatever the vault now says: it is shown once, as published.
     const seen = new Set();
-    return all.filter(entry => !seen.has(entry.id) && seen.add(entry.id) && sees(audience, entry));
+    return { visible: all.filter(entry => !seen.has(entry.id) && seen.add(entry.id) && sees(audience, entry)), note };
   }
 
   // The channel files kept here, as a site may see them: title and description, and an order that
@@ -142,29 +162,29 @@ export function contentStore(db, { get, pdsFor, now = () => Date.now() }) {
 
     // A channel is listed when the audience can see something in it, or in a channel inside it.
     async listChannels(audience) {
-      const visible = await entries(audience);
+      const { visible, note } = await entries(audience);
       const files = await channelFiles(audience.owner);
       const paths = new Set();
       for (const entry of visible) for (const path of [entry.channel, ...entry.channels]) {
         const parts = path.split('/');
         for (let end = 1; end <= parts.length; end++) paths.add(parts.slice(0, end).join('/'));
       }
-      return { owner: audience.owner, channels: [...paths].sort().map(path => channelView(path, files.get(path), visible)) };
+      return { owner: audience.owner, channels: [...paths].sort().map(path => channelView(path, files.get(path), visible)), ...note };
     },
 
     async getChannel(audience, path) {
-      const visible = await entries(audience);
+      const { visible, note } = await entries(audience);
       if (typeof path !== 'string' || !visible.some(entry => [entry.channel, ...entry.channels].some(each => under(each, path)))) {
         throw new Refused(404, 'NotFound', 'There is nothing here');
       }
-      return { owner: audience.owner, channel: channelView(path, (await channelFiles(audience.owner)).get(path), visible) };
+      return { owner: audience.owner, channel: channelView(path, (await channelFiles(audience.owner)).get(path), visible), ...note };
     },
 
     // Entries, a page at a time, without their bodies. In a channel, in its order first.
     async listBlocks(audience, { channel, cursor } = {}) {
       const start = cursor === undefined || cursor === null ? 0 : Number(cursor);
       if (!Number.isSafeInteger(start) || start < 0) throw new Refused(400, 'InvalidCursor', 'cursor is a value an earlier list returned');
-      let visible = await entries(audience);
+      let { visible, note } = await entries(audience);
       if (channel !== undefined && channel !== null) {
         visible = visible.filter(entry => inChannel(entry, channel));
         const order = (await channelFiles(audience.owner)).get(channel)?.order ?? [];
@@ -172,18 +192,19 @@ export function contentStore(db, { get, pdsFor, now = () => Date.now() }) {
         visible = visible.map((entry, index) => ({ entry, index })).sort((x, y) => rank(x.entry.slug) - rank(y.entry.slug) || x.index - y.index).map(({ entry }) => entry);
       }
       const page = visible.slice(start, start + PAGE).map(({ body, ...head }) => head);
-      return { owner: audience.owner, blocks: page, ...(start + PAGE < visible.length ? { cursor: String(start + PAGE) } : {}) };
+      return { owner: audience.owner, blocks: page, ...(start + PAGE < visible.length ? { cursor: String(start + PAGE) } : {}), ...note };
     },
 
     async getBlock(audience, id) {
-      const found = (await entries(audience)).find(entry => entry.id === id);
+      const { visible, note } = await entries(audience);
+      const found = visible.find(entry => entry.id === id);
       if (!found) throw new Refused(404, 'NotFound', 'There is nothing here');
-      return { owner: audience.owner, block: found };
+      return { owner: audience.owner, block: found, ...note };
     },
 
     // A media file the audience may see: one that a block it can see names.
     async mayShowMedia(audience, name) {
-      const visible = await entries(audience);
+      const { visible } = await entries(audience);
       if (typeof name !== 'string' || !visible.some(entry => entry.media?.name === name)) throw new Refused(404, 'NotFound', 'There is nothing here');
     },
   };

@@ -121,8 +121,8 @@ test("signed out shows nothing of anyone's home; an agent's block is an ordinary
     const agents = byId(fixtureIds.byAgent)
     assert.equal(blocks.some(doc => doc.id === fixtureIds.byAgent), true)
     assert.deepEqual([agents?.homeChannel, agents?.by, agents?.visibility, agents?.status], ["reading", "agent:claude-code", "private", undefined])
-    // Public is reached only through Publish.
-    await assert.rejects(setVisibility(fixtureIds.address, "public"), { name: "NotSupportedError" })
+    // Public is reached only through Publish: the move marks it and hands over to the Publish page.
+    assert.match((await setVisibility(fixtureIds.address, "public")).publish ?? "", /\?publish=/)
     const path = await createChannel()
     assert.ok(channelByPath(path)?.version)
     await deleteChannel(path)
