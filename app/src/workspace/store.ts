@@ -1,6 +1,6 @@
 // Workspace state, and the handlers both the UI and the WebMCP tools call (AGENTS.md rule 2).
 import { useSyncExternalStore } from "react"
-import { blockVersion, byId, cortex, channelRecords, channelsOf, demoJournal, inbox, inOrder, owner, blocks, bySlug, isBlock,
+import { blockVersion, byId, cortex, channelRecords, isCortexKind, channelsOf, demoJournal, inbox, inOrder, owner, blocks, bySlug, isBlock,
   refreshSample, sampleWorkspace, selectSource, type Audience, type ChannelRecord, type Doc, type Visibility,
 } from "@/data/workspace-data"
 import { docOf, fileOf } from "@/data/block-document"
@@ -28,8 +28,8 @@ const draftOf = (id: string) => {
 }
 const persist = (doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) => {
   const held = blockVersion(doc.id)
-  if (!held && cortex.some(node => node.id === doc.id)) {
-    sampleWorkspace()!.demo.saveCortex(doc, change)
+  if (!held && isCortexKind(doc.kind)) {
+    editable().demo.saveCortex(doc, change)
     return
   }
   const ref: BlockRef = held?.ref ?? { id: doc.id, layer: "private", store: "sealed" }
@@ -68,6 +68,7 @@ const savedWidth = () => {
 export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft" | "workspace.add-image"
   | "visibility.preview" | "visibility.move"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
+  | "cortex.observe"
 
 type State = {
   side: Side
@@ -120,6 +121,7 @@ let state: State = {
     "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true, "workspace.add-image": true,
     "visibility.preview": true, "visibility.move": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
+    "cortex.observe": true,
   },
 }
 const listeners = new Set<() => void>()
@@ -543,6 +545,89 @@ export function disconnect(id: string, toSlug: string) {
   if (!doc?.connect || doc.visibility !== "private") return
   doc.connect = doc.connect.filter(c => c.to !== toSlug)
   persist(doc)
+  set(refresh())
+}
+
+// ─── The cortex: what the person changes in it (cortex/docs/model.md, "Who may change what") ───
+
+const cortexDoc = (id: string) => {
+  const doc = draftOf(id)
+  if (!doc || isBlock(doc) || !isCortexKind(doc.kind)) throw new DOMException("There is no such part of your cortex.", "NotFoundError")
+  return doc
+}
+const today = () => new Date().toISOString().slice(0, 10)
+
+/** The person edits the text of a cortex part: the profile, an observation, a skill or a tool. Saved as they type. */
+export function editCortex(id: string, body: string) {
+  const doc = cortexDoc(id)
+  if (doc.body === body) return
+  doc.body = body
+  doc.updated = today()
+  persist(doc)
+  set(refresh())
+}
+
+const OBSERVATION_LIMIT = 2000
+/**
+ * Writes an observation: the person's own, or an agent's in the page once the person approved it
+ * (the cortex.observe tool). `about` is what it is about: block IDs, or channels as channel:<path>.
+ * Returns its id and title.
+ */
+export function writeObservation(input: { text: string; about?: string[] }, why?: string) {
+  const text = input.text.trim()
+  if (!text || [...text].length > OBSERVATION_LIMIT) throw new DOMException(`An observation is what was seen, at most ${OBSERVATION_LIMIT} characters`, "DataError")
+  const about = [...new Set(input.about ?? [])]
+  if (about.length > 20 || about.some(item => item.startsWith("channel:") ? !channelRecords.some(c => `channel:${c.path}` === item) && !blocks.some(b => channelsOf(b).includes(item.slice(8))) : !isBlock(byId(item)))) {
+    throw new DOMException("about is up to 20 blocks in this home, by id, or channels as channel:<path>", "DataError")
+  }
+  const doc: Doc = {
+    id: `observation-${newNodeId()}`, kind: "observation", title: text.split("\n")[0].slice(0, 80), slug: "", body: text,
+    visibility: "private", updated: today(), ...(about.length ? { about } : {}),
+  }
+  doc.slug = doc.id
+  editable().demo.saveCortex(doc, undefined, why)
+  usedSlugs.add(doc.slug)
+  set(refresh())
+  const made = byId(doc.id)!
+  return { id: made.id, title: made.title, about }
+}
+
+/** Pins an observation, so every agent session is handed it, or unpins it. Only the person does this. */
+export function pinObservation(id: string, pin: boolean) {
+  const doc = cortexDoc(id)
+  if (doc.kind !== "observation") throw new DOMException("Only an observation is pinned", "DataError")
+  if (!!doc.pin === pin) return
+  if (pin) doc.pin = true; else delete doc.pin
+  persist(doc)
+  set(refresh())
+}
+
+/** Switches a tool on, so agents may use it, or off. Only the person does this. */
+export function switchTool(id: string, on: boolean) {
+  const doc = cortexDoc(id)
+  if (doc.kind !== "tool") throw new DOMException("Only a tool is switched on or off", "DataError")
+  if (!!doc.on === on) return
+  doc.on = on
+  persist(doc)
+  set(refresh())
+}
+
+/** Forgets an observation, or removes a skill. The cortex keeps it, so it can be restored. */
+export function forgetCortex(id: string) {
+  const doc = cortexDoc(id)
+  if (doc.kind !== "observation" && doc.kind !== "skill") throw new DOMException("Only an observation or a skill is removed", "DataError")
+  editable().demo.removeCortex(id)
+  for (const s of Object.values(marks)) s.delete(id)
+  const wasOpen = state.view.kind === "doc" && state.view.id === id
+  set({ ...refresh(), history: state.history.filter(h => h !== id), ...(wasOpen ? { view: { kind: "empty" } as View } : {}) })
+}
+
+/** What agents proposed and asked for, waiting for the person. */
+export const cortexWaiting = () => sampleWorkspace()?.demo.waiting() ?? { profile: [], skills: [], tools: [] }
+
+/** The person's answer: a profile line accepted or declined, a skill approved or declined. */
+export async function answerCortex(kind: "profile" | "skill", id: string, yes: boolean) {
+  await editable().demo.answer(kind, id, yes)
   set(refresh())
 }
 

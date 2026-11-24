@@ -1,7 +1,7 @@
 // Synthetic data for the wireframe. No real person, no real records.
 
 import { newNodeId } from "../../../vault/vault/node.mjs"
-import type { Doc, Entity, InboxItem } from "./workspace-model"
+import type { CortexWaiting, Doc, Entity, InboxItem } from "./workspace-model"
 
 export const owner: Entity = { did: "did:plc:example0wner", handle: "mira.example", name: "Mira" }
 
@@ -95,6 +95,13 @@ export const cortex: Doc[] = [
   { id: fixtureIds.slowness, kind: "observation", by: "claude-code", about: [fixtureIds.slow, fixtureIds.tokyo, fixtureIds.dusk], title: "Slowness ties the essays to the photos", slug: "slowness-thread", visibility: "private", updated: "2026-11-15",
     body: "# Slowness ties the essays to the photos\n\nNoticed, not said. [[slow-software]] links to [[tokyo-walks]]; [[yanaka-dusk]] returns to the same street later; all three were collected into the slowness channel. The essays and the walks argue the same thing in two forms." },
 ]
+
+// What agents proposed for Mira, waiting for her answer in Settings › Cortex.
+export const waiting: CortexWaiting = {
+  profile: [{ id: "p-short-titles", heading: "Preferences", line: "Titles stay under five words.", by: "claude-code", quote: "Shorter. Always shorter titles." }],
+  skills: [{ name: "caption-photos", description: "Write a photo's caption in one line", text: "---\nname: caption-photos\ndescription: Write a photo's caption in one line\n---\nOne line: the place, then the light.\n", by: "codex" }],
+  tools: [{ name: "send-postcard", description: "Send a printed postcard of a photo", by: "codex" }],
+}
 
 export const inbox: InboxItem[] = [
   { id: "i1", kind: "reply", from: "june.example", text: "Writing everything twice is the only way I know.", at: "2026-11-14", ref: fixtureIds.garden, unread: true },

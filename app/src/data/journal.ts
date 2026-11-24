@@ -26,7 +26,9 @@ export type SessionLine = Common & { type: "session"; done: string; changes: str
 export type SaveLine = Common & { type: "save"; name: string; note?: string }
 export type Line = ChangeLine | SessionLine | SaveLine
 /** A change the vault's journal holds from before the workspace read the home, as a history line takes it. */
-export type PastChange = { at: string; node: string; actor: Actor; op?: ChangeOp; before?: Snapshot; after: Snapshot }
+export type PastChange = { at: string; node: string; actor: Actor; op?: ChangeOp; before?: Snapshot; after: Snapshot; owner?: HistoryOwner; reason?: string; ref?: string }
+/** A session an agent recorded in the cortex's journal: `changes` names its changes by their `ref`. */
+export type PastSession = { at: string; actor: Actor; done: string; changes: string[]; deadEnds: DeadEnd[] }
 
 export const snap = (d: Doc): Snapshot => ({
   title: d.title, body: d.body, kind: d.kind, homeChannel: d.homeChannel,
@@ -74,7 +76,7 @@ export function diffWords(a: string, b: string): DiffPart[] {
  * read from disk starts with the vault journal's changes (`past`), and with each block as it is
  * (`baseline`): what changes now is compared with how the block was when it was read.
  */
-export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>, { baseline = false, past = [] }: { baseline?: boolean; past?: readonly PastChange[] } = {}) {
+export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>, { baseline = false, past = [], sessions = [] }: { baseline?: boolean; past?: readonly PastChange[]; sessions?: readonly PastSession[] } = {}) {
   const byId = (id: string) => all.find(doc => doc.id === id)
   const journals: Record<HistoryOwner, Line[]> = { vault: [], cortex: [] }
   const historyLines = (owner?: HistoryOwner): readonly Line[] =>
@@ -231,17 +233,28 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
       { tried: "Connecting Reading list to Tokyo walks, day one", why: "Nothing on the list is about the walks" },
     ], day("2026-11-19", "09:12"))
   }
-  for (const change of past) {
+  // The vault's and the cortex's journals, as one timeline, by when each change was made.
+  const lineOf = new Map<string, string>()
+  const timeline = [...past.map(change => ({ at: change.at, change })), ...sessions.map(session => ({ at: session.at, session }))]
+    .sort((a, b) => a.at.localeCompare(b.at))
+  for (const item of timeline) {
+    if ("session" in item) {
+      const { at, actor: who, done, changes, deadEnds } = item.session
+      push<SessionLine>({ owner: "cortex", at, actor: who, type: "session", done, changes: changes.flatMap(ref => lineOf.get(ref) ?? []), deadEnds })
+      continue
+    }
+    const change = item.change
     const before = change.before && versionOf(change.before)
     if (change.before) versions.set(before!, change.before)
     const after = versionOf(change.after)
     versions.set(after, change.after)
     const op = change.op ?? opOf(change.before, change.after)
-    push<ChangeLine>({
-      owner: "vault", at: change.at, actor: change.actor, type: "change", node: change.node, op,
+    const line = push<ChangeLine>({
+      owner: change.owner ?? "vault", at: change.at, actor: change.actor, type: "change", node: change.node, op,
       ...(before ? { before } : {}), after, ...describe(change.before, change.after, op),
-      ...(op === "remove" ? { summary: "Removed it", fields: [] } : {}),
+      ...(op === "remove" ? { summary: "Removed it", fields: [] } : {}), ...(change.reason ? { reason: change.reason } : {}),
     })
+    if (change.ref) lineOf.set(change.ref, line.id)
   }
   if (baseline) {
     for (const doc of all) {

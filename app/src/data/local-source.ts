@@ -9,18 +9,20 @@
 // (vault/vault/rename.mjs), which rewrites what used the old path. History starts from the vault's
 // own journal. Who sees a block moves between Only you and Friends in its file, once the person has
 // approved; an agent's request for a move waits for them (/vault/requests). Public is Publish's.
-// What this source cannot do yet is said, and the file left as it is: public, and the cortex.
+// What this source cannot do yet is said, and the file left as it is: public. The cortex is read
+// beside the vault, into the workspace's own part, and written back through its own routes (local-cortex.ts).
 import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { heldNow, original } from "@/media/cache"
 import { docOf, fileOf } from "./block-document"
 import { bridgeFetch, type Bridge } from "./bridge"
 import { createJournal, snap, YOU, type Actor, type PastChange } from "./journal"
+import { cortexPast, createLocalCortex, type CortexJournal, type CortexParts } from "./local-cortex"
 import { createSampleSearch } from "./sample-search"
 import {
   emptyPlan, visibilityMove, type BlockHead, type BlockRef, type HomeFile, type HomeSource, type Layer, type VaultEvidence,
 } from "./source"
-import type { ChannelRecord, Doc, Entity, InboxItem } from "./workspace-model"
+import { blockKey, type ChannelRecord, type CortexWaiting, type Doc, type Entity, type InboxItem } from "./workspace-model"
 
 const visibleLayers: readonly Layer[] = ["public", "friends", "private"]
 const stale = () => new DOMException("The block changed. Read it again before saving.", "InvalidStateError")
@@ -157,7 +159,21 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
   }))
   const owner: Entity = { did: "", handle: listed.home, name: listed.home }
   const idAt = (path: string) => [...pathOf].find(([, at]) => at === path)?.[0]
-  const journal = createJournal(all, undefined, { baseline: true, past: journaled ? pastChanges(journaled, idAt) : [] })
+  // The cortex beside it, when the home has one; its history joins the vault's.
+  const read = <T,>(path: string) => bridgeFetch(path, {}, bridge).then(response => (response.ok ? response.json() as Promise<T> : undefined)).catch(() => undefined)
+  const [parts, cortexJournal] = await Promise.all([read<CortexParts>("/cortex/parts"), read<CortexJournal>("/cortex/journal?limit=500")])
+  const mind = createLocalCortex(parts, { bridge, later: (key, work) => later(key, work), failed: response => failed(response), actor: () => journal.actor() })
+  all.push(...mind.docs)
+  const remembered = cortexJournal ? cortexPast(cortexJournal) : { past: [], sessions: [] }
+  const journal = createJournal(all, undefined, {
+    baseline: true, past: [...(journaled ? pastChanges(journaled, idAt) : []), ...remembered.past], sessions: remembered.sessions,
+  })
+  // An observation about blocks points at them as evidence, at the versions they have now.
+  for (const doc of mind.docs) {
+    const about = doc.about?.filter(item => !item.startsWith("channel:") && pathOf.has(item))
+    if (about?.length) doc.evidence = about.map(id => ({ node: blockKey(id), version: journal.currentVersion(id)! }))
+  }
+  const noCortex = () => new DOMException("This home has no cortex yet. Start one with: ohmmmm init <handle>", "NotSupportedError")
   const versions = new Map<string, number>()
   let sequence = 0
   const versionOf = (id: string) => `local-${versions.get(id) ?? 0}`
@@ -272,18 +288,42 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
   }
 
   const source = {
-    // The workspace's own part: this home has no inbox or sample cortex; history starts from now.
+    // The workspace's own part: this home's cortex, read through the bridge; it has no inbox.
     demo: {
-      cortex: [] as Doc[], owner, entities, inbox: [] as InboxItem[], journal,
+      cortex: mind.docs, owner, entities, inbox: [] as InboxItem[], journal,
       markInboxRead() {},
-      saveCortex() { throw new DOMException("The cortex is not read through the bridge yet.", "NotSupportedError") },
+      /** Writes a cortex Doc back: the profile, an observation (new or changed), a skill's text, a tool. `why` is an agent's reason for a new observation. */
+      saveCortex(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3], why?: string) {
+        if (!parts) throw noCortex()
+        const isNew = !mind.docs.some(each => each.id === doc.id)
+        const saved = mind.save(doc, why)
+        if (isNew) all.push(saved)
+        journal.syncJournal(change)
+      },
+      /** Forgets an observation or removes a skill. */
+      removeCortex(id: string) {
+        if (!parts) throw noCortex()
+        mind.remove(id)
+        const at = all.findIndex(doc => doc.id === id)
+        if (at >= 0) all.splice(at, 1)
+        journal.syncJournal()
+      },
+      waiting: (): CortexWaiting => mind.waiting(),
+      /** The person's answer to a proposed profile line or skill; the cortex is read again after. */
+      async answer(kind: "profile" | "skill", id: string, yes: boolean) {
+        if (!parts) throw noCortex()
+        await mind.answer(kind, id, yes, () => queue)
+        for (const doc of mind.docs) if (!all.includes(doc)) all.push(doc)
+        journal.syncJournal()
+        onChange()
+      },
     },
     /** Where this home is: its handle, and the bridge it is read through. */
     home: { handle: listed.home, url: bridge.url },
     /** Every change written back so far, for tests. */
     settled: () => queue,
     /** Whether a change is not on disk yet, so leaving the page would lose it. */
-    unsent: () => [...files].some(([path, held]) => held.text !== held.sent && !refused.has(path)),
+    unsent: () => [...files].some(([path, held]) => held.text !== held.sent && !refused.has(path)) || mind.unsent(key => refused.has(key)),
     account() { return { did: null, user: { name: listed.home }, mirrored: false, service: null } },
     listBlocks(layers: readonly Layer[] = visibleLayers) {
       return blocks.filter(doc => layers.includes(doc.visibility)).map((doc): BlockHead => {

@@ -12,7 +12,7 @@ const missing = () => new DOMException("There is no such sample block.", "NotFou
 const stale = () => new DOMException("The sample block changed. Read it again before saving.", "InvalidStateError")
 
 export function createSampleSource() {
-  const { blocks, cortex, owner, entities, inbox, fixtureIds } = structuredClone({ ...fixtures })
+  const { blocks, cortex, owner, entities, inbox, fixtureIds, waiting } = structuredClone({ ...fixtures })
   const all = [...blocks, ...cortex]
   const journal = createJournal(all, fixtureIds)
   const channels: ChannelRecord[] = []
@@ -58,11 +58,43 @@ export function createSampleSource() {
         const item = inbox.find(item => item.id === id)
         if (item) item.unread = false
       },
-      saveCortex(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) {
+      saveCortex(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3], _why?: string) {
         const held = cortex.find(node => node.id === doc.id)
-        if (!held) throw missing()
-        Object.assign(held, doc)
+        if (held) Object.assign(held, doc)
+        else if (doc.kind === "observation") { const made = { ...doc, by: journal.actor().kind === "agent" ? journal.actor().name : "you" }; cortex.push(made); all.push(made) }
+        else throw missing()
         journal.syncJournal(change)
+      },
+      removeCortex(id: string) {
+        const held = cortex.find(node => node.id === id)
+        if (!held) return
+        cortex.splice(cortex.indexOf(held), 1)
+        all.splice(all.indexOf(held), 1)
+        journal.syncJournal()
+      },
+      waiting: () => waiting,
+      /** Accepting a line adds it under its heading; approving a skill adds it. In the sample, until reload. */
+      async answer(kind: "profile" | "skill", id: string, yes: boolean) {
+        if (kind === "profile") {
+          const line = waiting.profile.find(each => each.id === id)
+          if (!line) throw missing()
+          waiting.profile.splice(waiting.profile.indexOf(line), 1)
+          const profile = cortex.find(node => node.kind === "profile")
+          if (yes && profile) {
+            const heading = new RegExp(`(## ${line.heading}\\n\\n(?:- .*\\n?)*)`)
+            profile.body = heading.test(profile.body) ? profile.body.replace(heading, match => `${match.replace(/\n*$/, "\n")}- ${line.line}\n`) : `${profile.body.trimEnd()}\n\n## ${line.heading}\n\n- ${line.line}\n`
+          }
+        } else {
+          const skill = waiting.skills.find(each => each.name === id)
+          if (!skill) throw missing()
+          waiting.skills.splice(waiting.skills.indexOf(skill), 1)
+          if (yes) {
+            const made: Doc = { id: newNodeId(), kind: "skill", title: skill.name, slug: skill.name, description: skill.description, visibility: "private", updated: new Date().toISOString().slice(0, 10), body: skill.text.replace(/^---\n[\s\S]*?\n---\n/, "").trim() }
+            cortex.push(made)
+            all.push(made)
+          }
+        }
+        journal.syncJournal()
       },
     },
     account() { return { did: owner.did, user: { name: owner.name }, mirrored: false, service: null } },

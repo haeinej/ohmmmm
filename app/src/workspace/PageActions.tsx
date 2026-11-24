@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { notify } from "@/components/ui/notice"
-import { byId, titleOf } from "@/data/workspace-data"
+import { byId, isBlock, titleOf } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
-import { createChannel, deleteDoc, renameDoc, renameChannel, revealFolder } from "./store"
+import { createChannel, deleteDoc, forgetCortex, renameDoc, renameChannel, revealFolder } from "./store"
 
 /**
  * A name edited in place: the text selected, a forest ring. Enter or leaving keeps it; Escape puts
@@ -90,9 +90,11 @@ export function DeleteDialog() {
     <Dialog open={!!doc} onOpenChange={o => !o && close()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Delete “{doc && titleOf(doc)}”?</DialogTitle>
+          <DialogTitle>{doc && !isBlock(doc) ? (doc.kind === "observation" ? "Forget" : "Remove") : "Delete"} “{doc && titleOf(doc)}”?</DialogTitle>
           <DialogDescription>
-            {doc?.visibility === "private"
+            {doc && !isBlock(doc)
+              ? "It leaves your cortex, so agents no longer read it. The cortex keeps it in its history, so it can be restored."
+              : doc?.visibility === "private"
               ? "It is removed from your vault. This cannot be undone."
               : "It is removed from your vault. If it is published, taking down the post is its own step, and copies others made stay where they are."}
           </DialogDescription>
@@ -102,10 +104,10 @@ export function DeleteDialog() {
           <Button variant="destructive" onClick={() => {
             if (!doc) return
             const t = titleOf(doc)
-            deleteDoc(doc.id)
-            notify({ message: `Deleted “${t}”`, tone: "info" })
+            if (isBlock(doc)) deleteDoc(doc.id); else forgetCortex(doc.id)
+            notify({ message: `${isBlock(doc) ? "Deleted" : doc.kind === "observation" ? "Forgot" : "Removed"} “${t}”`, tone: "info" })
             close()
-          }}>Delete</Button>
+          }}>{doc && !isBlock(doc) ? (doc.kind === "observation" ? "Forget" : "Remove") : "Delete"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

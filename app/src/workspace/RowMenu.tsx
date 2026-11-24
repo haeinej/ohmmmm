@@ -161,7 +161,7 @@ export function RowMenu({ container }: { container: HTMLElement | null }) {
       case "u": toggleUnread(id); break
       case "r": if (!post) return false; startRename(rowId); return true
       case "a": if (!post) return false; toggleArchive(id); done(marks.archived.has(id) ? `Archived “${titleOf(doc)}”` : `Restored “${titleOf(doc)}”`); break
-      case "d": if (!post) return false; requestDelete(id); break
+      case "d": if (!post && doc.kind !== "observation" && doc.kind !== "skill") return false; requestDelete(id); break
       default: return false
     }
     setMenuOpen(false)
@@ -260,7 +260,7 @@ export function RowMenu({ container }: { container: HTMLElement | null }) {
             </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={!post} onClick={() => run("a", doc.id)}>{marks.archived.has(doc.id) ? "Restore" : "Archive"}<DropdownMenuShortcut>A</DropdownMenuShortcut></DropdownMenuItem>
-            <DropdownMenuItem disabled={!post} variant="destructive" onClick={() => run("d", doc.id)}>Delete<DropdownMenuShortcut>D</DropdownMenuShortcut></DropdownMenuItem>
+            <DropdownMenuItem disabled={!post && doc.kind !== "observation" && doc.kind !== "skill"} variant="destructive" onClick={() => run("d", doc.id)}>{post ? "Delete" : doc.kind === "observation" ? "Forget" : "Remove"}<DropdownMenuShortcut>D</DropdownMenuShortcut></DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
