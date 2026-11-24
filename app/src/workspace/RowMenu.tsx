@@ -13,7 +13,7 @@ import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { isBlock, locationOf, byId, channelRecords, channelsOf, docIdOf, placedIn, blocks, titleOf } from "@/data/workspace-data"
 import {
-  collect, createDraft, deleteChannel, marks, moveBlock, open, uncollect, setRepoMode, showGraph, toggleArchive, togglePin, toggleUnread, useWorkspace,
+  collect, createDraft, deleteChannel, marks, moveBlock, open, report, uncollect, setRepoMode, showGraph, toggleArchive, togglePin, toggleUnread, useWorkspace,
 } from "./store"
 import { InlineRename, InlineRenameChannel, requestDelete, startChannel } from "./PageActions"
 import { useLinkedHover } from "@/editor/LinkPreview"
@@ -140,12 +140,13 @@ export function RowMenu({ container }: { container: HTMLElement | null }) {
       if (k === "c" && !folder.includes("/")) { setMenuOpen(false); startChannel(folder); return true }
       if (k === "d") {
         setMenuOpen(false)
-        try { deleteChannel(folder); notify({ message: `Deleted the empty channel ${folder.replace("/", " › ")}`, tone: "info" }) }
-        catch (err) { notify({ message: (err as Error).message }) }
+        deleteChannel(folder)
+          .then(() => notify({ message: `Deleted the empty channel ${folder.replace("/", " › ")}`, tone: "info" }))
+          .catch(err => notify({ message: (err as Error).message }))
         return true
       }
       if (k === "n") {
-        createDraft({ homeChannel: folder })
+        void report(createDraft({ homeChannel: folder }))
         setMenuOpen(false)
         return true
       }
@@ -233,15 +234,15 @@ export function RowMenu({ container }: { container: HTMLElement | null }) {
                   const home = doc.homeChannel === c
                   return (
                     <DropdownMenuCheckboxItem key={c} disabled={home} checked={home || !!doc.channels?.includes(c)} onCheckedChange={on => {
-                      if (on) collect(doc.id, c); else uncollect(doc.id, c)
-                      notify({ message: `${on ? "Added to" : "Removed from"} ${c.replace("/", " › ")}`, tone: "info" })
+                      void report((on ? collect(doc.id, c) : uncollect(doc.id, c)).then(() =>
+                        notify({ message: `${on ? "Added to" : "Removed from"} ${c.replace("/", " › ")}`, tone: "info" })))
                     }}>{c.replace("/", " › ")}</DropdownMenuCheckboxItem>
                   )
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             {placed && (
-              <DropdownMenuItem onClick={() => { uncollect(doc.id, placed); notify({ message: `Removed from ${placed.replace("/", " › ")}`, tone: "info" }); setMenuOpen(false) }}>
+              <DropdownMenuItem onClick={() => { void report(uncollect(doc.id, placed)); notify({ message: `Removed from ${placed.replace("/", " › ")}`, tone: "info" }); setMenuOpen(false) }}>
                 Remove from {placed.split("/").at(-1)}
               </DropdownMenuItem>
             )}
@@ -251,8 +252,8 @@ export function RowMenu({ container }: { container: HTMLElement | null }) {
                 {/* Moves this row, as dragging it does: from the channel it shows in, to another. */}
                 {channels.map(f => (
                   <DropdownMenuCheckboxItem key={f} checked={f === (placed ?? here)} onCheckedChange={() => {
-                    const { published } = moveBlock(doc.id, placed ?? here, f)
-                    notify({ message: `Moved to ${f.replace("/", " › ")}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })
+                    void report(moveBlock(doc.id, placed ?? here, f).then(({ published }) =>
+                      notify({ message: `Moved to ${f.replace("/", " › ")}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })))
                     setMenuOpen(false)
                   }}>{f.replace("/", " › ")}</DropdownMenuCheckboxItem>
                 ))}

@@ -12,3 +12,6 @@ worker-configuration.d.ts
 feed/wrangler.site.jsonc
 service/wrangler.deploy.jsonc
 .claude/
+
+# Cirrus `pds init` "Save to file" writes the signing key here. It belongs in a password manager, never in git.
+cirrus/signing-key-backup-*.txt

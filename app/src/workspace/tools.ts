@@ -3,7 +3,7 @@ import { useEffect } from "react"
 import { search, type SearchInput } from "@/data/search"
 import { registerStepTool } from "@/webmcp"
 import type { Actor } from "@/data/journal"
-import { demoJournal } from "@/data/workspace-data"
+import { journalOf } from "@/data/workspace-data"
 import { record } from "./notifications"
 import { createDraft, open, setAgent, showGraph, useWorkspace, type ToolName } from "./store"
 
@@ -18,7 +18,7 @@ export function withAgent<I, O>(label: string, fn: (input: I, signal: AbortSigna
     signal.addEventListener("abort", clear)
     try {
       // What the tool changes is the agent's: history marks it as its version, and you can revert it.
-      const out = await demoJournal().actingAs(AGENT, () => fn(input, signal))
+      const out = await journalOf().actingAs(AGENT, () => fn(input, signal))
       setAgent({ state: "done", label })
       record({ kind: "agent", title: label, detail: "Done, through WebMCP" })
       setTimeout(clear, 1500)

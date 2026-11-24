@@ -4,12 +4,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { blobCid } from "../../vault/vault/core.mjs"
-import { publishedLayer, withVisibility } from "../../vault/vault/visibility.mjs"
+import { publishedLayer, withVisibility } from "../../vault/vault/visibility-folder.mjs"
 import { readProperties, splitFile } from "../../vault/vault/file.mjs"
 import { createLocalSource, fileId, mergeFile, UNPAIRED } from "../src/data/local-source"
-import { byId, bySlug, channelRecords, demoJournal } from "../src/data/workspace-data"
+import { byId, bySlug, channelRecords, journalOf } from "../src/data/workspace-data"
 import { memoryBackend, setMediaBackend } from "../src/media/cache"
-import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, setVisibility, sourceChanged } from "../src/workspace/store"
+import { addImage, approveMoveRequest, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, setVisibility, sourceChanged, waitingRequests } from "../src/workspace/store"
 
 const TID = "3m2zx5u6ifk2a"
 const bridge = { url: "http://127.0.0.1:8766", token: "QexdqYGJ2FZs7RkxcsaXaQMMXE0wJv3TqcHALTiddso" }
@@ -133,9 +133,9 @@ async function withHome(t: test.TestContext, files: Record<string, string> = HOM
   const problems: string[] = []
   let changed = 0
   // Wired as src/main.tsx wires it: the workspace reads again when the bridge's answer changed files.
-  const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) }, onChange: () => { changed++; sourceChanged() } })
+  const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) }, onChange: () => { changed++; return sourceChanged() } })
   await setSource(source)
-  t.after(async () => { globalThis.fetch = realFetch; await setSource() })
+  t.after(async () => { await source.settled(); globalThis.fetch = realFetch; await setSource(null) })
   return { ...home, source, problems, changes: () => changed }
 }
 
@@ -162,23 +162,23 @@ test("the home is read through the bridge, and an edit is written back merged, o
   assert.equal(bySlug("on-rain")!.visibility, "public")
 
   open(TID, "edit")
-  autosave(TID, { body: "Yanaka in the rain." })
-  assert.equal(byId(TID)!.body, "Yanaka in the rain.", "the workspace has it at once")
+  await autosave(TID, { body: "Yanaka in the rain." })
+  assert.equal(byId(TID)!.body, "Yanaka in the rain.", "the workspace has it as soon as the source answered")
   await source.settled()
   const saved = disk.get("notes/walk.md")!
   assert.match(saved, /^---\ntitle: Slow walk\nmood: calm\norigin: \/Users\/mira\/old\/walk\.md\ntags: \[yanaka, cats\]\nid: 3m2zx5u6ifk2a\nupdated: \d{4}-\d{2}-\d{2}\n---\n\nYanaka in the rain\.\n?$/)
   assert.ok(calls.includes("PUT /vault/file?notes/walk.md"))
 
   // Two edits in a row go in order, the second over the version the first wrote.
-  autosave(TID, { body: "Yanaka in the rain, then sun." })
-  autosave(TID, { title: "Rain, then sun" })
+  await autosave(TID, { body: "Yanaka in the rain, then sun." })
+  await autosave(TID, { title: "Rain, then sun" })
   await source.settled()
   assert.match(disk.get("notes/walk.md")!, /title: Rain, then sun[\s\S]*Yanaka in the rain, then sun\./)
   assert.deepEqual(problems, [])
 
   // Changed on disk meanwhile: nothing is written over it, and the person is told.
   disk.set("notes/walk.md", disk.get("notes/walk.md")!.replace("then sun", "then snow"))
-  autosave(TID, { body: "Mine." })
+  await autosave(TID, { body: "Mine." })
   await source.settled()
   assert.match(disk.get("notes/walk.md")!, /then snow/)
   assert.equal(problems.length, 1)
@@ -190,60 +190,61 @@ test("new blocks, images, channel order, moves and deletes reach the home", asyn
   setMediaBackend(memoryBackend())
   t.after(() => setMediaBackend(memoryBackend()))
 
-  const draft = createDraft({ homeChannel: "notes", title: "Lantern shop" })
-  saveDraft({ body: "Paper, wire, light." })
+  const draft = await createDraft({ homeChannel: "notes", title: "Lantern shop" })
+  await saveDraft({ body: "Paper, wire, light." })
+  const vaultId = byId(draft.id)!.vaultId!
   await source.settled()
   assert.ok(calls.includes("PUT /vault/file?notes/lantern-shop.md"))
   const made = disk.get("notes/lantern-shop.md")!
-  assert.match(made, new RegExp(`id: ${draft.id}`))
+  assert.match(made, new RegExp(`id: ${vaultId}`))
   assert.equal(props(made).visibility, undefined, "private is the default, so it is not written")
 
   // An image: the bridge writes the file and its block; a later caption merges onto what it wrote.
   const image = await addImage({ name: "Wet street.png", type: "image/png", bytes: PNG, channel: "notes", alt: "A wet street" })
   await source.settled()
   assert.equal(disk.get("notes/wet-street.png"), "bytes")
-  assert.match(disk.get("notes/wet-street.md")!, new RegExp(`id: ${image.id}`))
+  assert.match(disk.get("notes/wet-street.md")!, new RegExp(`id: ${byId(image.id)!.vaultId}`))
   open(image.id, "edit")
-  saveDraft({ body: "![[wet-street.png]]\n\nAfter the rain." })
+  await saveDraft({ body: "![[wet-street.png]]\n\nAfter the rain." })
   await source.settled()
   assert.match(disk.get("notes/wet-street.md")!, /^---\nkind: media\ntitle: Wet street\nalt: A wet street\nhash: b[a-z2-7]+\nmime: image\/png\nid: [a-z2-7]{13}\n[\s\S]*After the rain\./)
 
   // Into a channel's order: its _channel.md keeps its own properties and gains the order.
-  moveBlock(draft.id, "notes", "notes", { before: TID })
+  await moveBlock(draft.id, "notes", "notes", { before: TID })
   await source.settled()
   const channel = props(disk.get("notes/_channel.md")!)
   assert.deepEqual([channel.title, channel.kept], ["Notes", "yes"], "its own properties stay")
-  const order = channel.order as string[]
-  assert.equal(order.indexOf("lantern-shop") + 1, order.indexOf("walk"), "placed where it was dropped")
-  collect(draft.id, "essays")
+  // A private block's slug never goes into the readable _channel.md, which is shared with the channel.
+  assert.ok(!((channel.order as string[] | undefined) ?? []).includes("lantern-shop"))
+  await collect(draft.id, "essays")
   await source.settled()
   assert.deepEqual(props(disk.get("notes/lantern-shop.md")!).channels, ["essays"])
 
   // Moving a block to another folder goes through the bridge's rename: the file moves, a link to its
   // old path elsewhere is rewritten, and the workspace reads what changed again.
-  moveBlock(draft.id, "notes", "essays")
-  assert.equal(byId(draft.id)!.homeChannel, "essays", "the workspace has it at once")
+  await moveBlock(draft.id, "notes", "essays")
+  assert.equal(byId(draft.id)!.homeChannel, "essays", "the workspace has it as soon as the source answered")
   await source.settled()
   assert.equal(disk.has("notes/lantern-shop.md"), false)
-  assert.match(disk.get("essays/lantern-shop.md")!, new RegExp(`id: ${draft.id}`))
+  assert.match(disk.get("essays/lantern-shop.md")!, new RegExp(`id: ${vaultId}`))
   assert.match(disk.get("essays/link.md")!, /\[\[essays\/lantern-shop\]\]/)
   assert.ok(changes() > 0)
   assert.ok(calls.includes("POST /vault/rename"))
 
   // A channel renamed is one folder renamed, not a move per block.
   const before = calls.length
-  renameChannel("notes", "journal")
+  await renameChannel("notes", "journal")
   await source.settled()
   assert.deepEqual(calls.slice(before).filter(call => call.startsWith("POST")), ["POST /vault/rename"])
   assert.ok(disk.has("journal/walk.md") && !disk.has("notes/walk.md"))
   assert.equal(byId(TID)!.homeChannel, "journal")
   assert.ok(channelRecords.some(channel => channel.path === "journal"))
   // Afterwards the moved block is still edited over the version the rename left.
-  autosave(TID, { body: "After the move." })
+  await autosave(TID, { body: "After the move." })
   await source.settled()
   assert.match(disk.get("journal/walk.md")!, /mood: calm[\s\S]*After the move\./)
 
-  deleteDoc(draft.id)
+  await deleteDoc(draft.id)
   await source.settled()
   assert.equal(disk.has("essays/lantern-shop.md"), false)
   assert.deepEqual(problems, [])
@@ -263,15 +264,15 @@ test("history starts from the vault's journal: who changed what, and the version
   const { source } = await withHome(t, HOME, journal)
   const versions = source.history({ id: TID, layer: "private", store: "sealed" })
   assert.equal(versions.length, 2, "both kept versions; a change never kept is left out")
-  const lines = demoJournal().linesFor(TID)
+  const lines = journalOf().linesFor(TID)
   assert.deepEqual(lines.map(line => [line.op, line.actor.kind, line.actor.name]), [["create", "human", "you"], ["edit", "agent", "claude-code"]])
-  assert.equal(demoJournal().snapshotAt(lines[0].after)!.body, "Yanaka.")
+  assert.equal(journalOf().snapshotAt(lines[0].after)!.body, "Yanaka.")
   // A change made now follows on from the block as it was read, by you.
   open(TID, "edit")
-  autosave(TID, { body: "Yanaka, now." })
-  const now = demoJournal().linesFor(TID)
+  await autosave(TID, { body: "Yanaka, now." })
+  const now = journalOf().linesFor(TID)
   assert.deepEqual(now.map(line => line.op), ["create", "edit", "edit"])
-  assert.equal(demoJournal().snapshotAt(now[2].before!)!.body, "Yanaka, lanterns, cats.")
+  assert.equal(journalOf().snapshotAt(now[2].before!)!.body, "Yanaka, lanterns, cats.")
   await source.settled()
 })
 
@@ -280,42 +281,44 @@ test("who sees a block moves in its file once the person approves; public is Pub
   const { disk, calls, source, problems } = await withHome(t, HOME, undefined, requests)
 
   // The person, after the control's approval: the file is rewritten, and still reads as the same block.
-  setVisibility(TID, "friends")
-  assert.equal(byId(TID)!.visibility, "friends", "the workspace has it at once")
+  await setVisibility(TID, "friends")
+  assert.equal(byId(TID)!.visibility, "friends", "the workspace has it as soon as the source answered")
   await source.settled()
   assert.ok(calls.includes("POST /vault/visibility"))
   // Only the layer changed: the file gains visibility, and kind so it stays a block, and nothing else.
   assert.equal(disk.get("notes/walk.md"), HOME["notes/walk.md"].replace(`id: ${TID}\n`, `id: ${TID}\nkind: text\nvisibility: friends\n`))
   // Back to only you, by the person: the property goes, kind stays.
-  setVisibility(TID, "private")
+  await setVisibility(TID, "private")
   await source.settled()
   assert.equal(props(disk.get("notes/walk.md")!).visibility, undefined)
-  setVisibility(TID, "friends")
+  await setVisibility(TID, "friends")
   await source.settled()
 
   // An agent's move, approved by the person in the page, is sent with the agent that asked.
-  await demoJournal().actingAs({ kind: "agent", name: "Agent in this page" }, async () => { setVisibility(TID, "private", "It names a friend.") })
+  await journalOf().actingAs({ kind: "agent", name: "Agent in this page" }, async () => { await setVisibility(TID, "private", { reason: "It names a friend." }) })
   await source.settled()
   assert.ok(calls.includes("asked by agent:Agent-in-this-page"))
-  setVisibility(TID, "friends")
+  await setVisibility(TID, "friends")
   await source.settled()
 
-  // Public is Publish's: nothing is sent, and the person is told.
+  // Public is Publish's: nothing is sent, and the caller is told.
   const before = calls.length
-  setVisibility(TID, "public")
+  await assert.rejects(setVisibility(TID, "public"), /goes through Publish/)
   await source.settled()
   assert.equal(calls.length, before)
   assert.equal(byId(TID)!.visibility, "friends")
-  assert.match(problems.at(-1)!, /goes through Publish/)
+  assert.deepEqual(problems, [])
 
   // An agent's request waits; approved, the bridge moves the block and the workspace reads it again.
-  const waiting = await source.requests()
-  assert.deepEqual(waiting.map(each => [each.by, each.to]), [["agent:claude-code", "friends"]])
-  const decided = await source.decide(waiting[0].id, true)
-  assert.equal(decided.status, "approved")
+  // It is in the bell with the others: approved there, the same move runs, and the request is marked approved.
+  const waiting = waitingRequests()
+  assert.deepEqual(waiting.map(each => [each.askedBy, each.to, each.reason]), [["agent:claude-code", "friends", "To share with June."]])
+  await approveMoveRequest(waiting[0].id)
+  await source.settled()
+  assert.equal(requests[0].status, "approved")
   assert.equal(bySlug("no-id")!.visibility, "friends")
   assert.equal(props(disk.get("notes/no-id.md")!).visibility, "friends")
-  assert.deepEqual(await source.requests(), [])
+  assert.deepEqual(await source.moves.requests(), [])
 })
 
 test("publishing goes through the plan the person saw, and the file is marked by the bridge's answer", async t => {
@@ -328,7 +331,7 @@ test("publishing goes through the plan the person saw, and the file is marked by
 
   // Changed after the plan: the plan is stale, and nothing is published.
   open(TID, "edit")
-  autosave(TID, { body: "Yanaka at night." })
+  await autosave(TID, { body: "Yanaka at night." })
   await assert.rejects(source.publishBlock(ref, walks), /changed since you saw the plan/)
   assert.ok(!calls.includes("POST /vault/publish"))
 
@@ -347,7 +350,7 @@ test("publishing goes through the plan the person saw, and the file is marked by
   assert.equal(props(disk.get("notes/walk.md")!).visibility, "friends")
 })
 
-test("a key the bridge no longer takes says how to pair again, and leaves the workspace on the sample", async t => {
+test("a key the bridge no longer takes says how to pair again", async t => {
   const realFetch = globalThis.fetch
   globalThis.fetch = (async () => new Response(JSON.stringify({ error: "This is the agent key." }), { status: 403, headers: { "Content-Type": "application/json" } })) as typeof fetch
   t.after(() => { globalThis.fetch = realFetch })

@@ -1,8 +1,10 @@
-// The visibility pills show each block's layer. Widening access asks for approval, and an agent's move
-// (the visibility.move tool) always does, wider or narrower. On the home on this computer a move rewrites
-// the block's file (docs/serve.md); Everyone opens Publish (PublishDialog), and taking a public block back
-// first takes its post down. Publishing is the person's: no tool does it. The tree's rows are ohm-ui's,
-// so the pills sit over them, measured from the rows.
+// The visibility pills show each block's layer. Every move shows its preview first (the shared rules,
+// vault/vault/visibility.mjs); one that shows a block to more people asks for approval, and public
+// is finished on the Publish page, which previews the one post. While the pills are on screen, an
+// agent has the same two steps as tools: visibility.preview and visibility.move. On the home on this
+// computer (ohmmmm serve) public is Publish's dialog instead (PublishDialog): the bridge writes the post
+// to the person's PDS, and taking a public block back first takes its post down.
+// The tree's rows are ohm-ui's, so the pills sit over them, measured from the rows.
 import { useEffect, useLayoutEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import { CheckIcon, GlobeIcon, LockIcon, UsersIcon } from "lucide-react"
@@ -11,13 +13,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import { blockVersion, getSource, isBlock, byId, docIdOf, titleOf, type Doc, type Visibility } from "@/data/workspace-data"
-import { visibilityMove } from "@/data/source"
+import { getSource, isBlock, byId, docIdOf, titleOf, type Doc, type Visibility } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
+import { previewMove, setVisibility, useWorkspace } from "./store"
 import { registerStepTool } from "@/webmcp"
 import { PublishDialog, TakeDownDialog } from "./PublishDialog"
-import { setVisibility, useWorkspace } from "./store"
-import { withAgent } from "./tools"
+
+/** Whether the workspace is the home on this computer, which publishes through its own dialog. */
+const onThisComputer = () => { const source = getSource(); return !!source && "home" in source }
 
 export const VISIBILITY: Record<Visibility, { label: string; icon: LucideIcon }> = {
   private: { label: "Only you", icon: LockIcon },
@@ -26,71 +29,15 @@ export const VISIBILITY: Record<Visibility, { label: string; icon: LucideIcon }>
 }
 const openness: Record<Visibility, number> = { private: 0, friends: 1, public: 2 }
 type Mark = { id: string; top: number; height: number }
-/** A move waiting for the person: theirs, or an agent's, which carries its reason and the tool's answer. */
-type Asking = { doc: Doc; to: Visibility; agent?: { why?: string; answer: (approved: boolean) => void } }
-
-export const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish, which only the person does: they choose Everyone on the block and approve its plan."
-/** Whether the workspace is the home on this computer, whose moves rewrite its files. */
-const onThisComputer = () => "home" in getSource()
-
-/** What a move would do, as the visibility.preview tool answers it. */
-export function previewMove(id: string, to: Visibility) {
-  const doc = byId(id)
-  const held = blockVersion(id)
-  if (!isBlock(doc) || !held) throw new DOMException("There is no such block.", "DataError")
-  if (to === "public" || doc.visibility === "public") throw new DOMException(PUBLISH, "DataError")
-  if (doc.visibility === to) return { id, from: doc.visibility, to, unchanged: true }
-  const move = visibilityMove(held.ref, to)
-  return {
-    id, from: doc.visibility, to, warning: move.warning,
-    ...(onThisComputer() ? { where: "It is rewritten in its file on this computer, and shared only once the home syncs with the vault service." } : {}),
-  }
-}
 
 export function VisibilityMarks({ container }: { container: HTMLElement | null }) {
   const { rev, showVisibility, agentsAllowed, offered } = useWorkspace()
   const [marks, setMarks] = useState<Mark[]>([])
-  const [asking, setAsking] = useState<Asking | null>(null)
+  const [asking, setAsking] = useState<{ doc: Doc; to: Visibility; warning: string; answer?: (ok: boolean) => void } | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [publishing, setPublishing] = useState<Doc | null>(null)
   const [takingDown, setTakingDown] = useState<{ doc: Doc; to: "private" | "friends" } | null>(null)
   const local = onThisComputer()
-
-  // The control's tools, while it is on screen (app/AGENTS.md rule 4). A move by an agent always asks.
-  useEffect(() => {
-    if (!showVisibility || !agentsAllowed) return
-    const ac = new AbortController()
-    const target = { id: { type: "string", maxLength: 200 }, to: { enum: ["private", "friends", "public"] } }
-    if (offered["visibility.preview"]) {
-      registerStepTool<{ id: string; to: Visibility }, ReturnType<typeof previewMove>>({
-        name: "visibility.preview", title: "Who can see it",
-        description: "Says what moving a block to other people would do, and what it warns, without moving it. Returns the move.",
-        inputSchema: { type: "object", properties: target, required: ["id", "to"], additionalProperties: false },
-        annotations: { readOnlyHint: true },
-        run: async ({ id, to }) => previewMove(id, to),
-      }, ac.signal).catch(console.error)
-    }
-    if (offered["visibility.move"]) {
-      registerStepTool<{ id: string; to: Visibility; why?: string }, { id: string; visibility: Visibility }>({
-        name: "visibility.move", title: "Change visibility",
-        description: "Asks the person to move a block between only them and friends. Nothing moves until they approve it in the page; public goes through Publish. Say why in one line. Returns the block's id and its visibility.",
-        inputSchema: { type: "object", properties: { ...target, why: { type: "string", maxLength: 500 } }, required: ["id", "to"], additionalProperties: false },
-        annotations: { consequentialHint: true },
-        approve: ({ id, to, why }, signal) => new Promise<boolean>((resolve, reject) => {
-          const preview = previewMove(id, to)
-          if ("unchanged" in preview) return resolve(true)
-          setAsking({ doc: byId(id)!, to, agent: { why, answer: resolve } })
-          signal.addEventListener("abort", () => { setAsking(null); reject(new DOMException("Cancelled", "AbortError")) })
-        }),
-        run: withAgent("Changing who can see a block", async ({ id, to, why }) => {
-          // Journaled with the agent that asked and its reason, approved by the person above.
-          if (byId(id)?.visibility !== to) setVisibility(id, to, why)
-          return { id, visibility: byId(id)!.visibility }
-        }),
-      }, ac.signal).catch(console.error)
-    }
-    return () => ac.abort()
-  }, [showVisibility, agentsAllowed, offered])
 
   // Measure every block row, again whenever the tree changes shape.
   useLayoutEffect(() => {
@@ -114,24 +61,56 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
     return () => { mo.disconnect(); ro.disconnect() }
   }, [container, showVisibility, rev])
 
+  const move = (doc: Doc, to: Visibility) => setVisibility(doc.id, to).then(result => {
+    if (result.publish) {
+      notify({ message: `“${titleOf(doc)}” is marked for ${VISIBILITY[to].label.toLowerCase()}. Finish it on the Publish page.`, tone: "info" })
+      window.open(result.publish, "_blank", "noopener")
+    } else notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" })
+    return result
+  })
   const change = (doc: Doc, to: Visibility) => {
-    // Everyone again, on a public block: its post is updated to the block as it is now.
+    // Everyone again, on a public block in the home on this computer: its post is updated to the block as it is now.
     if (local && to === "public") return setPublishing(doc)
     if (to === doc.visibility) return
     if (local && doc.visibility === "public") return setTakingDown({ doc, to: to === "friends" ? "friends" : "private" })
-    if (openness[to] > openness[doc.visibility]) return setAsking({ doc, to })
-    setVisibility(doc.id, to)
-    notify({ message: `“${titleOf(doc)}” is now for ${VISIBILITY[to].label.toLowerCase()}`, tone: "info" })
+    let warning: string
+    try { warning = previewMove(doc.id, to).warning } catch (err) { return notify({ message: (err as Error).message }) }
+    // Showing it to more people, or anything that goes through Publish, asks first.
+    if (openness[to] > openness[doc.visibility] || to === "public" || doc.visibility === "public") return setAsking({ doc, to, warning })
+    move(doc, to).catch(err => notify({ message: (err as Error).message }))
   }
-  const answer = (approved: boolean) => {
-    if (!asking) return
-    if (asking.agent) asking.agent.answer(approved)
-    else if (approved) {
-      setVisibility(asking.doc.id, asking.to)
-      notify({ message: `“${titleOf(asking.doc)}” is now for ${VISIBILITY[asking.to].label.toLowerCase()}${local && asking.to === "friends" ? ", once your home syncs" : ""}`, tone: "info" })
-    }
-    setAsking(null)
-  }
+
+  // An agent's way in: the same preview and the same move, which stops at the same dialog.
+  useEffect(() => {
+    if (!showVisibility || !agentsAllowed) return
+    const steps = new AbortController()
+    const schema = { type: "object", properties: { id: { type: "string" }, to: { type: "string", enum: ["private", "friends", "public"] } }, required: ["id", "to"] } as const
+    if (offered["visibility.preview"]) void registerStepTool<{ id: string; to: Visibility }, ReturnType<typeof previewMove>>({
+      name: "visibility.preview", title: "Who can see it",
+      description: "What moving one block to another layer would do: the action, whether it shows the block to more people, the warning, and what it still needs. Changes nothing.",
+      inputSchema: schema, annotations: { readOnlyHint: true },
+      run: async ({ id, to }) => previewMove(id, to),
+    }, steps.signal)
+    if (offered["visibility.move"]) void registerStepTool<{ id: string; to: Visibility }, Awaited<ReturnType<typeof setVisibility>>>({
+      name: "visibility.move", title: "Change visibility",
+      description: "Moves one block to another layer after the person approves the preview in a dialog. A move to or from public opens the Publish page for that post. Returns the block's id, its layer and the Publish page if any.",
+      inputSchema: schema, annotations: { consequentialHint: true },
+      approve: ({ id, to }, signal) => new Promise<boolean>((resolve, reject) => {
+        const doc = byId(id)
+        if (!isBlock(doc)) return reject(new DOMException("Only blocks have visibility", "DataError"))
+        let warning: string
+        try { warning = previewMove(id, to).warning } catch (err) { return reject(err) }
+        signal.addEventListener("abort", () => { setAsking(null); reject(new DOMException("Cancelled", "AbortError")) })
+        setAsking({ doc, to, warning, answer: resolve })
+      }),
+      run: async ({ id, to }) => {
+        const doc = byId(id)
+        if (!isBlock(doc)) throw new DOMException("Only blocks have visibility", "DataError")
+        return move(doc, to)
+      },
+    }, steps.signal)
+    return () => steps.abort()
+  }, [showVisibility, agentsAllowed, offered]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!showVisibility) return null
   return <>
@@ -172,30 +151,24 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
     {publishing ? <PublishDialog doc={publishing} onClose={() => setPublishing(null)} /> : null}
     {takingDown ? <TakeDownDialog doc={takingDown.doc} to={takingDown.to} onClose={() => setTakingDown(null)} /> : null}
 
-    <Dialog open={!!asking} onOpenChange={o => !o && answer(false)}>
+    <Dialog open={!!asking} onOpenChange={o => { if (!o) { asking?.answer?.(false); setAsking(null) } }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>
-            {asking?.agent ? "An agent asks: " : ""}
-            {asking && (asking.to === "private" ? `Make “${titleOf(asking.doc)}” only yours?` : `Show “${titleOf(asking.doc)}” to ${VISIBILITY[asking.to].label.toLowerCase()}?`)}
-          </DialogTitle>
-          <DialogDescription>
-            {asking?.agent?.why ? <>“{asking.agent.why}” </> : null}
-            {asking && moveNote(asking.doc, asking.to, local)}
-          </DialogDescription>
+          <DialogTitle>Show “{asking && titleOf(asking.doc)}” to {asking && VISIBILITY[asking.to].label.toLowerCase()}?</DialogTitle>
+          <DialogDescription>{asking?.warning}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => answer(false)}>{asking?.agent ? "Decline" : "Cancel"}</Button>
-          <Button onClick={() => answer(true)}>{asking?.agent ? "Approve" : "Change visibility"}</Button>
+          <Button variant="ghost" onClick={() => { asking?.answer?.(false); setAsking(null) }}>Cancel</Button>
+          <Button onClick={() => {
+            if (!asking) return
+            const { doc, to, answer } = asking
+            setAsking(null)
+            // An agent's call runs the move itself once approved; the button runs it here.
+            if (answer) return answer(true)
+            move(doc, to).catch(err => notify({ message: (err as Error).message }))
+          }}>Change visibility</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   </>
-}
-
-/** What the person reads before approving a move, here: the sample, or their home on this computer. */
-export function moveNote(doc: Doc, to: Visibility, local: boolean) {
-  if (!local) return "This changes the block’s visibility in the sample home. Publishing requires a separate preview and approval."
-  if (to === "friends") return "Its file on this computer is marked for friends. It is shared only once your home syncs with the vault service; then the service and the friends you choose can read it."
-  return `Its file on this computer is marked only yours.${doc.visibility === "friends" ? " Anything already shared stays where it was copied." : ""}`
 }

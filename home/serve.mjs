@@ -64,7 +64,7 @@ import { blockPost, publishedAddresses } from '../vault/vault/publish-block.mjs'
 import { memoryKv, ownStores, pdsStore } from '../vault/vault/stores.mjs';
 import { createVault } from '../vault/vault/vault.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
-import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility.mjs';
+import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
 import { findHome } from './home.mjs';
 

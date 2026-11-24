@@ -1,8 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { createSampleSource } from "../src/data/sample-source"
-import { blockKey, byId, channelRowId, demoJournal, docIdOf, placedIn } from "../src/data/workspace-data"
-import { fixtureIds } from "../src/data/sample"
+import { createFixtureSource, fixtureIds } from "./fixtures/fixture-source"
+import { blockKey, byId, channelByPath, channelRowId, docIdOf, journalOf, placedIn } from "../src/data/workspace-data"
 import { buildGraph } from "../src/graph/model"
 import { isPostId } from "../../vault/vault/file.mjs"
 import { search } from "../src/data/search"
@@ -11,13 +10,13 @@ import { blockOf, type BlockRef, type HomeFile } from "../src/data/source"
 import { collect, createDraft, deleteDoc, moveBlock, restoreVersion, saveDraft, setSource } from "../src/workspace/store"
 import { newNodeId } from "../../vault/vault/node.mjs"
 
-test("the sample workspace edits and collects blocks through the same data source search reads", async () => {
-  const sampleSource = createSampleSource()
+test("the workspace edits and collects blocks through the same data source search reads", async () => {
+  const sampleSource = createFixtureSource()
   await setSource(sampleSource)
-  const draft = createDraft({ title: "A synthetic reading list" })
+  const draft = await createDraft({ title: "A synthetic reading list" })
   try {
-    saveDraft({ body: "Alder lantern." })
-    collect(draft.id, "reading")
+    await saveDraft({ body: "Alder lantern." })
+    await collect(draft.id, "reading")
     const ref = (await sampleSource.listBlocks(["private"])).find(block => block.id === draft.id)!
     assert.equal(ref.layer, "private")
     const file = await sampleSource.readBlock(ref)
@@ -35,30 +34,31 @@ test("the sample workspace edits and collects blocks through the same data sourc
     assert.equal((await search({ query: "Alder lantern and river" }))[0].id, draft.id)
   } finally {
     await setSource(sampleSource)
-    deleteDoc(draft.id)
+    await deleteDoc(draft.id)
     assert.deepEqual(await search({ query: "Alder lantern" }), [])
     await setSource()
   }
 })
 
-test("draft kinds, history and channel moves use the same TID across placements", async () => {
-  const sampleSource = createSampleSource()
+test("draft kinds, history and channel moves keep one sealed ID and one vault TID across placements", async () => {
+  const sampleSource = createFixtureSource()
   await setSource(sampleSource)
-  const draft = createDraft({ homeChannel: "writing/journal", title: "Alder lantern" })
+  const draft = await createDraft({ homeChannel: "writing/journal", title: "Alder lantern" })
   try {
-    assert.ok(isPostId(draft.id))
+    assert.match(draft.id, /^[A-Za-z0-9_-]{16,64}$/)
+    assert.ok(isPostId(byId(draft.id)?.vaultId))
     assert.equal(byId(draft.id)?.kind, "text")
-    const initial = demoJournal().currentVersion(draft.id)!
-    saveDraft({ body: "https://example.test/alder-lantern" })
+    const initial = journalOf().currentVersion(draft.id)!
+    await saveDraft({ body: "https://example.test/alder-lantern" })
     assert.equal(byId(draft.id)?.kind, "link")
     const row = channelRowId(draft.id, "projects/tools")
     assert.equal(docIdOf(row), draft.id)
     assert.equal(placedIn(row), "projects/tools")
-    assert.ok(moveBlock(draft.id, "writing/journal", "projects/tools").homeChannelChanged)
+    assert.ok((await moveBlock(draft.id, "writing/journal", "projects/tools")).homeChannelChanged)
     assert.equal(byId(draft.id)?.homeChannel, "projects/tools")
     assert.ok((await sampleSource.connections()).some(edge =>
-      edge.kind === "contains" && edge.from === "channel:projects/tools" && edge.to === blockKey(draft.id)))
-    restoreVersion(draft.id, initial)
+      edge.kind === "contains" && edge.from === `channel:${channelByPath("projects/tools")!.id}` && edge.to === blockKey(byId(draft.id)!.vaultId!)))
+    await restoreVersion(draft.id, initial)
     assert.equal(byId(draft.id)?.homeChannel, "writing/journal")
     assert.equal(byId(draft.id)?.kind, "text")
   } finally {
@@ -66,8 +66,8 @@ test("draft kinds, history and channel moves use the same TID across placements"
   }
 })
 
-test("vault evidence and cortex observations refer to the same block keys and keep separate histories", async () => {
-  const sampleSource = createSampleSource()
+test("vault evidence and cortex observations refer to the same block keys, and observed edges are drawn apart", async () => {
+  const sampleSource = createFixtureSource()
   await setSource(sampleSource)
   try {
     const evidence = await sampleSource.connections()
@@ -75,22 +75,28 @@ test("vault evidence and cortex observations refer to the same block keys and ke
     assert.ok(evidence.some(edge => edge.from === garden && edge.to === blockKey(fixtureIds.slow) && edge.kind === "links"))
     assert.ok(evidence.some(edge => edge.from === garden && edge.kind === "mentions" && edge.to.startsWith("entity:")))
     const graph = buildGraph()
+    // Nodes are blocks only; the cortex is off by default.
     assert.ok(graph.nodes.some(node => node.id === garden))
+    assert.ok(graph.nodes.every(node => node.root === "vault"))
+    // People a block mentions and channels are not drawn; every edge is a connect between blocks.
+    assert.ok(graph.edges.every(edge => edge.source.startsWith("block:") && edge.target.startsWith("block:")))
+    assert.ok(graph.labels.some(label => label.name === "writing"))
+    assert.ok((graph.nodes.find(node => node.id === blockKey(fixtureIds.slow))?.backlinks ?? 0) >= 2)
     const observation = byId(fixtureIds.slowness)!
     assert.equal(observation.kind, "observation")
     assert.deepEqual(observation.about, [fixtureIds.slow, fixtureIds.tokyo, fixtureIds.dusk])
-    assert.ok(observation.evidence?.length)
-    // An observation about blocks is drawn as their connection, not as a node of its own.
-    const edge = graph.edges.find(each => [each.source, each.target].sort().join() === [blockKey(fixtureIds.slow), blockKey(fixtureIds.dusk)].sort().join())
-    assert.deepEqual(edge?.observed, [observation.title])
+    // An observation about blocks is an observed edge of its own, never merged with one the person made.
+    const pair = [blockKey(fixtureIds.slow), blockKey(fixtureIds.tokyo)].sort().join()
+    const between = graph.edges.filter(each => [each.source, each.target].sort().join() === pair)
+    assert.equal(between.length, 2)
+    assert.deepEqual(between.find(each => each.observed)?.observed, [observation.title])
+    assert.ok(between.some(each => !each.observed))
     assert.equal(graph.nodes.some(node => node.doc.id === observation.id), false)
-    for (const pointer of observation.evidence) {
-      assert.ok(pointer.node.startsWith("block:"))
-      assert.ok(demoJournal().snapshotAt(pointer.version))
-    }
-    assert.ok(demoJournal().historyLines("cortex").some(line => line.type === "change" && line.node === observation.id))
-    assert.ok(demoJournal().historyLines("vault").some(line => line.type === "change" && line.node === fixtureIds.garden))
-    assert.ok(demoJournal().historyLines("vault").every(line => line.type !== "change" || line.node !== observation.id))
+    const withCortex = buildGraph({ cortex: true })
+    assert.ok(withCortex.nodes.some(node => node.root === "cortex" && node.doc.kind === "skill"))
+    assert.ok(journalOf().historyLines("cortex").some(line => line.type === "change" && line.node === observation.id))
+    assert.ok(journalOf().historyLines("vault").some(line => line.type === "change" && line.node === fixtureIds.garden))
+    assert.ok(journalOf().historyLines("vault").every(line => line.type !== "change" || line.node !== observation.id))
     assert.equal((await search({ query: "June", scope: "entities" }))[0]?.kind, "entity")
   } finally {
     await setSource()

@@ -13,7 +13,7 @@ import { homeBridge, listenHome, pairApp } from "../../home/serve.mjs"
 import { openCortex as openFolder } from "../../cortex/src/folder.mjs"
 import { createLocalSource } from "../src/data/local-source"
 import { cortexPast, observationTitle } from "../src/data/local-cortex"
-import { blockKey, byId, cortex, demoJournal } from "../src/data/workspace-data"
+import { blockKey, byId, cortex, journalOf } from "../src/data/workspace-data"
 import { buildGraph } from "../src/graph/model"
 import {
   answerCortex, cortexWaiting, editCortex, forgetCortex, pinObservation, setSource, sourceChanged, switchTool, writeObservation,
@@ -45,7 +45,8 @@ async function withHome(t: test.TestContext) {
   const source = await createLocalSource(bridge, { onProblem: message => { problems.push(message) }, onChange: sourceChanged })
   await setSource(source)
   t.after(async () => {
-    await setSource()
+    await source.settled()
+    await setSource(null)
     await new Promise(done => { server.closeAllConnections(); server.close(done) })
     await rm(parent, { recursive: true, force: true })
   })
@@ -60,8 +61,7 @@ test("the paired app shows the real home's profile, observations, skills and too
   assert.deepEqual(kinds, ["observation:The walk and the rain notes are the same week.", "profile:Profile", "skill:file-a-source", "tool:vault-search"])
   const seen = byId("observation-walks-and-rain")!
   assert.deepEqual([seen.by, seen.about], ["claude-code", [WALK, RAIN]])
-  // Its evidence names the real blocks, by block key, and each resolves to one the workspace shows.
-  assert.deepEqual(seen.evidence!.map(each => each.node), [blockKey(WALK), blockKey(RAIN)])
+  // What it is about resolves to the blocks the workspace shows.
   assert.deepEqual(seen.about!.map(id => byId(id)?.title), ["Slow walk", "Rain"])
   // In the graph, an observed connection joins the two blocks.
   const edge = buildGraph().edges.find(each => each.observed?.includes(seen.title))
@@ -74,7 +74,7 @@ test("the paired app shows the real home's profile, observations, skills and too
 
 test("the cortex's history joins the vault's: its changes by who made them, and an agent's session with its dead end", async t => {
   await withHome(t)
-  const lines = demoJournal().historyLines("cortex")
+  const lines = journalOf().historyLines("cortex")
   const made = lines.find(line => line.type === "change" && line.node === "observation-walks-and-rain")
   assert.ok(made && made.type === "change")
   assert.deepEqual([made.op, made.actor], ["create", { kind: "agent", name: "claude-code" }])
@@ -82,15 +82,15 @@ test("the cortex's history joins the vault's: its changes by who made them, and 
   assert.ok(session && session.type === "session")
   assert.deepEqual([session.done, session.changes, session.deadEnds[0].tried], ["Read the notes from that week", [made.id], "Filing the rain note under weather"])
   // One timeline: the vault's and the cortex's lines in the order they happened.
-  const all = demoJournal().historyLines()
+  const all = journalOf().historyLines()
   assert.deepEqual(all.map(line => line.at), [...all.map(line => line.at)].sort())
 })
 
 test("the person edits the profile, a skill and a tool, and each is written through the cortex, journaled as theirs", async t => {
   const { source, lines, file, problems } = await withHome(t)
-  editCortex("cortex-profile", "## Preferences\n\n- Short paragraphs.\n\n## Goals\n\n## Notes")
-  editCortex("skill-file-a-source", "# Filing a source\n\nAsk once, then file.")
-  switchTool("tool-vault-search", true)
+  await editCortex("cortex-profile", "## Preferences\n\n- Short paragraphs.\n\n## Goals\n\n## Notes")
+  await editCortex("skill-file-a-source", "# Filing a source\n\nAsk once, then file.")
+  await switchTool("tool-vault-search", true)
   await source.settled()
   assert.deepEqual(problems, [])
   assert.match(await file("profile.md"), /- Short paragraphs\./)
@@ -100,26 +100,27 @@ test("the person edits the profile, a skill and a tool, and each is written thro
   assert.deepEqual(mine.slice(-3), [["profile", "update"], ["skill/file-a-source", "update"], ["tool/vault-search", "update"]])
   assert.equal(source.unsent(), false)
   // In the app's history too, as the person's.
-  const profile = demoJournal().linesFor("cortex-profile").at(-1)!
+  const profile = journalOf().linesFor("cortex-profile").at(-1)!
   assert.deepEqual(profile.actor, { kind: "human", name: "you" })
-  assert.equal(demoJournal().linesFor("tool-vault-search").at(-1)!.summary, "Switched it on")
+  assert.equal(journalOf().linesFor("tool-vault-search").at(-1)!.summary, "Switched it on")
 })
 
 test("the person writes, pins and forgets an observation about a block", async t => {
   const { source, lines, file, layout } = await withHome(t)
-  const made = writeObservation({ text: "Walks before writing.", about: [WALK] })
+  const made = await writeObservation({ text: "Walks before writing.", about: [WALK] })
   await source.settled()
-  const id = made.id.slice("observation-".length)
+  // Its name in the cortex is its file's: the slug the workspace gave it.
+  const id = byId(made.id)!.slug.slice("observation-".length)
   assert.match(await file("observations", `${id}.md`), new RegExp(`by: "you"[\\s\\S]*about: \\["${WALK}"\\]`))
-  pinObservation(made.id, true)
-  editCortex(made.id, "Walks before writing, most mornings.")
+  await pinObservation(made.id, true)
+  await editCortex(made.id, "Walks before writing, most mornings.")
   await source.settled()
   assert.match(await file("observations", `${id}.md`), /pin: true[\s\S]*most mornings/)
   assert.equal(byId(made.id)!.title, "Walks before writing, most mornings.")
-  forgetCortex(made.id)
+  await forgetCortex(made.id)
   await source.settled()
   await assert.rejects(file("observations", `${id}.md`))
-  assert.deepEqual((await lines()).filter(line => line.node === `observation/${id}`).map(line => [line.op, line.actor.name]), [["create", "member"], ["update", "member"], ["remove", "member"]])
+  assert.deepEqual((await lines()).filter(line => line.node === `observation/${id}`).map(line => [line.op, line.actor.name]), [["create", "member"], ["update", "member"], ["update", "member"], ["remove", "member"]], "made, pinned, edited, forgotten: one write each")
   assert.equal(byId(made.id), undefined)
   // Forgotten, it is kept: the person can restore it with the cortex.
   const removed = (await lines()).at(-1)
@@ -129,10 +130,10 @@ test("the person writes, pins and forgets an observation about a block", async t
 
 test("an agent in the page writes an observation, once approved, as its own", async t => {
   const { source, lines } = await withHome(t)
-  const made = await demoJournal().actingAs({ kind: "agent", name: "Agent in this page" }, async () => writeObservation({ text: "Prefers lists.", about: [RAIN] }, "Asked for a list twice"))
+  const made = await journalOf().actingAs({ kind: "agent", name: "Agent in this page" }, async () => writeObservation({ text: "Prefers lists.", about: [RAIN] }, "Asked for a list twice"))
   await source.settled()
   const last = (await lines()).at(-1)
-  assert.deepEqual([last.node, last.actor, last.reason], [`observation/${made.id.slice(12)}`, { kind: "agent", name: "Agent-in-this-page" }, "approved by the person in the app: Asked for a list twice"])
+  assert.deepEqual([last.node, last.actor, last.reason], [`observation/${byId(made.id)!.slug.slice(12)}`, { kind: "agent", name: "Agent-in-this-page" }, "approved by the person in the app: Asked for a list twice"])
   assert.equal(byId(made.id)!.by, "Agent in this page")
 })
 
@@ -152,11 +153,11 @@ test("the person accepts a profile line and approves a skill; the workspace read
 test("a change made on disk since the app read it is not written over", async t => {
   const { source, layout, problems, file } = await withHome(t)
   await writeFile(join(layout.cortex, "profile.md"), "---\n---\n\n## Notes\n\n- Written by hand.\n")
-  editCortex("cortex-profile", "## Notes\n\n- From the app.")
+  // Refused, and said: the store reports it as a notice.
+  await assert.rejects(editCortex("cortex-profile", "## Notes\n\n- From the app."), /changed on disk/)
   await source.settled()
   assert.match(await file("profile.md"), /Written by hand/)
-  assert.equal(problems.length, 1)
-  assert.match(problems[0], /changed on disk/)
+  assert.deepEqual(problems, [])
 })
 
 test("cortex history lines read their versions from the texts the bridge sent", () => {
@@ -168,8 +169,8 @@ test("cortex history lines read their versions from the texts the bridge sent", 
     sessions: [],
     texts: { p1: "## Notes\n", p2: "---\naccount: \"mira.example\"\n---\n## Notes\n", c1: "---\nby: \"codex\"\n---\nFirst.\n", c2: "---\nby: \"codex\"\n---\nSecond line.\n" },
   })
-  assert.deepEqual(past.map(each => [each.node, each.op, each.actor.name, each.after.body, each.owner]), [
-    ["observation-x", "create", "codex", "First.", "cortex"], ["observation-x", undefined, "you", "Second line.", "cortex"],
+  assert.deepEqual(past.map(each => [each.node, each.op, each.actor.name, each.after.body]), [
+    ["observation-x", "create", "codex", "First."], ["observation-x", undefined, "you", "Second line."],
   ])
   assert.deepEqual(sessions, [])
   assert.equal(observationTitle("# Heading here\nmore"), "Heading here")

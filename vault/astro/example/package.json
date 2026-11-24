@@ -1,0 +1,7 @@
+{
+  "name": "ohm-astro-example",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "astro dev", "build": "astro build" },
+  "dependencies": { "@ohmmmm/astro": "file:..", "astro": "5.18.2" }
+}

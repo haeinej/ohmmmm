@@ -200,10 +200,9 @@ function useConnectLine(doc: Doc, onLinking?: (on: boolean) => void) {
       const target = d.target ? byId(d.target.id) : undefined
       stop()
       if (!target) return
-      try {
-        const { added } = connectDocs(doc.id, target.id)
-        notify({ message: added ? `Connected “${titleOf(doc)}” to “${titleOf(target)}”` : `Already connected to “${titleOf(target)}”`, tone: "info" })
-      } catch (err) { notify({ message: (err as Error).message }) }
+      connectDocs(doc.id, target.id)
+        .then(({ added }) => notify({ message: added ? `Connected “${titleOf(doc)}” to “${titleOf(target)}”` : `Already connected to “${titleOf(target)}”`, tone: "info" }))
+        .catch(err => notify({ message: (err as Error).message }))
     },
     onPointerCancel: () => stop(),
   }

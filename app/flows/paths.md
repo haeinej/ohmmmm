@@ -1,6 +1,6 @@
 # Every interaction path in the workspace
 
-What a person (or an agent) can do in the ohm workspace wireframe, where each path starts, how it goes, where it ends, and what it is for. This is the end-state record of the wireframe as built. The layout and design are in [workspace.md](workspace.md); the rules are in [../AGENTS.md](../AGENTS.md).
+What a person (or an agent) can do in the ohm workspace, where each path starts, how it goes, where it ends, and what it is for. This is the end-state record of the workspace as built. The layout and design are in [workspace.md](workspace.md); the rules are in [../AGENTS.md](../AGENTS.md).
 
 **The workspace in one sentence:** one person's home for what they write (the **vault**) and what their agents know about them (the **cortex**). Here they find things, write blocks, see how everything connects around them, decide who sees what, and let an agent help through the same steps.
 
@@ -12,7 +12,7 @@ How to read each path:
 - **Agent:** the WebMCP tool that runs the same step, or *UI only*.
 - **Asks first:** for anything other people would see, or anything that can't be undone, the block confirms before acting.
 
-Nothing in the wireframe is saved between reloads. Every end state below is true for the session.
+**Production first.** The workspace shows the signed-in member's home from their vault service and nothing else: no sample data is in the app. Signed out, it shows sign-in. Every change is sent to the service first and shows once the service has answered; it lasts across reloads and devices. The private layer and the cortex open only on a device that has unlocked the account's keys; until then they show as locked. Places with nothing in them show ohm-ui's `Empty`.
 
 ---
 
@@ -68,10 +68,10 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
 | C1 | Show who each block is for | Click the eye in the home header | Each block shows an icon at its end: globe (Everyone), people (Friends), lock (Only you); the label is on hover | See at a glance what is shared | *UI only* |
-| C2 | **Make a block less private** | Click a block's icon → Friends or Everyone → **confirm** | The block is *marked* for that audience. It is **not published**: it reaches your site and other apps only when you publish. On your home through `ohmmmm serve`, Friends rewrites its file and the icon says "not shared yet" until your home syncs; Everyone opens Publish (C6) | Decide who a block is for | `visibility.move`, which always asks first · **asks first** |
-| C3 | Make a block more private | Click its icon → Friends or Only you | Marked at once (no confirmation needed); an agent's move to it still asks | Pull something back | `visibility.move` (asks first) |
-| C3a | What a move would do | — | The move, its warning, and where it is written | Let an agent explain a move before asking | `visibility.preview` |
-| C3b | **An agent on this computer asks** | It calls `vault_request_visibility`; the app shows "<agent> asks: …" with its reason, when it opens, regains focus, or every 20 seconds | Approve: the block moves, journaled with who asked and why. Decline: nothing changes. The agent sees which (`vault_requests`) | Agents never change who sees a block themselves | *UI only* (the request is the agent's tool) · **asks first** |
+| C2 | **Show a block to more people** | Click a block's icon → Friends or Everyone → the preview's warning → **Change visibility** | Only you → Friends: moved into the friends layer at the service. → Everyone: a block that is not a post becomes one at its channel's address, is marked public, and the Publish page opens with that one post's preview; it is public only once it is published | Decide who a block is for | `visibility.move` (consequential: the same dialog) |
+| C3 | Make a block more private | Click its icon → Only you | Friends → Only you: sealed on this device at once (no confirmation). Everyone → Friends asks first and opens the Publish page, which takes the record down | Pull something back | `visibility.move` |
+| C3a | Preview a move | (the dialog in C2) | What the move does, its warning, and what it still needs, by the shared rules | Know before deciding | `visibility.preview` (read-only) |
+| C3b | **An agent on this computer asks** | It calls `vault_request_visibility`; the request waits in the bell with its reason | Approve: the block moves, journaled with who asked and why. Decline: nothing changes. The agent sees which (`vault_requests`) | Agents never change who sees a block themselves | *UI only* (the request is the agent's tool) · **asks first** |
 | C4 | **View as someone else** | Hover the eye → View as You / Friends / Public | The tree, graph and block show only what that audience can see; the cortex is locked; a bar says "Viewing as…" with Back to you. If the open block is one they can't see, the editor says so instead of showing it | Check what others actually see before you publish | *UI only* |
 | C5 | Back to yourself | Back to you, choose You, or hide visibility | Everything is visible again | Return to editing | *UI only* |
 | C6 | **Publish a block** (your home through `ohmmmm serve`) | Click its icon → Everyone · Publish… → the plan: address, label and sublabel (the channel's, editable), its images, links that become words, and what this computer still needs → **Publish** | Its post is on your PDS and the notice gives its address (Open); the file is marked public and the icon is the globe; a new label is kept on its channel. On a public block, Everyone · Update… rewrites the post, keeping its address and date. Cancel writes nothing | Put a block on your site, in your own words for where it goes | *UI only*: no agent publishes · **asks first** |
@@ -81,12 +81,13 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| D1 | **See your graph** | Home → graph icon, or ⌘G | Obsidian-style, in white, grey and green. You (your profile) in the middle; what agents observed about you, skills and tools as green diamonds close around you, each joined to you; vault blocks as grey dots further out, clustered by channel with the channel's name above. Grey lines are your links; dashed green lines are connections an agent observed. No areas, no names for the two parts, no key | See how your home is organised around you and how it connects | `workspace.graph` |
-| D2 | Explore | Hover an item or a collecting channel | It, its lines and its folders' names light up; the rest fades | Read one node's neighbourhood | *UI only* |
-| D2a | Find a folder in the list | Click a cluster's name in the graph | The list opens with that folder revealed | Go from the map to the files | *UI only* |
+| D1 | **See your graph** | Home → graph icon, or ⌘G | Obsidian-style. You in the middle. Each node is a block ([words](../../docs/words.md#in-the-graph)), coloured by its label (its home's top channel) and sized by its backlinks; blocks with one label gather in one direction with the label's name above. Each line is a connect: a link, embed or mention of another block in the text, or a whole-block connection. A connection an agent only observed is its own dashed line, bowed apart from any you made. Channels, `contains` and people a block mentions are not drawn | See how your blocks connect around you | `workspace.graph` |
+| D1a | Show the cortex | Graph settings → Cortex (off by default; only once this device has unlocked your keys) | What agents know about you, their skills and tools gather close around you as diamonds | See your memory beside your writing | *UI only* |
+| D2 | Explore | Hover a block | It and its lines light up; the rest fades | Read one node's neighbourhood | *UI only* |
+| D2a | Find a label in the list | Click a label's name in the graph | The list opens with that channel revealed | Go from the map to the files | *UI only* |
 | D3 | Rearrange | Drag a node | Its neighbours follow on soft springs and settle back | Untangle a part to look at | *UI only* |
 | D4 | Zoom and pan | Wheel or pinch, drag the background, or + / − / fit | The view moves; item names and folders inside folders fade in as you zoom; names that would overlap are left out; fit returns to all | Read detail or the whole | *UI only* |
-| D5 | **Centre on a person** | A person in search results, or an inbox mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
+| D5 | **Centre on a person** | A person in search results, or a mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
 | D6 | Back to you | Back to me | All your blocks again | Return | `workspace.graph` |
 | D7 | Filter the graph | Graph settings → Connections; Lay out again | The lines show or hide; the layout restarts | Simplify or refresh | *UI only* |
 
@@ -118,14 +119,14 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | E16 | **History** | Block toolbar → clock | The block's versions, as in H9 | Go back in time | `history.versions` |
 | E17 | Read a shared block | Open a block for friends or everyone | Read-only, with "changing it asks first" | Protect what others already see | *UI only* |
 
-## F. Inbox and notifications
+## F. Notifications
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| F1 | **Inbox** | Rack Inbox (a dot when there are new items) | The side panel lists replies, mentions, friend requests and cortex observations, newest first | See what came in from others | *UI only* |
-| F2 | Open an inbox item | Click it | About a post: that post opens. Otherwise its own view opens (a friend request: Accept / Not now; a mention: see them in the graph). It counts as read | Respond | *UI only* |
-| F3 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
-| F4 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
+| F1 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
+| F2 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
+| F3 | **Answer an agent's request** | Bell → Agent → *Waiting for you* → **Review** → **Approve**, or **Decline** | Approve: the same move as C2/C3, by the same handler, journalled as asked by the agent and approved by you. Decline: nothing moves. A block changed since the agent asked is refused, to be reviewed again | Only you show a block to more people | *UI only*: an agent asks with `vault_set_visibility` |
+| F4 | What an agent hid | Opening the home with the private layer unlocked | Blocks an agent with a grant hid on their way to private are sealed into the private layer and journalled | Finish narrowing an agent started | *automatic* |
 
 ## G. Profile and settings
 
@@ -142,7 +143,7 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | G6a | Accept a profile line | Settings → Cortex → Accept (or Decline) | The line is under its heading in your profile, as your change; declined, it is never proposed again | Decide what agents may take as true about you | *UI only* |
 | G6b | Approve a skill | Settings → Cortex → Approve (or Decline) | The skill is in force, as your change naming the agent; declined, it is moved aside, kept | Decide how agents do things for you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
-| G8 | Sign out | Settings → Sign out | A notice (not in the wireframe) | Leave | *Not yet* |
+| G8 | Sign out | Settings → Sign out | Ends the ohm session (`POST /api/auth/sign-out`); the workspace then shows sign-in | Leave | *UI only* |
 
 ## H. History ([flows/history.md](history.md))
 
@@ -177,9 +178,11 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
+| `visibility.preview` | What moving one block would do, by the shared rules | C3a | read-only | Nothing changes |
+| `visibility.move` | Moves one block after the person approves the same dialog as C2 | C2, C3 | consequential | Moved and journalled, or, to or from public, marked and the Publish page opened; declining leaves it as it was (`NotAllowedError`) |
 | `cortex.observe` | Asks to keep an observation about the open block | J5 | consequential: waits for your Approve | An observation, written as the agent's, once you approved |
 
-Nothing an agent can do here is public. Moving a block to Friends is a tool that always asks first (`visibility.move`). Deleting is not a tool yet. Publishing and taking a post down will never be tools: the owner decided that no agent publishes (vault/plans/standard-site.md).
+Nothing an agent can do here is public without the person. `visibility.move` stops at the person's approval; publishing happens on the Publish page, signed in at the PDS. Deleting and publishing are not tools yet. On the home on this computer (`ohmmmm serve`), Everyone opens Publish's dialog instead, and the bridge writes the post to your PDS.
 
 ## J. Your cortex ([flows/cortex.md](cortex.md))
 
@@ -200,9 +203,9 @@ Everything in the cortex is yours to change. On the home on this computer each c
 | Opening anything | One block is open in the editor; the tree has revealed it and shows it selected; the graph rings it; it is in your back/forward history; its unread dot is gone |
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
-| Marking who a block is for | It is marked, not published. Showing it to more people needed your yes |
-| Publishing (your home) | Its post is on your PDS at the address the plan showed, the file says public, and nothing else of your vault left your computer |
-| Taking a post down | The record is gone from your PDS before the block moved; the block is kept |
+| Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer, after your yes for wider. Public is reached only through Publish, for that one post. Every move is journalled |
+| Publishing (your home on this computer) | Its post is on your PDS at the address the plan showed, the file says public, and nothing else of your vault left your computer |
+| Taking a post down (your home on this computer) | The record is gone from your PDS before the block moved; the block is kept |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |
@@ -218,5 +221,5 @@ These show a notice saying what they will do. Each will become a path above once
 - **Publishing from the sample, and through the vault service.** On your home through `ohmmmm serve` it is built (C6, C7).
 - **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
-- **Signing out.**
-- **Persistence:** saving across reloads.
+- **Unlocking on this device:** the private layer and the cortex open once the account app's keys are wired into the workspace (`privateSession`). The cortex also needs the keys package to seal under `ohm-vault/cortex/v1`.
+- **Media upload from the editor:** the media cache requests are in the source (`HomeSource.media`); dropping a picture does not send its bytes yet.

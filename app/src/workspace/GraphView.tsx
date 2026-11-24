@@ -1,11 +1,11 @@
-// The graph, as Obsidian's graph view: a live force layout you pan, zoom and drag; hovering lights an
-// item and its lines and fades the rest; names come in as you zoom. White, grey and ohm's green only.
+// The graph, as Obsidian's graph view: a live force layout you pan, zoom and drag; hovering lights a
+// block and its lines and fades the rest; names come in as you zoom.
 //
-// You are the circle in the middle: your profile. What your agents observed about you, and their
-// skills and tools (green diamonds), gather close around you, each joined to you; what you write
-// (grey dots) gathers further out. A connection an agent observed between two blocks is a green line.
-// Things filed together (a channel, a category) cluster in one direction, with the folder's name
-// above them (graph/model.ts says what is filed where). Nothing needs a key.
+// Each node is a block (graph/model.ts), coloured by its label and sized by its backlinks; blocks
+// with one label gather in one direction from you, with the label's name over them. Each line is a
+// connect the person made. One an agent only observed is dashed, and drawn apart, bowed beside it.
+// You are the circle in the middle; with the cortex on, what your agents know about you and their
+// skills and tools (diamonds) gather close around you.
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   forceCollide, forceLink, forceManyBody, forceRadial, forceSimulation, forceX, forceY,
@@ -18,10 +18,10 @@ import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
-import { buildGraph, DEFAULT_FILTERS, type GraphEdge, type GraphGroup, type GraphNode, type Root } from "@/graph/model"
+import { buildGraph, DEFAULT_FILTERS, type GraphEdge, type GraphLabel, type GraphNode, type Root } from "@/graph/model"
 import { cn } from "@/lib/cn"
-import { cortex } from "@/data/workspace-data"
-import { kept, me, open, revealFolder, scopeFolders, showGraph, useWorkspace } from "./store"
+import { cortex, cortexState } from "@/data/workspace-data"
+import { kept, me, open, revealFolder, setGraphCortex, showGraph, useWorkspace } from "./store"
 
 type SimNode = GraphNode & SimulationNodeDatum
 type SimLink = SimulationLinkDatum<SimNode> & GraphEdge
@@ -30,9 +30,23 @@ type Point = { x: number; y: number }
 /** Where each node was last, so re-centring or filtering moves nodes instead of re-scattering them. */
 const last = new Map<string, Point>()
 
-const radiusOf = (n: GraphNode) => 4 + Math.sqrt(n.degree) * 1.4
+/** Bigger the more the person connected to it. */
+const radiusOf = (n: GraphNode) => 4 + Math.sqrt(n.backlinks) * 2.2
 /** Thicker the stronger: one for each way two things are joined and each channel they share. */
-const widthOf = (e: GraphEdge) => Math.min(3.5, 0.8 + (e.weight - 1) * 0.6)
+const widthOf = (e: GraphEdge) => e.observed ? 1 : Math.min(3.5, 0.8 + (e.weight - 1) * 0.6)
+/**
+ * A label's colour, from the theme's chart tokens only: the forest and green family, at two
+ * strengths. Red is never used, since it means failed.
+ */
+const SWATCH = [
+  "fill-chart-1", "fill-chart-2", "fill-chart-3", "fill-chart-4",
+  "fill-chart-1/55", "fill-chart-2/55", "fill-chart-3/55", "fill-chart-4/55",
+]
+/** An observed edge bows beside the straight line between the same two blocks. */
+const bow = (a: Point, b: Point) => {
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
+  return `M${a.x},${a.y} Q${mx - (dy / len) * 14},${my + (dx / len) * 14} ${b.x},${b.y}`
+}
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
 const polar = (a: number, r: number): Point => ({ x: Math.cos(a) * r, y: Math.sin(a) * r })
 
@@ -41,34 +55,19 @@ const ME = 18
 /** How far from you each kind of thing gathers: what is known about you close, what you wrote further out. */
 const REACH: Record<Root, number> = { cortex: 78, vault: 190 }
 
-/** Folders in the tree's order: alphabetical, with "other" last. */
-const byName = (a: GraphGroup, b: GraphGroup) => (a.name === "other" ? 1 : 0) - (b.name === "other" ? 1 : 0) || a.name.localeCompare(b.name)
-const isCollecting = (g: GraphGroup) => !!g.collects && !g.members.length
-
-/** Which way from you each folder's things gather: an angle per folder, by how much is in it. */
-function directionsOf(groups: GraphGroup[]) {
+/** Which way from you each label's blocks gather: an angle per label, by how many it holds. */
+function directionsOf(labels: GraphLabel[]) {
   const at = new Map<string, number>()
-  const children = (id: string) => groups.filter(g => g.parent === id && !isCollecting(g)).sort(byName)
-  const cut = (g: GraphGroup, a0: number, a1: number) => {
-    // Inside a channel, its own channels stay close together instead of spreading over its whole share.
-    if (g.depth >= 1) { const mid = (a0 + a1) / 2, half = Math.min(a1 - a0, 0.5) / 2; a0 = mid - half; a1 = mid + half }
-    const kids = children(g.id)
-    const direct = g.members.length - kids.reduce((s, k) => s + k.members.length, 0)
-    const parts = [...(direct > 0 && kids.length ? [{ k: undefined, w: direct }] : []), ...kids.map(k => ({ k, w: Math.max(1, k.members.length) }))]
-    const total = parts.reduce((s, p) => s + p.w, 0)
-    let a = a0, own = (a0 + a1) / 2
-    for (const p of parts) {
-      const span = ((a1 - a0) * p.w) / total
-      if (p.k) cut(p.k, a, a + span)
-      else own = a + span / 2
-      a += span
+  for (const root of ["vault", "cortex"] as Root[]) {
+    const mine = labels.filter(label => label.root === root)
+    const total = mine.reduce((sum, label) => sum + Math.max(1, label.members.length), 0)
+    // The two kinds start apart, so their clusters interleave instead of lining up.
+    let angle = root === "cortex" ? -Math.PI / 2 + 0.6 : -Math.PI / 2
+    for (const label of mine) {
+      const span = (Math.PI * 2 * Math.max(1, label.members.length)) / total
+      at.set(`${root}:${label.name}`, angle + span / 2)
+      angle += span
     }
-    at.set(g.id, own)
-  }
-  // The two kinds start half a turn apart, so their clusters interleave instead of lining up.
-  for (const root of groups.filter(g => g.depth === 0)) {
-    const start = root.root === "cortex" ? -Math.PI / 2 + 0.6 : -Math.PI / 2
-    cut(root, start, start + Math.PI * 2)
   }
   return at
 }
@@ -78,10 +77,10 @@ const floating = "rounded-2xl bg-popover text-popover-foreground shade-3"
 
 /** Lives in the side panel, in the home. What it draws follows the home's scope and who you are looking as. */
 export function GraphView() {
-  const { rev, scope, audience, graphCenter: center, view, filters: repoFilters } = useWorkspace()
+  const { rev, scope, audience, graphCenter: center, graphCortex, view, filters: repoFilters } = useWorkspace()
   // The open item is ringed in the graph too: one active item, everywhere.
   const activeId = view.kind === "doc" ? view.id : null
-  const include = useMemo(() => scopeFolders(scope), [scope])
+  const include = useMemo(() => ({ vault: scope.vault, cortex: graphCortex }), [scope.vault, graphCortex])
   const [showLinks, setShowLinks] = useState(DEFAULT_FILTERS.links)
   const [layout, setLayout] = useState(0)
   const graph = useMemo(() => buildGraph({ center, vault: include.vault, cortex: include.cortex, audience, links: showLinks, keep: kept }), [center, include, audience, showLinks, repoFilters, rev]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -104,10 +103,9 @@ export function GraphView() {
     return () => ro.disconnect()
   }, [])
 
-  const groupById = useMemo(() => new Map(graph.groups.map(g => [g.id, g])), [graph])
-  const collecting = useMemo(() => graph.groups.filter(isCollecting), [graph])
-  const directions = useMemo(() => directionsOf(graph.groups), [graph])
-  const aimOf = (n: GraphNode) => polar(directions.get(n.group) ?? -Math.PI / 2, REACH[n.root])
+  const directions = useMemo(() => directionsOf(graph.labels), [graph])
+  const swatchOf = useMemo(() => new Map(graph.labels.map(label => [`${label.root}:${label.name}`, label.swatch])), [graph])
+  const aimOf = (n: GraphNode) => polar(directions.get(`${n.root}:${n.label}`) ?? -Math.PI / 2, REACH[n.root])
 
   const { nodes, links } = useMemo(() => {
     const nodes: SimNode[] = graph.nodes.map(n => {
@@ -115,12 +113,13 @@ export function GraphView() {
       return { ...n, ...(last.get(n.id) ?? { x: target.x + (Math.random() - 0.5) * 20, y: target.y + (Math.random() - 0.5) * 20 }) }
     })
     const links: SimLink[] = graph.edges.map(e => ({ ...e }))
+    // Observed edges are drawn but do not pull: the layout is what the person made.
     return { nodes, links }
   }, [graph, layout]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const sim = forceSimulation<SimNode, SimLink>(nodes)
-      .force("link", forceLink<SimNode, SimLink>(links).id(d => d.id).distance(60).strength(l => Math.min(0.1, 0.025 * l.weight)))
+      .force("link", forceLink<SimNode, SimLink>(links).id(d => d.id).distance(60).strength(l => l.observed ? 0 : Math.min(0.1, 0.025 * l.weight)))
       .force("charge", forceManyBody<SimNode>().strength(-40).distanceMax(120))
       .force("collide", forceCollide<SimNode>(n => radiusOf(n) + 9).strength(0.9))
       // Soft pulls, not fixed places: toward the folder's direction, and to the kind's distance from you.
@@ -166,8 +165,7 @@ export function GraphView() {
 
   const fit = () => {
     if (!svgRef.current || !zoomRef.current || !size.w) return
-    const hubs = collecting.map(hubAt)
-    const xs = [0, ...nodes.map(n => n.x!), ...hubs.map(p => p.x)], ys = [0, ...nodes.map(n => n.y!), ...hubs.map(p => p.y)]
+    const xs = [0, ...nodes.map(n => n.x!)], ys = [0, ...nodes.map(n => n.y!)]
     const pad = 48
     const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad, minY = Math.min(...ys) - pad - 10, maxY = Math.max(...ys) + pad
     const k = Math.min(1.8, Math.max(0.25, Math.min(size.w / (maxX - minX), size.h / (maxY - minY))))
@@ -189,40 +187,20 @@ export function GraphView() {
 
   const zoomBy = (factor: number) => select(svgRef.current!).call(zoomRef.current!.scaleBy, factor)
 
-  // The lit item: the one under the pointer, or the one being dragged, or a collecting channel.
+  // The lit item: the one under the pointer, or the one being dragged.
   const lit = dragging ?? hover
   const byId = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
-  /** A collecting channel sits just beyond the middle of what it collects. */
-  const hubAt = (g: GraphGroup): Point => {
-    const pts = g.collects!.map(id => byId.get(id)).filter(Boolean) as SimNode[]
-    if (!pts.length) return { x: 0, y: 0 }
-    const x = pts.reduce((s, n) => s + n.x!, 0) / pts.length, y = pts.reduce((s, n) => s + n.y!, 0) / pts.length
-    const r = Math.hypot(x, y) || 1
-    // Out among what you wrote, never in with what is known about you.
-    const out = Math.max(r + 46, REACH.vault + 30)
-    return { x: (x / r) * out, y: (y / r) * out }
-  }
   const near = useMemo(() => {
     if (!lit) return null
     const s = new Set([lit])
-    const hub = collecting.find(g => g.id === lit)
-    if (hub) { hub.collects!.forEach(id => s.add(id)); return s }
     for (const l of links) {
       const a = (l.source as SimNode).id, b = (l.target as SimNode).id
       if (a === lit) s.add(b)
       if (b === lit) s.add(a)
     }
-    for (const g of collecting) if (g.collects!.includes(lit)) s.add(g.id)
     return s
-  }, [lit, links, collecting])
-  // The folders around the lit item, so their names stay lit.
-  const litGroups = useMemo(() => {
-    const s = new Set<string>()
-    const n = lit ? byId.get(lit) : undefined
-    if (n) for (let g: string | undefined = n.group; g; g = groupById.get(g)?.parent) s.add(g)
-    if (lit && collecting.some(g => g.id === lit)) s.add(lit)
-    return s
-  }, [lit, byId, groupById, collecting])
+  }, [lit, links])
+  const litLabel = lit ? byId.get(lit) : undefined
 
   // Dragging pins the node under the pointer and keeps the layout warm, so neighbours follow on
   // their springs; letting go releases it to ease back. A press without movement is a click.
@@ -260,31 +238,13 @@ export function GraphView() {
   const k = t.k
   // Names fade in between these zoom levels; cluster names always show.
   const detail = Math.max(0, Math.min(1, (k - 1.1) / 0.4))
-  const pathOf = (g: GraphGroup) => g.id.split("/").slice(1).join("/")
-  const reveal = (g: GraphGroup) => revealFolder(g.root, pathOf(g))
-  // The folders named over their clusters.
-  const clusters = graph.groups.filter(g => g.depth > 0 && !isCollecting(g) && g.members.length)
+  const reveal = (label: GraphLabel) => revealFolder(label.root, label.name)
 
   return (
     <div ref={boxRef} className="relative min-h-0 flex-1 overflow-hidden">
       <svg ref={svgRef} role="img" aria-label={isMe ? "Graph of your home around you, and how it connects" : `Graph of what mentions @${graph.center.handle}`}
         className={cn("absolute inset-0 size-full touch-none select-none", dragging ? "cursor-grabbing" : "cursor-grab")}>
         <g transform={t.toString()}>
-          {/* What a channel collects from other folders. */}
-          {showLinks && collecting.flatMap(g => {
-            const at = hubAt(g)
-            return g.collects!.map(id => {
-              const n = byId.get(id)
-              if (!n) return null
-              const on = lit ? lit === g.id || lit === id : null
-              return (
-                <line key={`${g.id}|${id}`} x1={at.x} y1={at.y} x2={n.x} y2={n.y} vectorEffect="non-scaling-stroke" strokeWidth={0.8} strokeLinecap="round" strokeDasharray="2 3"
-                  className={cn("transition-[opacity,stroke] duration-(--ohm-duration-open) ease-(--ohm-ease-out)",
-                    on ? "stroke-primary opacity-100 dark:stroke-foreground" : "stroke-muted-foreground",
-                    on === false ? "opacity-[.07]" : !on && "opacity-40")} />
-              )
-            })
-          })}
           {/* Everything known about you hangs from you. */}
           {nodes.filter(n => n.root === "cortex").map(n => {
             const on = lit ? lit === n.id : null
@@ -297,15 +257,20 @@ export function GraphView() {
           {links.map((l, i) => {
             const a = l.source as SimNode, b = l.target as SimNode
             const on = lit ? a.id === lit || b.id === lit : null
-            // What an agent observed between two blocks is green; what you wrote or connected is grey.
-            const observed = Boolean(l.observed?.length) && !l.kinds.some(kind => kind !== "links") && !l.wholeBlock
+            const observed = Boolean(l.observed?.length)
             const said = [l.why, ...(l.observed ?? []).map(text => `Observed: ${text}`)].filter(Boolean).join("\n")
-            return (
+            const look = cn("fill-none transition-[opacity,stroke] duration-(--ohm-duration-open) ease-(--ohm-ease-out)",
+              on || observed ? "stroke-primary dark:stroke-foreground" : "stroke-muted-foreground",
+              on === false ? "opacity-[.07]" : on ? "opacity-100" : observed ? "opacity-55" : "opacity-40")
+            // What an agent observed is its own line: dashed, and bowed apart from any the person made.
+            return observed ? (
+              <path key={i} d={bow({ x: a.x!, y: a.y! }, { x: b.x!, y: b.y! })} vectorEffect="non-scaling-stroke"
+                strokeWidth={widthOf(l) + (on ? 0.4 : 0)} strokeLinecap="round" strokeDasharray="3 3" className={look}>
+                {said && <title>{said}</title>}
+              </path>
+            ) : (
               <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} vectorEffect="non-scaling-stroke"
-                strokeWidth={widthOf(l) + (on ? 0.4 : 0)} strokeLinecap="round" strokeDasharray={observed ? "3 3" : undefined}
-                className={cn("transition-[opacity,stroke] duration-(--ohm-duration-open) ease-(--ohm-ease-out)",
-                  on || l.observed?.length ? "stroke-primary dark:stroke-foreground" : "stroke-muted-foreground",
-                  on === false ? "opacity-[.07]" : on ? "opacity-100" : l.observed?.length ? "opacity-60" : "opacity-40")}>
+                strokeWidth={widthOf(l) + (on ? 0.4 : 0)} strokeLinecap="round" className={look}>
                 {said && <title>{said}</title>}
               </line>
             )
@@ -321,21 +286,6 @@ export function GraphView() {
               {(graph.center.name || graph.center.handle || "?").slice(0, 1).toUpperCase()}
             </text>
           </g>
-          {collecting.map(g => {
-            const at = hubAt(g)
-            const faded = near && !near.has(g.id)
-            return (
-              <g key={g.id} data-node transform={`translate(${at.x},${at.y})`} role="button" tabIndex={0} aria-label={`Channel ${g.name}`}
-                className={cn("cursor-pointer outline-none transition-opacity duration-(--ohm-duration-open) ease-(--ohm-ease-out)", faded && "opacity-20")}
-                onPointerEnter={() => setHover(g.id)} onPointerLeave={() => setHover(h => (h === g.id ? null : h))}
-                onFocus={() => setHover(g.id)} onBlur={() => setHover(null)}
-                onClick={() => reveal(g)} onKeyDown={e => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), reveal(g))}>
-                <circle r={12} className="fill-transparent" />
-                <circle r={4.5} strokeWidth={1.5} strokeDasharray="2 2" vectorEffect="non-scaling-stroke"
-                  className={cn("fill-card", lit === g.id ? "stroke-primary dark:stroke-foreground" : "stroke-muted-foreground")} />
-              </g>
-            )
-          })}
           {nodes.map(n => {
             const r = radiusOf(n)
             const isLit = n.id === lit
@@ -362,11 +312,10 @@ export function GraphView() {
                     <rect x={-r * 0.35} y={-r * 0.35} width={r * 0.7} height={r * 0.7} transform="rotate(45)" className="fill-card" />
                   </>
                 ) : (
-                  // What you wrote: a grey dot.
+                  // A block: a dot in its label's colour.
                   <>
                     {on && <circle r={r + 3.5} className="fill-none stroke-primary dark:stroke-foreground" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
-                    <circle r={r}
-                      className={cn("transition-[fill] duration-(--ohm-duration-open) ease-(--ohm-ease-out)", on ? "fill-primary dark:fill-foreground" : "fill-muted-foreground")} />
+                    <circle r={r} className={cn("transition-[fill] duration-(--ohm-duration-open) ease-(--ohm-ease-out)", SWATCH[swatchOf.get(`${n.root}:${n.label}`) ?? 0])} />
                   </>
                 )}
               </g>
@@ -379,7 +328,7 @@ export function GraphView() {
             // Names that must show go first; any other that would sit on one already placed is left out.
             const placed: { x: number; y: number; w: number }[] = []
             const must = (n: SimNode) => n.id === lit || n.doc.id === activeId
-            return [...nodes].sort((p, q) => Number(must(q)) - Number(must(p)) || Number(near?.has(q.id) ?? 0) - Number(near?.has(p.id) ?? 0) || q.degree - p.degree).map(n => {
+            return [...nodes].sort((p, q) => Number(must(q)) - Number(must(p)) || Number(near?.has(q.id) ?? 0) - Number(near?.has(p.id) ?? 0) || q.backlinks - p.backlinks || q.degree - p.degree).map(n => {
               const show = near?.has(n.id) || n.doc.id === activeId ? 1 : detail
               if (!show) return null
               const [x, y] = t.apply([n.x!, n.y!])
@@ -400,34 +349,24 @@ export function GraphView() {
         </g>
       </svg>
 
-      {/* Each folder's name, above its cluster. Clicking one shows it in the list. */}
+      {/* Each label's name, above its blocks. Clicking one shows its channel in the list. */}
       <div className="pointer-events-none absolute inset-0">
         {(() => {
           const placed: { x: number; y: number; w: number }[] = []
-          const labels = [
-            ...clusters.map(g => {
-              const pts = g.members.map(id => byId.get(id)).filter(Boolean) as SimNode[]
-              const x = pts.reduce((s, n) => s + n.x!, 0) / pts.length
-              const top = Math.min(...pts.map(n => n.y!))
-              return { g, at: { x, y: top - 22 + (g.depth === 1 ? 0 : 8) } }
-            }),
-            ...collecting.map(g => { const p = hubAt(g); return { g, at: { x: p.x, y: p.y + 14 } } }),
-          ]
-          return labels.map(({ g, at }) => {
-            const [x, y] = t.apply([at.x, at.y])
-            const inner = g.depth > 1
-            const show = inner ? (litGroups.has(g.id) ? 1 : detail) : 1
-            if (!show) return null
-            const w = g.name.length * 7 + 10
+          return graph.labels.filter(label => label.members.length).map(label => {
+            const pts = label.members.map(id => byId.get(id)).filter(Boolean) as SimNode[]
+            if (!pts.length) return null
+            const [x, y] = t.apply([pts.reduce((s, n) => s + n.x!, 0) / pts.length, Math.min(...pts.map(n => n.y!)) - 22])
+            const w = label.name.length * 7 + 10
             if (placed.some(p => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < 16)) return null
             placed.push({ x, y, w })
-            const faded = lit && !litGroups.has(g.id) && !near?.has(g.id)
+            const faded = litLabel && (litLabel.label !== label.name || litLabel.root !== label.root)
             return (
-              <button key={g.id} type="button" onClick={() => reveal(g)} title={`Show ${g.name} in the list`}
-                style={{ left: x, top: y, opacity: faded ? 0.35 : show }}
-                className={cn("pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-md px-1 leading-4 transition-opacity duration-(--ohm-duration-open) ease-(--ohm-ease-out) hover:bg-muted",
-                  inner ? "text-small text-muted-foreground" : "text-small font-semibold text-foreground/70")}>
-                {g.name}
+              <button key={`${label.root}:${label.name}`} type="button" onClick={() => reveal(label)} title={`Show ${label.name} in the list`}
+                style={{ left: x, top: y, opacity: faded ? 0.35 : 1 }}
+                className="pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap rounded-md px-1 text-small leading-4 font-semibold text-foreground/70 transition-opacity duration-(--ohm-duration-open) ease-(--ohm-ease-out) hover:bg-muted">
+                {label.root === "vault" && <svg aria-hidden width="8" height="8"><circle cx="4" cy="4" r="4" className={SWATCH[label.swatch]} /></svg>}
+                {label.name}
               </button>
             )
           })
@@ -450,6 +389,11 @@ export function GraphView() {
             <label className="flex min-h-8 items-center justify-between gap-3 rounded-lg px-1.5 text-body hover:bg-muted">
               Connections
               <Switch checked={showLinks} onCheckedChange={setShowLinks} />
+            </label>
+            {/* Your cortex, around you. Off by default; it opens only on a device that unlocked your keys. */}
+            <label className="flex min-h-8 items-center justify-between gap-3 rounded-lg px-1.5 text-body hover:bg-muted">
+              Cortex
+              <Switch checked={graphCortex} disabled={cortexState !== "open"} onCheckedChange={setGraphCortex} />
             </label>
             <Button size="sm" variant="secondary" className="mt-1.5 h-8 w-full"
               onClick={() => { last.clear(); userMoved.current = false; setLayout(n => n + 1) }}>

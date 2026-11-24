@@ -47,19 +47,23 @@ test('the journal takes only well-formed events, appends them, and skips a damag
 test('adding a file copies it in beside a block that says where it came from; the original stays', async t => {
   const { base, vault, db, put } = await setup(t);
   const query = await put('work/queries/churn.sql', 'select 1;\n');
-  const added = await addToVault({ vault, source: query, by: 'agent:claude-code', now: new Date('2026-11-19T01:00:00Z') });
-  assert.deepEqual(added.files, ['inbox/churn.sql', 'inbox/churn.md']);
+  await assert.rejects(addToVault({ vault, source: query }), /which channel/);
+  const added = await addToVault({ vault, source: query, channel: 'queries', by: 'agent:claude-code', now: new Date('2026-11-19T01:00:00Z') });
+  assert.deepEqual(added.files, ['queries/churn.sql', 'queries/churn.md']);
   assert.equal(await readFile(query, 'utf8'), 'select 1;\n');
-  const block = await readFile(join(vault, 'inbox/churn.md'), 'utf8');
+  const block = await readFile(join(vault, 'queries/churn.md'), 'utf8');
   assert.match(block, /kind: code/);
   assert.match(block, new RegExp(`origin: "?${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?`));
   assert.match(block, /by: "agent:claude-code"|by: agent:claude-code/);
-  assert.match(block, /status: proposed/);
+  assert.doesNotMatch(block, /status:/);
+  // An agent's block starts private, whatever it said: showing it to more people is the person's move.
+  assert.match(block, /visibility: private/);
   assert.match(block, /!\[\[churn\.sql\]\]/);
-  assert.match(await readFile(join(vault, 'inbox/_channel.md'), 'utf8'), /kind: inbox/);
+  await assert.rejects(readFile(join(vault, 'queries/_channel.md')));
   // The same name again gets a free one; nothing is overwritten.
-  const again = await addToVault({ vault, source: query });
-  assert.deepEqual(again.files, ['inbox/churn-2.sql', 'inbox/churn-2.md']);
+  const again = await addToVault({ vault, source: query, channel: 'queries' });
+  assert.deepEqual(again.files, ['queries/churn-2.sql', 'queries/churn-2.md']);
+  assert.doesNotMatch(await readFile(join(vault, 'queries/churn-2.md'), 'utf8'), /visibility:/);
 
   // A note keeps its own properties and gains its origin; with --move the original goes.
   const note = await put('Downloads/Reading list.md', '---\ntitle: Reading\n---\n\nBooks.\n');
@@ -69,23 +73,23 @@ test('adding a file copies it in beside a block that says where it came from; th
   assert.match(await readFile(join(vault, moved.block), 'utf8'), /title: Reading[\s\S]*origin:/);
 
   // An address becomes a source that refers to it, and a link block from it. Nothing is fetched.
-  const link = await addToVault({ vault, source: 'https://example.com/essays/on-rain', title: 'On rain' });
-  assert.match(link.block, /^inbox\/example-com-essays-on-rain\.md$/);
+  const link = await addToVault({ vault, source: 'https://example.com/essays/on-rain', channel: 'reading', title: 'On rain' });
+  assert.match(link.block, /^reading\/example-com-essays-on-rain\.md$/);
   assert.equal(JSON.parse(await readFile(join(vault, `_sources/${link.source}/source.json`), 'utf8')).retain, 'reference');
 
-  await assert.rejects(addToVault({ vault, source: join(vault, 'writing/rain.md') }), /already in the vault/);
-  await assert.rejects(addToVault({ vault, source: join(base, 'work') }), /one file at a time/);
-  await assert.rejects(addToVault({ vault, source: join(base, 'nothing.txt') }), /There is no file/);
+  await assert.rejects(addToVault({ vault, source: join(vault, 'writing/rain.md'), channel: 'writing' }), /already in the vault/);
+  await assert.rejects(addToVault({ vault, source: join(base, 'work'), channel: 'work' }), /one file at a time/);
+  await assert.rejects(addToVault({ vault, source: join(base, 'nothing.txt'), channel: 'work' }), /There is no file/);
   await assert.rejects(addToVault({ vault, source: query, channel: '_hidden' }), /not a channel's path/);
-  await assert.rejects(addToVault({ vault, source: query, by: 'someone' }), /by is me/);
+  await assert.rejects(addToVault({ vault, source: query, channel: 'queries', by: 'someone' }), /by is me/);
 
   // Indexing afterwards keeps what add said, rather than recording the files again as unknown.
   await scan({ vault, db });
-  const history = inspect(db, 'inbox/churn.md').history;
+  const history = inspect(db, 'queries/churn.md').history;
   assert.deepEqual(history.map(event => [event.op, event.by, event.via]), [['added', 'agent:claude-code', 'add']]);
   assert.equal(history[0].origin, query);
   const { events } = await readEvents(vault);
-  assert.equal(events.filter(event => event.path === 'inbox/churn.md').length, 1);
+  assert.equal(events.filter(event => event.path === 'queries/churn.md').length, 1);
 });
 
 test('a file dropped in by hand is recognised by its bytes, and its later moves are followed', async t => {

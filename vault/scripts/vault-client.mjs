@@ -90,5 +90,8 @@ export function vaultClient({ pds, session, renew, vault, audience, get = fetch 
     removeFriend: did => ask('removeFriend', { body: { did } }),
     listShared: owner => ask('listShared', { query: { owner } }),
     getShared: (owner, id) => ask('getShared', { query: { owner, id } }),
+    previewMove: (id, to) => ask('previewMove', { query: { id, to } }),
+    hideBlock: move => ask('hideBlock', { body: move }),
+    requestMove: move => ask('requestMove', { body: move }),
   };
 }

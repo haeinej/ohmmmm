@@ -1,5 +1,5 @@
 import { isBlock, locationOf, type Doc, type Entity } from "./workspace-model"
-import { SETTINGS_TABS } from "@/workspace/settings-tabs"
+import { SETTINGS_TABS } from "../workspace/settings-tabs"
 import { searchInput } from "./source"
 import type { SearchHit, SearchProvider, SearchScope } from "./search"
 
@@ -13,14 +13,16 @@ const excerpt = (body: string, q: string) => {
   return (start > 0 ? "…" : "") + text.slice(start, start + 90) + (text.length > start + 90 ? "…" : "")
 }
 
-/** In memory, over the synthetic data. */
-export const createSampleSearch = (all: Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
+// Search in memory, over what a source holds: the home on this computer, and the tests' fixture.
+
+/** In memory, over the given documents and people. */
+export const createMemorySearch = (all: () => Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
   signal?.throwIfAborted()
   const { query, limit } = searchInput(input)
   const scope = input.scope ?? "all"
   const q = query.trim().toLowerCase()
   if (!q) return []
-  const docs = all
+  const docs = all()
     .filter(d => inScope(d, scope))
     .map(d => ({ d, score: (d.title.toLowerCase().includes(q) ? 2 : 0) + (d.body.toLowerCase().includes(q) ? 1 : 0) }))
     .filter(r => r.score > 0)

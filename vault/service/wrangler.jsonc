@@ -17,6 +17,11 @@
   // ohm's own sign-in: the Worker that answers /api/auth/get-session.
   // "services": [{ "binding": "AUTH", "service": "ohm-api" }],
   "preview_urls": false,
+  // The media cache: the bytes behind media records (src/media.mjs). Create the bucket first:
+  //   wrangler r2 bucket create ohm-vault-media
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ohm-vault-media" }],
+  // Optional: smaller copies of pictures to show. Without it, the original is answered.
+  // "images": { "binding": "IMAGES" },
   "d1_databases": [{ "binding": "DB", "database_name": "ohm-vault", "database_id": "" }],
   "vars": {
     "SERVICE_DID": "did:web:vault.ohmmmm.com",

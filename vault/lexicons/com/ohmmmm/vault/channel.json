@@ -13,8 +13,8 @@
           "description": { "type": "string", "maxLength": 20000, "description": "Markdown: the body of _channel.md." },
           "kind": {
             "type": "string",
-            "description": "collection is the default. A concept channel is an idea you collect toward. An inbox takes new captures. An import channel holds what one connector brought in.",
-            "knownValues": ["collection", "concept", "inbox", "import"]
+            "description": "collection is the default. A concept channel is an idea you collect toward. An import channel holds what one connector brought in.",
+            "knownValues": ["collection", "concept", "import"]
           },
           "order": {
             "type": "array",

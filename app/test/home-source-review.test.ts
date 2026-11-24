@@ -1,21 +1,23 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { createServiceSource } from "../src/data/service-source"
-import { createSampleSource } from "../src/data/sample-source"
+import { createFixtureSource } from "./fixtures/fixture-source"
 import { blockOf, moveVisibility, type BlockRef } from "../src/data/source"
 import { channelByPath, workspaceEvidence } from "../src/data/workspace-data"
 import { renameChannel, setSource } from "../src/workspace/store"
 import { isPostId, setProperty } from "../../vault/vault/file.mjs"
 import { newNodeId } from "../../vault/vault/node.mjs"
 
-test("renaming a sample channel keeps its UI identity and updates its evidence key", async () => {
-  await setSource(createSampleSource())
+test("renaming a channel moves it at the source, keeps its identity and updates its evidence key", async () => {
+  await setSource(createFixtureSource())
   try {
     const original = channelByPath("writing")!
-    renameChannel("writing", "essays")
+    await renameChannel("writing", "essays")
     assert.equal(channelByPath("writing"), undefined)
     assert.equal(channelByPath("essays")?.id, original.id)
-    assert.ok(workspaceEvidence().some(edge => edge.kind === "contains" && edge.from === "channel:essays/journal"))
+    // A channel with an ID is known by it, so its evidence follows it when it moves.
+    const inner = channelByPath("essays/journal")!
+    assert.ok(workspaceEvidence().some(edge => edge.kind === "contains" && edge.from === `channel:${inner.id}`))
   } finally {
     await setSource()
   }
@@ -83,8 +85,8 @@ test("unlocking preserves a Friends search match on its channel path", async () 
   }
 })
 
-test("sample file saves add and remove whole-block links", async () => {
-  const sampleSource = createSampleSource()
+test("fixture file saves add and remove whole-block links", async () => {
+  const sampleSource = createFixtureSource()
   const ref: BlockRef = { id: newNodeId(), layer: "private", store: "sealed" }
   assert.ok(isPostId(ref.id))
   const file = { path: "reading/alder.md", text: "---\nkind: text\nvisibility: private\n---\n\nA seed." }

@@ -21,10 +21,18 @@ This repository is a Claude Code plugin. Its bundled skills are:
 | --- | --- |
 | [start](skills/start/SKILL.md) | The project's purpose and rules |
 | [vault](skills/vault/SKILL.md) | Working in your notes with the vault's tools |
+| [host-pds](skills/host-pds/SKILL.md) | Hosting your own PDS on Cloudflare with Cirrus and connecting it to ohm |
 | [suggest-labels](skills/suggest-labels/SKILL.md) | Deciding your site's sections with you |
+| [design-home](skills/design-home/SKILL.md) | The curator's first job: screening your site, feeds, PDS and folders read-only, reporting them, and applying only what you decide |
 | [migrate-site](skills/migrate-site/SKILL.md) | Moving a website and social posts in without loss |
 | [build-renderer](skills/build-renderer/SKILL.md) | Making your site's pages build from records |
 | [document-work](skills/document-work/SKILL.md) | Turning each completed outcome into distinct agent and human guides |
+
+It also ships one agent:
+
+| Agent | What it does |
+| --- | --- |
+| [curator](agents/curator.md) | Decides your vault's labels and channels with you and keeps them tidy. The only agent that settles structure; other agents flag questions for it as cortex observations marked `needs: curator`. It runs in your coding agent, never on a server |
 
 [How documentation follows your work](skills/document-work/README.md) explains what to expect from the last skill and how to use it. Its instructions, writing guides and contract live together in [skills/document-work/](skills/document-work/).
 
@@ -214,7 +222,7 @@ The plugin starts a small server on your own machine, `ohm-vault`, that gives yo
 | `vault_list`, `vault_read` | List posts, and read one in full |
 | `vault_search` | Search your posts at every visibility |
 | `vault_save` | Create a post, always private, or change one that was read |
-| `vault_set_visibility` | Mark a post as public, for friends, or private |
+| `vault_set_visibility` | Ask to move a post or friends-only block to public, friends or private. With a write grant, a move to private hides it from friends at once; anything else waits for you in the cockpit |
 | `vault_status` | What publishing would change, without changing anything |
 | `vault_publish` | Publish: make what is published in your repository match your vault. It shows what would change first |
 | `vault_mirror` | Bring what you have already published on your PDS into the vault. It looks first and says what it found |
@@ -310,7 +318,7 @@ pnpm --dir cirrus install --frozen-lockfile
 pnpm --dir cirrus exec wrangler login
 ```
 
-**1. The PDS.** If you already have one, use it. To start one, run `pnpm --dir cirrus pds init`, set up a hostname such as `pds.example.com`, and follow the Cirrus instructions to back up your signing key, verify your handle, and deploy. [Cirrus quick start](https://cirrus.earth/start/quick-start/)
+**1. The PDS.** If you already have one, use it. To start one, run `pnpm --dir cirrus pds init`, set up a hostname such as `pds.example.com`, back up your signing key, verify your handle, and deploy. [Host your own PDS](docs/host-your-pds.md) walks through every step and connecting it to ohm; `cirrus/` deploys the published `@getcirrus/pds` package, locked to one tarball, and that release's source is kept unchanged in [vendor/cirrus/](vendor/cirrus/) ([vendor/IMPORTS.json](vendor/IMPORTS.json)).
 
 **2. The site configuration.**
 
@@ -391,6 +399,7 @@ Use the [human repository guide](docs/repository-map.md) to understand where a c
 | Path | What it is |
 | --- | --- |
 | [cirrus/](cirrus/) | The PDS: a Cloudflare Worker with a Durable Object for the repository and R2 for its media |
+| [vendor/](vendor/) | Upstream source kept unchanged at a pinned commit: the Cirrus release that [cirrus/](cirrus/) installs from npm and deploys. [vendor/IMPORTS.json](vendor/IMPORTS.json) records where each file came from |
 | [feed/](feed/) | The site Worker: identity, forms, the feeds, post pages, and private posts |
 | [vault/](vault/) | The rules every post follows at any visibility; a post as a file; bringing published posts in; syncing a folder; and the stores a site of your own keeps posts in |
 | [service/](service/) | The vault service: ohm's working copy of a vault, one capability to a file, the editor's page, and [the reference](service/CAPABILITIES.md) for every request |

@@ -48,7 +48,7 @@ What I used for the board review. It joins on `account_id`, not `user_id`, becau
 - **kind** says what the block is: `text`, `excerpt`, `link`, `media`, `file`, `code` or `post`. You rarely write it. A block that is one fenced code block is `code`, one embedded file is `file` or `media`, one address is a `link`, and anything else is `text`. Write it when you mean something else, as above.
 - **origin** is where the original lives, when it is not this file: a path on your computer (`~/…` or `/…`), a Google Drive path (`gdrive:My Drive/…`, or the folder Google Drive for desktop mounts), a web address, or an AT URI.
 - **from** names the source a block was captured from, and **excerpt** holds the exact words you kept: `excerpt: {"quote": "the words"}`.
-- **by** and **status** say who made a block (`me` or `agent:<name>`) and whether it is `proposed`, `kept` or `archived`.
+- **by** says who made a block (`me` or `agent:<name>`), and **status** whether it is `kept` or `archived`. An older file that still says `status: proposed` reads as an ordinary block.
 - **visibility** says which layer the block is in, and so who can read it: `private` (the default; encrypted, readable only on your devices), `friends` (readable by ohm and the friends you choose) or `public` (published). Leave it out and the block is private. See [the plan for the three layers](../plans/encryption.md); the storage behind them is not built yet.
 
 The file stays readable: SQL, Python or any other code goes in a fenced block with its language, and Obsidian's `[[links]]`, `![[embeds]]`, callouts, Mermaid diagrams and math all keep working. The vault never runs code.
@@ -155,8 +155,8 @@ Each version of your notes the vault sees is kept too, in `.vault/history/`: wha
 
 ```sh
 npx github:haeinej/ohmmmm vault add ~/Downloads/attention.pdf --channel reading
-npx github:haeinej/ohmmmm vault add ~/work/queries/churn.sql --by agent:claude-code
-npx github:haeinej/ohmmmm vault add https://example.com/essays/on-rain --title "On rain"
+npx github:haeinej/ohmmmm vault add ~/work/queries/churn.sql --channel queries --by agent:claude-code
+npx github:haeinej/ohmmmm vault add https://example.com/essays/on-rain --channel reading --title "On rain"
 ```
 
 - A Markdown file is copied into the channel with an `origin` property.
@@ -164,9 +164,9 @@ npx github:haeinej/ohmmmm vault add https://example.com/essays/on-rain --title "
 - An address becomes a source that refers to it and a link block from that source. Nothing is fetched.
 - The original stays where it was, unless you add `--move`.
 - Nothing already in the vault is overwritten.
-- With no `--channel`, things go to `inbox`.
+- Every addition names its `--channel`. There is no inbox: things go where you are working.
 
-When an agent adds something with `--by agent:<name>`, the block is marked `status: proposed` for you to keep or not.
+When an agent adds something with `--by agent:<name>`, the block says so, and starts private whatever the file said. Showing it to more people is always your move. The journal keeps who did what, and history keeps each version, so anything can be put back.
 
 **Dropping a file in by hand** records what can be checked, and nothing more. When indexing finds a new file in the vault folder, it looks for two things:
 
@@ -209,11 +209,11 @@ Configure a trusted MCP client to launch `ohm vault mcp --vault /path/to/vault -
 
 Ask the agent to run `vault_index`, then search for a block, open it with its history, or follow connections from it. Refresh the index after editing files outside the tools.
 
-To try a capture, ask it to save `https://example.test/reading` to the Inbox. You get a proposed block and a source reference in your folder. Ask it to collect the block in `reading` to make it appear there too. The journal records both actions under the agent name you chose. If another collection is running in the same vault, try again once it finishes.
+To try a capture, grant it `write` on `notes` (below), then ask it to save `https://example.test/reading` into `notes`. You get a private block marked as the agent's, and a source reference in your folder. Ask it to collect the block in `reading` to make it appear there too. The journal records both actions under the agent name you chose. If another collection is running in the same vault, try again once it finishes.
 
 ### Letting an agent change things
 
-By default an agent can only propose: captures land in the Inbox as `proposed`. When you trust an agent with part of your vault, grant it, one channel at a time:
+By default an agent can read, search and collect, and nothing else: it captures and writes only into channels you granted it. Grant it one channel at a time (setting up a home with `design-home` ends by granting the channels you agreed there). A grant also lets an agent move a block on that channel to private, never to more people: [who can see a block](visibility.md).
 
 ```sh
 npx github:haeinej/ohmmmm vault grant claude-code link notes     # may link blocks in notes/ to others
@@ -234,7 +234,7 @@ Give each root a `note` in `.vault/config.json`: what is there, what to trust, h
 
 ### Checking the vault
 
-`vault_lint` (or `ohm vault lint`) gathers what is worth a second look: links to notes that don't exist, notes nothing points to, pairs of notes about the same thing with no link between them, notes with the same title, and proposals you haven't decided on. The vault can't tell whether two notes agree; your agent can. The [lint skill](../skills/lint/SKILL.md) has it read each pair, write what it finds to your cortex, fix what you granted, and ask you about the rest.
+`vault_lint` (or `ohm vault lint`) gathers what is worth a second look: links to notes that don't exist, notes nothing points to, pairs of notes about the same thing with no link between them, and notes with the same title. The vault can't tell whether two notes agree; your agent can. The [lint skill](../skills/lint/SKILL.md) has it read each pair, write what it finds to your cortex, fix what you granted, and ask you about the rest.
 
 ## Using the vault from the cortex
 

@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { byId, titleOf, type Doc } from "@/data/workspace-data"
 import { registerStepTool } from "@/webmcp"
 import { requestDelete } from "@/workspace/PageActions"
-import { pinObservation, switchTool, useWorkspace, writeObservation } from "@/workspace/store"
+import { pinObservation, report, switchTool, useWorkspace, writeObservation } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 
 const LIMIT = 2000
@@ -33,7 +33,7 @@ export function CortexActions({ doc }: { doc: Doc }) {
     return (
       <span className={pill}>
         <span className="truncate">{doc.by && doc.by !== "you" ? `Seen by ${doc.by}` : "Yours"}{on.length ? ` · about ${on.join(", ")}` : " · about you"}</span>
-        <Button size="xs" variant="ghost" aria-pressed={!!doc.pin} onClick={() => pinObservation(doc.id, !doc.pin)}
+        <Button size="xs" variant="ghost" aria-pressed={!!doc.pin} onClick={() => void report(pinObservation(doc.id, !doc.pin))}
           title={doc.pin ? "Every agent session is handed it. Unpin" : "Hand it to every agent session"}>
           <Icon icon={doc.pin ? PinOffIcon : PinIcon} size="xs" />{doc.pin ? "Unpin" : "Pin"}
         </Button>
@@ -46,8 +46,7 @@ export function CortexActions({ doc }: { doc: Doc }) {
       <span className={pill}>
         <span className="truncate">{doc.on ? "Agents may use it" : "Off: agents do not use it"}</span>
         <Switch aria-label={`${doc.title} is ${doc.on ? "on" : "off"}`} checked={!!doc.on} onCheckedChange={v => {
-          switchTool(doc.id, v)
-          notify({ message: `${doc.title} is ${v ? "on" : "off"}`, tone: "info" })
+          void report(switchTool(doc.id, v)).then(() => notify({ message: `${doc.title} is ${v ? "on" : "off"}`, tone: "info" }))
         }} />
       </span>
     )
@@ -98,7 +97,7 @@ export function ObserveButton({ doc, className }: { doc: Doc; className?: string
         signal.addEventListener("abort", () => { setAsking(null); reject(new DOMException("Cancelled", "AbortError")) })
       }),
       run: withAgent("Writing an observation", async ({ text: said, why }) => {
-        const made = write(said, why)
+        const made = await write(said, why)
         return { id: made.id, about: made.about, next: "workspace.open" }
       }),
     }, ac.signal).catch(console.error)
@@ -109,9 +108,9 @@ export function ObserveButton({ doc, className }: { doc: Doc; className?: string
     asking?.answer(approved)
     setAsking(null)
   }
-  const mine = () => {
+  const mine = async () => {
     try {
-      write(text)
+      await write(text)
       setText("")
       setOpen(false)
       notify({ message: "Kept in your cortex, about this block", tone: "info" })

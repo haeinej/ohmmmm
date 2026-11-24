@@ -10,7 +10,7 @@
 //   link   add a link from a block under these folders to another node (write includes it)
 //
 // A scope is a channel's path, and covers that folder and every folder inside it. `*` is the whole
-// vault. With no grant an agent may still capture into the Inbox and collect, as before.
+// vault. With no grant an agent may read, search and collect, and nothing else.
 import { isChannelPath } from './node.mjs';
 
 export const GRANTS = '.vault/grants.json';
