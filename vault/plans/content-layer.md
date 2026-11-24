@@ -54,7 +54,7 @@ Today we rebuild a site and swap where its content is read from. Instead, any As
 - **An `ohm` loader package.** Channels become collections and blocks become entries, with media as image references served from ohm's media cache. A site maps its collections to channels in its config, and its design stays its own.
 - **Public at build time,** from a content loader over the vault service's public reads.
 - **Friends at request time,** through Astro's live collections and the viewer's ohm session, on a server-rendered route. A static build can never hold Friends content, so this split is required, not a choice.
-- **One content API: the vault service.** The PDS stays the public record other apps read; sites do not read it directly, because only the service can answer for Friends and render media.
+- **One content API: the vault service.** The PDS stays the public record other apps read. Sites read through the service, because only it can answer for Friends and render media. The loader starts on the PDS only because the service has no reads for anyone yet, and keeps that source for sites with no ohm account.
 - The `migrate-site` skill shrinks to: add the loader, map collections to channels, check the pages against a baseline. Rule 8 ("rebuild it identically") in `vault/AGENTS.md` becomes "swap the content source for the loader".
 
 ## Publishing and plugins inside the vault
@@ -68,11 +68,14 @@ The mirror, the feed Worker rendering pages, and identical rebuilds. They keep w
 
 ## Order
 
-1. **Remove the inbox** on `home/production-wiring`, then merge PR #33. Merge #34 (curator) and #35 (PDS) as they are, after dropping the agenda's `proposed` count from the curator docs.
-2. **Visibility moves** (standard.site plan step 2), with publishing as one of them.
-3. **The `ohm` Astro loader**, public first, then Friends through live collections. haeinjung.com is the first site on it.
-4. **Plugin manifest and sandbox**, once a first real plugin is wanted.
-5. **Spaces** (standard.site plan step 3), when stable.
+1. **Remove the inbox** on `home/production-wiring`, then merge PR #33. Merge #34 (curator) and #35 (PDS) once up to date with `main`, dropping the agenda's `proposed` count from the curator docs.
+2. **The `ohm` Astro loader**, public first. Until the service has reads for anyone, its public source is the member's PDS (`site.standard.document`s), behind a source interface. haeinjung.com is the first site on it.
+3. **Content reads on the service** for sites: public by DID, Friends with the viewer's session. Then the loader reads through them, and gets Friends through live collections.
+4. **Visibility moves** (standard.site plan step 2), with publishing as one of them.
+5. **Plugin manifest and sandbox**, once a first real plugin is wanted.
+6. **Spaces** (standard.site plan step 3), when stable.
+
+Who builds which, and the prompts to start them: [docs/handoff/content-layer-split.md](../../docs/handoff/content-layer-split.md).
 
 ## Open: the owner's calls
 
