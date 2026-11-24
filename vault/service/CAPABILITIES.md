@@ -394,25 +394,25 @@ Agents' requests for moves, oldest first: those waiting, or those approved or de
 
 ### `com.ohmmmm.vault.declineMoveRequest`
 
-The member declines an agent's request. Nothing moves. Only the member, signed in to ohm, answers a request.
+The member declines an agent's request. Nothing moves. Only the member, signed in to ohm, answers a request. Declining it again changes nothing more.
 
 | | |
 | --- | --- |
 | Reads or changes | Changes (`POST`) |
 | Who may ask | The member, signed in to ohm |
 | Takes | `id`: the request's ID<br>`reason`: optional: why |
-| Gives | `id`, `declined` |
+| Gives | `id`, `declined`, and `unchanged` when it was declined already |
 
 ### `com.ohmmmm.vault.recordMove`
 
-The member's cockpit records a move it made, after the member approved it: a request it answers, a hidden block it sealed, or a move to or from public it handed to Publish. Only the member, signed in to ohm, records a move.
+The member's cockpit records a move it made, after the member approved it: a request it answers, a hidden block it sealed, or a move to or from public it handed to Publish. Only the member, signed in to ohm, records a move. Sent again with the same `moveId` (or `sealedAs`, or `request`), it changes nothing more and answers as the first time.
 
 | | |
 | --- | --- |
 | Reads or changes | Changes (`POST`) |
 | Who may ask | The member, signed in to ohm |
-| Takes | `block`: the block's ID before the move<br>`from`: its layer before<br>`to`: its layer after<br>`request`: optional: the request this answers<br>`sealedAs`: optional: its opaque ID in the private layer<br>`cleanupPending`: optional: true when the old copy could not be removed<br>`reason`: optional: why |
-| Gives | `block`, `from`, `to`, `state` (done, cleanup-pending, or previewed for Publish), and `approved` with the request |
+| Takes | `block`: the block's ID before the move<br>`from`: its layer before<br>`to`: its layer after<br>`request`: optional: the request this answers<br>`sealedAs`: optional: its opaque ID in the private layer<br>`cleanupPending`: optional: true when the old copy could not be removed<br>`reason`: optional: why<br>`moveId`: optional: the cockpit's own ID for this move, so sending it again records nothing more |
+| Gives | `block`, `from`, `to`, `state` (done, cleanup-pending, or previewed for Publish), `approved` with the request, and `unchanged` when this move was recorded already |
 
 ### `com.ohmmmm.vault.listMoves`
 

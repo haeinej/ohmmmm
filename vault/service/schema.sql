@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS moves (
   approved_by TEXT,
   reason TEXT,
   request TEXT,
+  move_id TEXT,
   PRIMARY KEY (did, seq)
 );
 CREATE TABLE IF NOT EXISTS move_requests (
@@ -259,6 +260,10 @@ CREATE TABLE IF NOT EXISTS move_requests (
   PRIMARY KEY (did, id)
 );
 CREATE INDEX IF NOT EXISTS move_requests_waiting ON move_requests (did, state);
+-- A move the cockpit names (`moveId`) is journalled once, however often it is sent. One request
+-- waits per block and layer, even when two agents ask at once.
+CREATE UNIQUE INDEX IF NOT EXISTS moves_move_id ON moves (did, move_id);
+CREATE UNIQUE INDEX IF NOT EXISTS move_requests_one_waiting ON move_requests (did, block, to_layer) WHERE state = 'waiting';
 
 -- The last copy of what each member published, as content reads gave it (src/content.mjs): served,
 -- marked stale, when their PDS cannot be reached, so a site keeps working.
