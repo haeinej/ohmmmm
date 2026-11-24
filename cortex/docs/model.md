@@ -85,6 +85,8 @@ The slowness essay and the Yanaka photos were written in the same week, about th
 - **About one block or channel:** extra context on it. It shows in that block's connections card, and the agent sees it when it reads the block.
 - **About two or more blocks:** it also **connects them**. In the graph that's an observed connection, drawn green; hover it to read the observation. It never becomes one of your links. If you connect the blocks yourself, that connection is yours.
 
+- **A flag for the curator:** `needs: curator` on an observation about a block or channel asks the curator, the one agent that settles labels, channels, moves and merges with you, to take it up. The curator answers with an observation of its own whose `settles` names the flags and whose text says what you decided; `cortex_recall` with `needs: curator` lists the flags not yet settled. A settle names the flag at the version it answered, so a flag rewritten with a new question is open again, and its author withdraws it by rewriting it with `needs: null`. The cortex cannot tell a curator subagent from the agent it runs in, so a flag counts as settled only by you (`cortex observe … --settles <id>`) or by an agent with another name than the one that raised it; the curator is refused a flag raised under its own name and asks you to settle it.
+
 **Editing:** you can change the text, change what it's about, delete it, or write one yourself (`by: you`). Deleting an observation removes the connections it made. An agent may edit or delete only its own observations, and only while you haven't edited them.
 
 **Reading many:** observations only grow. `cortex_start` gives the most recent ones plus any marked by you as always relevant (`pin: true`). `cortex_recall` searches them by words or by block. Old ones are never thrown away automatically; you delete what you don't want.
@@ -163,6 +165,7 @@ Every change by anyone is a journal line with who, when and why, and can be reve
 - **Connections card:** observations about a block, with the text on hover.
 - **History:** the cortex timeline reads the same journal, now without settlements.
 - **WebMCP:** the history tools stay. Editing an observation is a new step with its own tool, per the app's rules.
+- **Built (2026-11-24):** paired with a home through `ohmmmm serve`, the app reads and changes the real cortex through the bridge's cortex routes ([home/cortex-routes.mjs](../../home/cortex-routes.mjs), [docs/serve.md](../../docs/serve.md)), which use only this folder's operations, opened as the person. The person edits every part, pins and forgets observations, switches tools, removes skills, and accepts or declines profile lines and skills. The one WebMCP tool is `cortex.observe`: an agent in the page asks, the person approves, and the observation is written as the agent's ([app/flows/cortex.md](../../app/flows/cortex.md)). History reads this journal into one timeline with the vault's.
 
 ### ohm-onboarding (the account app)
 

@@ -64,11 +64,11 @@ Every block opens in the main panel in one block editor, built after the referen
 
 - **Path.** The toolbar starts with the block's path in a pill, such as `vault / writing / journal / Monday, rain`.
   - **Rename:** click the block's name to rename it in place, with a forest ring around it and the text selected.
-  - **Save by dragging:** drag the pill out of the window to save the block as a `.md` file, or onto a channel in the side panel to move it there.
+  - **Save by dragging:** drag the pill out of the window to save the block as a `.md` file, or onto a channel in the side panel to move it there. A block that shows images is saved as a `.zip`: the `.md` and an `assets/` folder, each embed written as `![alt](assets/<file>)`, so it opens anywhere after the tab has closed.
   - **The ⌄ beside it** opens the block's menu, as a session list has it: Open in › (new tab, graph), Rename (R), Open file…, Save as Markdown, Move to › (from its home channel), Archive (A), Delete (D, asks first).
 - **Toolbar.** After the path, a pill of inserts: Text, Image, Table, and + for everything. On the right: the connections button (with its count), History (the block's versions) and you. Toolbar inserts go after the block the caret is in, never inside a table or list.
 - **Dropping.**
-  - **Images** dropped or pasted onto the block go in where they land. Image in the toolbar or `/` opens a file picker.
+  - **Images** dropped or pasted onto the block go in where they land. Image in the toolbar or `/` opens a file picker. Each image becomes a private **media block** of its own in the block's channel (`![[wet-street.png]]` is its body), named by its bytes' CID, and the block embeds it with `![[wet-street]]`, on a line of its own. The same image added again is not copied: its media block is shown, and collected into the channel if it was not there. The bytes stay in this browser's media cache (`ohm-media`), with sizes of 320, 960 and 1920 px made here. A block never holds a temporary browser address: saving one is refused ([vault/plans/media.md](../../vault/plans/media.md)).
   - **Blocks and files:** dropping a `.md` or `.txt` file, or a block from the tree, opens it. A veil says what the drop will do.
 - **Title.** "Untitled block" until it has one. Type a title with spaces between words, then press Enter to move into the block. Hover the title to add an emoji icon.
 - **Writing.** The empty line says "Type / for commands or @ for mentions". `/` opens the insert menu at the caret, grouped (Generate, Create, Media, Basic) and filtered as you type, with arrows and Enter.
@@ -108,6 +108,8 @@ Every block opens in the main panel in one block editor, built after the referen
   - `extensions.ts`: the slash command, links, and the active cell.
   - `editor.css`: styles the text with ohm tokens.
   - `src/workspace/drop.ts`: opening and saving by drag.
+  - `embed.ts`: `![[…]]` as an embed in the editor and in its Markdown.
+  - `src/media/`: the media cache (`cache.ts`), embeds and the save guard (`embeds.ts`), exports (`export.ts`) and the `.zip` writer (`zip.ts`).
 
 ## Steps and tools
 
@@ -118,10 +120,11 @@ Every block opens in the main panel in one block editor, built after the referen
 | 3 | Graph | Show graph | `workspace.graph` (opens it in the side panel) | `readOnlyHint` | none |
 | 4 | Create | New block | `workspace.create` | none (only a local draft) | none |
 | 5 | Edit | Save draft | `workspace.save-draft` | none (private, local) | none |
+| 6 | Add an image | Image | `workspace.add-image` | none (private, local) | none |
 
 Publishing is not part of this flow. It will be its own flow, with `consequentialHint` and an `ApprovalCard` (see AGENTS.md rules 11 and 12).
 
-`workspace.search` and `workspace.open` stay registered for as long as the workspace is on screen, because search is reachable from every view. `workspace.save-draft` exists only while the editor is open.
+`workspace.search` and `workspace.open` stay registered for as long as the workspace is on screen, because search is reachable from every view. `workspace.save-draft` and `workspace.add-image` exist only while a private block is open in the editor.
 
 ### `workspace.search`
 
@@ -154,6 +157,13 @@ Publishing is not part of this flow. It will be its own flow, with `consequentia
 - **description:** Saves the open draft as private. It is never published. Returns its id and slug.
 - **inputSchema:** `{ "title"?: string, "body"?: string }`
 
+### `workspace.add-image`
+
+- **title:** Image
+- **description:** Adds an image to the open private block. It becomes a private media block in the block's channel, or the one the vault already has for the same image, and the block embeds it at its end. Returns the media block's id and slug.
+- **inputSchema:** `{ "name": string (1–200), "type": "image/avif" | "image/gif" | "image/jpeg" | "image/png" | "image/webp", "data": base64 (up to 20 MB of image), "alt"?: string (up to 1000) }`
+- **Handler:** `addImage` in `src/workspace/store.ts`, the same one the editor's drop, paste and picker call. Bad base64 or another type is refused with `DataError`. The agent's change is saved once, as its own, like `workspace.save-draft`.
+
 ## States
 
 | Situation | What the person sees |
@@ -162,6 +172,10 @@ Publishing is not part of this flow. It will be its own flow, with `consequentia
 | No search matches | "Nothing matches" in the overlay |
 | Agent working | `AgentStatus` in the main panel's header |
 | Draft saved | `notify()`: "Saved as private" |
+| An image is already in the vault | `notify()`: the same media block is shown |
+| A body with a temporary image address | `notify()`: the save is refused, and why |
+| An embed names nothing in the vault | The embed reads "Nothing in your vault is called …" |
+| An embedded image is not on this device | The embed says so, by the media block's title |
 
 ## Where the code is
 

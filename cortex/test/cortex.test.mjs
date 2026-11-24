@@ -67,6 +67,55 @@ test('an observation is one file, a retry is not a second one, and a rewrite nam
   }
 });
 
+test('a working agent flags a question for the curator, and the curator settles it with an observation of its own', async () => {
+  const { dir, cortex } = await fresh();
+  const curator = openCortex(dir, { actor: 'curator' });
+  await cortex.observe({ id: 'label-q', text: 'This essay reads like a photo post; its label may be wrong.', needs: 'curator' });
+  await cortex.observe({ id: 'plain', text: 'Prefers tables to lists.' });
+  assert.match(await readFile(join(dir, 'observations', 'label-q.md'), 'utf8'), /\nneeds: "curator"\n/);
+  assert.deepEqual((await cortex.observations({ needs: 'curator' })).observations.map(item => item.id), ['label-q']);
+  await assert.rejects(cortex.observe({ id: 'x', text: 'y', needs: 'anyone' }), refused('InvalidRequest'));
+  await assert.rejects(curator.observe({ id: 'answer', text: 'Kept as is.', settles: ['plain'] }), refused('NotFound'));
+  await assert.rejects(curator.observe({ id: 'answer', text: 'Kept as is.', settles: ['answer'] }), refused('InvalidRequest'));
+  // Settling writes the curator's own observation and leaves the flag as its author wrote it.
+  await curator.observe({ id: 'answer', text: 'The person kept the label.', settles: ['label-q'] });
+  assert.deepEqual((await cortex.observations({ needs: 'curator' })).observations, []);
+  assert.equal((await cortex.readObservation('label-q')).observation.needs, 'curator');
+  assert.deepEqual((await cortex.readObservation('answer')).observation.settles, ['label-q']);
+  // The same over the tools.
+  const tools = createTools(cortex);
+  await tools.call('cortex_observe', { id: 'channel-q', text: 'Two channels hold the same trip.', needs: 'curator' });
+  assert.deepEqual((await tools.call('cortex_recall', { needs: 'curator' })).observations.map(item => item.id), ['channel-q']);
+});
+
+test('a flag is not settled by the agent that raised it, and a rewritten flag is open again', async () => {
+  const { dir, cortex, person } = await fresh();
+  const curator = openCortex(dir, { actor: 'curator' });
+  const open = async () => (await cortex.observations({ needs: 'curator' })).observations.map(item => item.id);
+  // An agent cannot settle its own flag; a curator subagent shares its name, so the person settles it.
+  const flag = await cortex.observe({ id: 'own-q', text: 'This channel may belong under another.', needs: 'curator' });
+  await assert.rejects(cortex.observe({ id: 'own-a', text: 'Settled by me.', settles: ['own-q'] }), refused('PersonOnly'));
+  // A settle written by hand under the flag's own author does not count either.
+  await writeFile(join(dir, 'observations', 'forged.md'), `---\nat: "2026-11-23T00:00:00.000Z"\nby: "test-agent"\nsettles:\n  - "own-q@${flag.version}"\n---\nSettled.\n`);
+  assert.deepEqual(await open(), ['own-q']);
+  await person.observe({ id: 'you-1', text: 'Keep it where it is.', settles: ['own-q'] });
+  assert.deepEqual(await open(), []);
+  // Rewritten with a new question, the flag is open again; its author withdraws it with needs: null.
+  const read = await cortex.readObservation('own-q');
+  const rewritten = await cortex.observe({ id: 'own-q', text: 'Now it may belong in two channels.', replaces: read.version });
+  assert.deepEqual(await open(), ['own-q']);
+  await cortex.observe({ id: 'own-q', text: 'Now it may belong in two channels.', needs: null, replaces: rewritten.version });
+  assert.deepEqual(await open(), []);
+  assert.equal((await cortex.readObservation('own-q')).observation.needs, undefined);
+  // Once a settled flag is gone, the curator can still retry and rewrite its own answer.
+  await cortex.observe({ id: 'gone-q', text: 'Two blocks may be one.', needs: 'curator' });
+  const answer = await curator.observe({ id: 'gone-a', text: 'The person kept both.', settles: ['gone-q'] });
+  await cortex.removeObservation('gone-q', { replaces: (await cortex.readObservation('gone-q')).version });
+  assert.equal((await curator.observe({ id: 'gone-a', text: 'The person kept both.', settles: ['gone-q'] })).unchanged, true);
+  await curator.observe({ id: 'gone-a', text: 'The person kept both blocks.', settles: ['gone-q'], replaces: answer.version });
+  assert.deepEqual((await cortex.readObservation('gone-a')).observation.settles, ['gone-q']);
+});
+
 test('an agent changes only its own observations as it left them; the person changes any', async () => {
   const { dir, cortex, person } = await fresh();
   const codex = openCortex(dir, { actor: 'codex' });

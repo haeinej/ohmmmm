@@ -21,7 +21,7 @@ These are enforced by the commands and tests. Do not work around them.
 5. **Every post has a label, and the address comes from it.** `/posts/<label>/<sublabel>/<slug>`. A post that fits no section goes under `other`, as a last resort. [docs/labels.md](docs/labels.md)
 6. **Labels are the owner's words.** Offer the plain default and ask. [skills/suggest-labels/SKILL.md](skills/suggest-labels/SKILL.md)
 7. **Never set or mention a post's form.** The publish command identifies it.
-8. **The site's source is the specification.** Do not ask the owner how to build their site. Rebuild it identically and swap only where the content is read from. Ask only what neither the source nor the content can tell you, one decision per question.
+8. **The site's source is the specification.** Follow [move-to-astro](skills/move-to-astro/SKILL.md) to move the site onto Astro and the ohm loader, identically. Keep its design and public addresses. Ask only what the source and content cannot settle, one decision per question.
 9. **Nothing lost, nothing looks different, only the content side changes.** Work on a copy, take a baseline, and check against it. [skills/migrate-site/SKILL.md](skills/migrate-site/SKILL.md)
 10. **Publish nothing without the owner's approval.** A record on a PDS is public the moment it is written. Preview first.
 
@@ -43,6 +43,7 @@ Keep member content private and use synthetic examples in public documentation.
 - Reading, saving, or changing the owner's notes, or who can see one: [skills/vault/SKILL.md](skills/vault/SKILL.md)
 - Finding friends from the person's inbox, or emailing a friend: [skills/connections/SKILL.md](skills/connections/SKILL.md)
 - Deciding sections: [skills/suggest-labels/SKILL.md](skills/suggest-labels/SKILL.md)
+- Designing a home from what someone already has (site, feeds, PDS, folders), and settling labels, channels, moves and merges: the [curator](agents/curator.md) agent with [skills/design-home/SKILL.md](skills/design-home/SKILL.md). Other agents only flag structure questions, with `needs: curator` on a cortex observation
 - Making a site's pages build from records: [skills/build-renderer/SKILL.md](skills/build-renderer/SKILL.md)
 - Documenting completed work for people and agents: [skills/document-work/SKILL.md](skills/document-work/SKILL.md)
 - The commands: `npm run identity`, `posts`, `profile`, `publish:post`, `render`, `lexicon`, `configure`, `migrate`, and `ohm vault init|add|index|status|inspect|search|hook` for a vault folder on this machine ([docs/vault-format.md](docs/vault-format.md)). Run `npm test` after changing code.

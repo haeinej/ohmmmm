@@ -65,6 +65,13 @@ export const checkAccount = value => {
 
 // An observation's ID is made once where it was seen, and reused on a retry.
 export const OBSERVATION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+// Who an observation is waiting for. A working agent flags what only the curator settles (labels,
+// channels, moves, merges) with needs: curator; the curator answers with an observation of its own
+// that settles it. A settle names the flag at the version it answered, so a flag rewritten with a
+// new question is open again. The cortex cannot tell a curator subagent from the agent it runs in
+// (they share one name), so a flag is settled by the person, or by an agent other than the one that
+// raised it; nothing else counts.
+export const NEEDS = ['curator'];
 // How many observations a session is handed, besides the pinned ones.
 export const RECENT = 30;
 const CHANNEL = 'channel:';
@@ -160,16 +167,23 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
   const readObservationFile = (id, content) => {
     const { properties, body } = splitFront(content);
     const about = Array.isArray(properties.about) ? properties.about.filter(item => typeof item === 'string') : [];
+    // Each settle is written <flag id>@<the flag's version it answered>.
+    const settled = (Array.isArray(properties.settles) ? properties.settles : [])
+      .map(item => (typeof item === 'string' ? /^([^@]+)@(c[0-9a-f]+)$/.exec(item) : null)).filter(Boolean)
+      .map(([, flag, version]) => ({ id: flag, version }));
     return {
       id, text: body.trim(), by: typeof properties.by === 'string' ? properties.by : 'you',
       at: typeof properties.at === 'string' ? properties.at : null,
       ...(typeof properties.session === 'string' ? { session: properties.session } : {}),
       ...(about.length ? { about } : {}),
       ...(properties.pin === true ? { pin: true } : {}),
+      ...(NEEDS.includes(properties.needs) ? { needs: properties.needs } : {}),
+      ...(settled.length ? { settles: settled.map(item => item.id), settled } : {}),
     };
   };
-  const observationFile = ({ text: said, by, at: when, session, about, pin }) =>
-    writeFront({ at: when, by, ...(session ? { session } : {}), ...(about?.length ? { about } : {}), ...(pin ? { pin: true } : {}) }, `${said.trim()}\n`);
+  const observationFile = ({ text: said, by, at: when, session, about, pin, needs, settled }) =>
+    writeFront({ at: when, by, ...(session ? { session } : {}), ...(about?.length ? { about } : {}), ...(pin ? { pin: true } : {}),
+      ...(needs ? { needs } : {}), ...(settled?.length ? { settles: settled.map(item => `${item.id}@${item.version}`) } : {}) }, `${said.trim()}\n`);
   async function heldObservation(id) {
     const content = await text(observationPath(id));
     if (content === null) return null;
@@ -753,19 +767,39 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
     // Writes one observation: a new one, or a rewrite of one given with the version read. The person
     // writes any; an agent writes new ones, and rewrites only its own as it left them. Only the
     // person pins one, so every session is handed it.
-    async observe({ id, text: said, about, session, pin, replaces, reason } = {}) {
+    async observe({ id, text: said, about, session, pin, needs, settles, replaces, reason } = {}) {
       checkObservationId(id);
       if (typeof said !== 'string' || !said.trim() || [...said].length > 2000) throw new Refused('InvalidRequest', 'An observation is what was seen, at most 2,000 characters');
       if (session !== undefined && !oneLine(session, 200)) throw new Refused('InvalidRequest', 'session is one line, at most 200 characters');
       if (pin !== undefined && typeof pin !== 'boolean') throw new Refused('InvalidRequest', 'pin is true or false');
       if (pin !== undefined && !person) throw new Refused('PersonOnly', 'Only the person pins an observation');
+      // needs: null withdraws a flag when its author rewrites it.
+      if (needs !== undefined && needs !== null && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}, or null to withdraw a flag`);
+      const held = await heldObservation(id);
+      let settled;
+      if (settles !== undefined) {
+        if (!Array.isArray(settles) || settles.length > 20 || new Set(settles).size !== settles.length || settles.includes(id)) throw new Refused('InvalidRequest', 'settles is up to 20 distinct IDs of other observations');
+        // A flag this observation already settles keeps the version it answered, even if it has
+        // since been removed, so a retry or a rewrite of the answer still works.
+        const already = new Map((held?.observation.settled ?? []).map(item => [item.id, item.version]));
+        settled = [];
+        for (const flag of settles) {
+          checkObservationId(flag);
+          if (already.has(flag)) { settled.push({ id: flag, version: already.get(flag) }); continue; }
+          const target = await heldObservation(flag);
+          if (!target?.observation.needs) throw new Refused('NotFound', `There is no observation ${flag} waiting to be settled`);
+          if (!person && target.observation.by === authorOf(actor)) throw new Refused('PersonOnly', `${flag} was raised under your own name, so the person settles it: ask them, and they run cortex observe with --settles ${flag}`);
+          settled.push({ id: flag, version: target.version });
+        }
+      }
       const why = checkReason(reason);
       const checked = await checkAbout(about);
       const spec = nodeOf(`observation/${id}`);
-      const held = await heldObservation(id);
       if (held) {
-        const was = held.observation;
-        const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}) };
+        const { settles: _ids, settled: wasSettled, needs: wasNeeds, ...was } = held.observation;
+        const keptNeeds = needs === undefined ? wasNeeds : needs ?? undefined;
+        const next = { ...was, text: said, ...(about !== undefined ? { about: checked } : {}), ...(pin !== undefined ? { pin } : {}),
+          ...(keptNeeds ? { needs: keptNeeds } : {}), settled: settled ?? wasSettled };
         const content = observationFile(next);
         if (replaces === undefined) {
           // A retry of the same observation is not a second one.
@@ -777,7 +811,7 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
         return { id, ...await edit(spec, 'update', content, { before: held.version, reason: why, session }) };
       }
       if (replaces !== undefined && replaces !== null) throw changed(`observation ${id}`, null);
-      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin });
+      const content = observationFile({ text: said, by: authorOf(actor), at: now().toISOString(), session, about: checked, pin, needs: needs ?? undefined, settled });
       return { id, ...await edit(spec, 'create', content, { reason: why, session }) };
     },
 
@@ -806,13 +840,22 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
 
     // Observations, newest first: all of them, those about something (a block ID or channel:<path>),
     // or those whose words match. Words in the text count, and so do the IDs and channels it is about.
-    async observations({ q, about, by, limit = 50 } = {}) {
+    // With needs, only the flags waiting for that agent: marked needs, and not settled at their
+    // current version by the person or by an agent other than the flag's author.
+    async observations({ q, about, by, needs, limit = 50 } = {}) {
+      if (needs !== undefined && !NEEDS.includes(needs)) throw new Refused('InvalidRequest', `needs is ${NEEDS.join(' or ')}`);
       if (q !== undefined && (typeof q !== 'string' || !q.trim() || q.length > 2000)) throw new Refused('InvalidRequest', 'q is one or more words, at most 2,000 characters');
       if (about !== undefined && (typeof about !== 'string' || !about.trim())) throw new Refused('InvalidRequest', 'about is a block ID, or a channel written channel:<path>');
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Refused('InvalidRequest', 'limit is a whole number from 1 to 500');
       let { observations: found } = await all();
+      const flags = new Map(found.filter(item => item.needs).map(item => [item.id, item]));
+      const settled = new Set(found.flatMap(answer => (answer.settled ?? []).filter(({ id: flag, version }) => {
+        const target = flags.get(flag);
+        return target && target.version === version && (answer.by === 'you' || answer.by !== target.by);
+      }).map(item => item.id)));
       if (about !== undefined) found = found.filter(item => item.about?.includes(about));
       if (by !== undefined) found = found.filter(item => item.by === by);
+      if (needs !== undefined) found = found.filter(item => item.needs === needs && !settled.has(item.id));
       if (q !== undefined) {
         const words = [...new Set(q.toLowerCase().split(/\s+/).filter(Boolean))].slice(0, 12);
         const count = (within, word) => within.toLowerCase().split(word).length - 1;
@@ -887,6 +930,114 @@ export function openCortex(dir, { actor = 'member', now = () => new Date(), vaul
       if (await text(at('tools', `${name}.md`)) !== null) throw new Refused('NameTaken', 'A tool already has this name');
       await put(at('.cortex', 'proposed', 'tools', `${name}.md`), writeFront({ name, description, on: false, proposedBy: actor }, `## Takes\n\n${inputs}\n\n## Gives\n\n${outputs}\n`));
       return { name, proposed: true };
+    },
+
+    // --- What the person does from the app (home/serve.mjs) ---------------------------------------
+    // Each is the person's own change, made through edit() so it is kept and journaled as theirs, and
+    // refused to an agent in code.
+
+    // A skill in force, whole: its SKILL.md, the body under its properties, and its version.
+    async readSkill(name) {
+      const found = await skillAt(at('skills', known(name, 'skill')));
+      if (!found) throw new Refused('NotFound', 'There is no such skill');
+      return { name, description: String(found.description ?? ''), text: found.skill.text, body: splitFront(found.skill.text).body, files: found.skill.files.map(file => file.path), version: found.version };
+    },
+
+    // The person rewrites a skill's instructions: the body of its SKILL.md. Its properties and the
+    // files beside it stay as they are. `replaces` is the version read.
+    async writeSkill(name, { body, replaces, reason } = {}) {
+      onlyPerson('edits a skill');
+      if (typeof body !== 'string' || bytes(body) > 65536) throw new Refused('InvalidRequest', 'A skill is Markdown, at most 64 KB');
+      const spec = nodeOf(`skill/${known(name, 'skill')}`);
+      const live = await skillAt(at('skills', name));
+      if (!live) throw new Refused('NotFound', 'There is no such skill');
+      if (replaces !== undefined && replaces !== live.version) throw changed(`skill ${name}`, live.version);
+      const held = splitFront(live.skill.text);
+      const head = live.skill.text.slice(0, live.skill.text.length - held.body.length);
+      const content = `${head}${held.body.startsWith('\n') ? '\n' : ''}${body.trim()}\n`;
+      if (content === live.skill.text) return { name, version: live.version, unchanged: true };
+      return { name, ...await edit(spec, 'update', { text: content, files: live.skill.files }, { before: live.version, reason: checkReason(reason) ?? 'skill edited' }) };
+    },
+
+    // The person removes a skill. It is kept, and can be restored.
+    async removeSkill(name, { replaces, reason } = {}) {
+      onlyPerson('removes a skill');
+      const spec = nodeOf(`skill/${known(name, 'skill')}`);
+      const live = await spec.live();
+      if (!live) return { name, removed: true, unchanged: true };
+      if (replaces !== undefined && replaces !== live.version) throw changed(`skill ${name}`, live.version);
+      return { name, removed: true, ...await edit(spec, 'remove', null, { before: live.version, reason: checkReason(reason) ?? 'skill removed' }) };
+    },
+
+    // Skills agents proposed, waiting for the person: each whole, with who proposed it.
+    async proposedSkills() {
+      const root = at('.cortex', 'proposed', 'skills');
+      const found = [];
+      for (const entry of await names(root)) {
+        if (!entry.isDirectory() || !NAME.test(entry.name)) continue;
+        const skill = await skillAt(join(root, entry.name));
+        if (!skill) continue;
+        let proposal = {};
+        try { proposal = JSON.parse(await text(join(root, entry.name, '.proposal.json')) ?? '{}') ?? {}; } catch {}
+        found.push({ name: entry.name, description: String(skill.description ?? ''), text: skill.skill.text, files: skill.skill.files.filter(file => file.path !== '.proposal.json').map(file => file.path), by: typeof proposal.by === 'string' ? proposal.by : null, when: typeof proposal.when === 'string' ? proposal.when : null, version: skill.version });
+      }
+      return found.sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // The person turns a proposed skill down. It was never in force, so it is no change to a node;
+    // it is moved aside to .cortex/declined/skills/, so nothing is lost.
+    async declineSkill(name) {
+      onlyPerson('declines a skill');
+      const root = at('.cortex', 'proposed', 'skills', known(name, 'skill'));
+      if (!await skillAt(root)) throw new Refused('NotFound', 'No skill of that name is waiting');
+      const stamp = now().toISOString().replace(/[:.]/g, '-');
+      await mkdir(at('.cortex', 'declined', 'skills'), { recursive: true });
+      await rename(root, at('.cortex', 'declined', 'skills', `${name}_${stamp}`));
+      return { name, declined: true };
+    },
+
+    // A tool in tools/: its file, the body under its properties, whether it is on, and its version.
+    async readTool(name) {
+      const live = await nodeOf(`tool/${known(name, 'tool')}`).live();
+      if (!live) throw new Refused('NotFound', 'There is no such tool');
+      const { properties, body } = splitFront(live.content);
+      return { name, description: String(properties.description ?? ''), on: properties.on === true, text: live.content, body, version: live.version };
+    },
+
+    // The person switches a tool on or off, or rewrites what it says. Every other property stays.
+    async writeTool(name, { body, on, replaces, reason } = {}) {
+      onlyPerson('changes a tool');
+      if (body !== undefined && (typeof body !== 'string' || bytes(body) > 65536)) throw new Refused('InvalidRequest', 'A tool is Markdown, at most 64 KB');
+      if (on !== undefined && typeof on !== 'boolean') throw new Refused('InvalidRequest', 'on is true or false');
+      const spec = nodeOf(`tool/${known(name, 'tool')}`);
+      const live = await spec.live();
+      if (!live) throw new Refused('NotFound', 'There is no such tool');
+      if (replaces !== undefined && replaces !== live.version) throw changed(`tool ${name}`, live.version);
+      const held = splitFront(live.content);
+      let content = live.content;
+      if (body !== undefined) content = `${content.slice(0, content.length - held.body.length)}${held.body.startsWith('\n') ? '\n' : ''}${body.trim()}\n`;
+      if (on !== undefined && (held.properties.on === true) !== on) content = writeFront({ ...splitFront(content).properties, on }, splitFront(content).body);
+      if (content === live.content) return { name, version: live.version, unchanged: true };
+      const why = checkReason(reason) ?? (on !== undefined && (held.properties.on === true) !== on ? (on ? 'switched on' : 'switched off') : 'tool edited');
+      return { name, ...await edit(spec, 'update', content, { before: live.version, reason: why }) };
+    },
+
+    // Tools agents asked for: requests for one to be built, never usable as they are.
+    async proposedTools() {
+      const found = [];
+      for (const entry of await names(at('.cortex', 'proposed', 'tools'))) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        const content = await readFile(at('.cortex', 'proposed', 'tools', entry.name), 'utf8');
+        const { properties, body } = splitFront(content);
+        found.push({ name: entry.name.slice(0, -3), description: String(properties.description ?? ''), body, by: typeof properties.proposedBy === 'string' ? properties.proposedBy : null });
+      }
+      return found.sort((a, b) => a.name.localeCompare(b.name));
+    },
+
+    // A node's text at one of its versions, now or kept, or null. For history; it changes nothing.
+    async textAt(node, version) {
+      const content = await contentAt(nodeOf(node), version);
+      return content === null ? null : typeof content === 'string' ? content : content.text;
     },
 
     // --- From before docs/model.md ---------------------------------------------------------------

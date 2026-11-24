@@ -29,7 +29,7 @@ If a Devin task needs something in a Claude-owned file (a service request, a wor
 | --- | --- | --- | --- | --- |
 | C1 | Claude | Remove the inbox (plan › Remove the inbox), on #33 | Now | `home/production-wiring` |
 | C2 | Claude | Content reads for sites: public channels and blocks by DID, and Friends reads with a viewer's ohm session | After #33 merges | `vault/content-reads` |
-| C3 | Claude | Visibility moves, publishing as one of them (standard.site plan › step 2) | After C2 merges | `home/visibility` |
+| C3 | Claude | Visibility moves, publishing as one of them (standard.site plan › step 2). The home-folder part (Only you ↔ Friends, agents ask, the person approves) was agreed with the owner and built in #44; moves between the service's stores and publishing remain | After C2 merges | `home/visibility` |
 | D1 | Devin | The `ohm` Astro loader, public content from the member's PDS | After #37 merges | `vault/astro-loader` |
 | D2 | Devin | The curator's `move-to-astro` skill, written while moving haeinjung.com onto Astro and the loader with it | After D1 (stacked if open) | `vault/move-to-astro` here, and a branch in `haeinej/haeinjung.com` |
 | D3 | Devin | Bring #34 and #35 up to date with `main` | After #33 merges | their own branches |

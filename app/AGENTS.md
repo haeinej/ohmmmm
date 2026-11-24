@@ -71,6 +71,7 @@ npm --prefix app run build
 Root `npm test` also runs the app typecheck and build. The import preserved history from ohm-ux. Verify it from the root with `git log -m --follow -- app/src/App.tsx`.
 
 - The app is Vite + React 19 + Tailwind 4. ohm-ui's foundations are in `src/ohm/`, copied with `npm run foundations -- ../ohmmmm/app` from an ohm-ui checkout beside ohmmmm; never edit them here. Components come from `npx shadcn add @ohm/<name>` into `src/components/`.
+- `yjs`, `y-protocols`, `@tiptap/y-tiptap` and `@tiptap/extension-collaboration` are there because the editor's drag handle (`@tiptap/extension-drag-handle`) imports the last two, and `@tiptap/y-tiptap` imports the first two. There is no real-time collaboration and none is planned: build nothing on them, and do not remove them while the drag handle stays.
 - In development, `src/webmcp-shim.ts` stands in for `document.modelContext` when the browser has none, so the tool path can be walked from the console: `await document.modelContext.getTools()`, then `executeTool(tool, input)`. It is never in a production build.
 
 ## Each flow

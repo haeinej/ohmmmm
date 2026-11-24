@@ -6,15 +6,19 @@ One list for the vault, the cortex and the account app. When a part needs a word
 
 - **Home:** a person's folder `ohmmmm.<handle>`, holding `vault/` and `cortex/`.
 - **Handle:** the person's AT Protocol handle, which names the home. The DID is in the cortex's identity, not in folder names.
+- **Bridge:** `ohmmmm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohmmmm pair`) prints, which holds that browser's **app key**. Each agent has its own **agent key** (`ohmmmm agents add <name>`), which reaches only the MCP endpoints and makes every session it opens that agent ([docs/serve.md](serve.md)).
 
 ## In the vault
 
 - **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post**: a standard.site document (`site.standard.document`) in the member's repository, with the post itself inside as `com.ohmmmm.post` content. The member's website is its **publication** (`site.standard.publication`).
+- **Media block:** a block of kind `media` that holds one image: its file sits beside it in the home folder, and its `hash` is the bytes' CID. Another block shows it with an **embed**, `![[slug]]`. Outside the home folder its bytes are in the **media cache** (the browser's `ohm-media` today), with **sizes**: smaller copies made on the device ([vault/plans/media.md](../vault/plans/media.md)).
 - **Channel:** an ordered collection of blocks; a block can be in many. Named by its path, such as `essays` or `notes/reading`.
+- **Former name:** a path, slug or title a block or channel had before it was renamed or moved. Old names keep working: the journal records them (`renamed`, `moved`), and a reference that uses one is listed to tidy, never broken ([vault/plans/renames.md](../vault/plans/renames.md)).
 - **Entity**, **source:** a person, place or thing a block is about; where a block came from.
 - **Connection:** a link the content shows: a channel contains a block, a block links to, embeds or mentions something, a block is from a source. Cortex calls the same thing **evidence** when it reads it; the vault draws it, a model never does.
 - **Node:** any file the vault reads as a thing: a block, a channel, an entity or a source (node keys such as `block:<id>`).
 - **Visibility:** `public`, `friends` or `private`, on each block; it chooses the **layer**, and so the store.
+- **Publish:** making a block a post, only by the person after they see its **plan** (address, label, images). From the home folder the bridge does it with the person's **app password**, which stays on their computer. **Take down** removes the post first, then moves the block. The **label** and **sublabel** place a post on the site (`/posts/<label>/<sublabel>/<slug>`); a channel keeps its own as `site` ([docs/serve.md](serve.md)).
 - **Friends layer**, **private layer:** blocks readable by the vault service and shared with chosen DIDs; blocks the service stores only as ciphertext.
 - **Journal** (`.vault/journal.jsonl`), **index** (`.vault/index.sqlite`), **roots** (`.vault/config.json`).
 - **Version** and **rev:** a kept state of a block. `version` names its exact ciphertext (for compare-and-swap); `rev` names the kept version and never changes, so history points at it.

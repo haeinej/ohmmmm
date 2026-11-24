@@ -12,7 +12,7 @@
 // cortex accept <id> [dir]          add a line an agent proposed to the profile
 // cortex decline <id> [dir]         turn one down; that line is not proposed again
 // cortex observations [dir] [--about <id|channel:path>] [--json]   what agents observed, newest first
-// cortex observe <text> [dir] [--about <id,…>] [--pin]   write an observation of your own
+// cortex observe <text> [dir] [--about <id,…>] [--settles <id,…>] [--pin]   write an observation of your own
 // cortex forget <id> [dir]          remove an observation; it is kept in history and can be restored
 // cortex migrate [dir]              bring a cortex made before docs/model.md to profile and observations
 // cortex hook <moment> [dir] --agent <name>   answer a Claude Code or Codex hook: session-start, prompt, stop, session-end
@@ -123,7 +123,9 @@ try {
     const pin = rest.includes('--pin');
     if (pin) rest.splice(rest.indexOf('--pin'), 1);
     const about = take('--about');
-    const done = await openCortex(folder(rest[1]), { actor: 'member' }).observe({ id: `you-${randomUUID().slice(0, 8)}`, text: rest[0], ...(about ? { about: about.split(',').map(item => item.trim()).filter(Boolean) } : {}), ...(pin ? { pin } : {}) });
+    const settles = take('--settles');
+    const list = given => given.split(',').map(item => item.trim()).filter(Boolean);
+    const done = await openCortex(folder(rest[1]), { actor: 'member' }).observe({ id: `you-${randomUUID().slice(0, 8)}`, text: rest[0], ...(about ? { about: list(about) } : {}), ...(settles ? { settles: list(settles) } : {}), ...(pin ? { pin } : {}) });
     console.log(`Recorded ${done.id}`);
   } else if (command === 'forget' && rest[0]) {
     const cortex = openCortex(folder(rest[1]), { actor: 'member' });
@@ -199,7 +201,7 @@ try {
     const done = await openCortex(folder(rest[1]), { actor: 'member' }).revert({ change: rest[0], reason });
     console.log(`Change ${rest[0]} is undone: ${done.node} is back as it was. What it replaced is kept.`);
   } else {
-    console.log('cortex init [dir] [--account <did>] | mcp [dir] | serve [dir] [--port 8765] [--host 127.0.0.1] | token [dir] [--replace] | vault connect <folder> [dir] [--module <file>] | vault [dir] | profile [dir] | account <did|handle> [dir] | accept <id> [dir] | decline <id> [dir] | observations [dir] [--about <id>] [--json] | observe <text> [dir] [--about <ids>] [--pin] | forget <id> [dir] | migrate [dir] | approve <skill> [dir] | event <text> [dir] | status [dir] [--json] | hook <moment> [dir] --agent <name> | install-hooks claude-code|codex | history [dir] [--node <path>] [--since <seq|date>] [--actor <name>] [--json] | as-of <node> <save|date|seq> [dir] | save <name> <note> [dir] | restore <node> <version> [dir] [--reason <why>] | revert <change> [dir] [--reason <why>]');
+    console.log('cortex init [dir] [--account <did>] | mcp [dir] | serve [dir] [--port 8765] [--host 127.0.0.1] | token [dir] [--replace] | vault connect <folder> [dir] [--module <file>] | vault [dir] | profile [dir] | account <did|handle> [dir] | accept <id> [dir] | decline <id> [dir] | observations [dir] [--about <id>] [--json] | observe <text> [dir] [--about <ids>] [--settles <ids>] [--pin] | forget <id> [dir] | migrate [dir] | approve <skill> [dir] | event <text> [dir] | status [dir] [--json] | hook <moment> [dir] --agent <name> | install-hooks claude-code|codex | history [dir] [--node <path>] [--since <seq|date>] [--actor <name>] [--json] | as-of <node> <save|date|seq> [dir] | save <name> <note> [dir] | restore <node> <version> [dir] [--reason <why>] | revert <change> [dir] [--reason <why>]');
     process.exitCode = command ? 1 : 0;
   }
 } catch (problem) {
