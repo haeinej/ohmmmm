@@ -8,6 +8,8 @@
 //   /vault/file     PUT or DELETE one file, as the person, only over the version it was read at
 //   /vault/journal  GET the vault's recent changes, with the kept versions they name, for the app's history
 //   /vault/rename   POST a rename or move of a block or channel, as the person, rewriting what used the old name
+//   /vault/visibility  POST a block's move between Only you and Friends, as the person
+//   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -34,6 +36,7 @@ import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
 import { appendEvents, readEvents } from '../vault/vault/journal.mjs';
 import { isChannelPath, newNodeId, readNode, SOURCES } from '../vault/vault/node.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
+import { decideRequest, layerOf, readRequests, withVisibility } from '../vault/vault/visibility.mjs';
 import { findHome } from './home.mjs';
 
 export const PORT = 8766;
@@ -279,6 +282,38 @@ export async function renameAsPerson({ vault, change }) {
   return { ...done, moves: plan.moves, files: now };
 }
 
+/**
+ * Moves a block between Only you and Friends as the person (vault/vault/visibility.mjs), over the
+ * version read (`replaces`; left out when the person approves an agent's request on the file as it
+ * is). Journaled `changed`, `via: visibility`, with `layer`, `was`, and the agent that `asked` and
+ * its `why` when one did. Public is refused: that is Publish.
+ */
+export async function moveAsPerson({ vault, path, to, replaces, asked, why }) {
+  if (!editablePath(path)) throw Object.assign(new Error('Give the block as its file\'s path in the vault'), { status: 400 });
+  const file = await inVault(vault, path);
+  const before = await readFile(file, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+  if (before === undefined) throw Object.assign(new Error('There is no such file any more'), { status: 412, version: null });
+  const version = await versionOf(before);
+  if (replaces !== undefined && replaces !== version) throw Object.assign(new Error('The file changed since it was read'), { status: 412, version });
+  const was = layerOf(path, before);
+  const text = withVisibility(path, before, to);
+  if (text === before) return { path, text, version, layer: to, unchanged: true };
+  const kept = await keep(vault, before);
+  const hash = await keep(vault, text);
+  const temp = join(dirname(file), `.edit-${randomUUID()}`);
+  try {
+    await writeFile(temp, text, { flag: 'wx' });
+    await rename(temp, file);
+  } finally {
+    await rm(temp, { force: true });
+  }
+  await appendEvents(vault, [{
+    at: new Date().toISOString(), op: 'changed', root: 'vault', path, by: 'me', via: 'visibility', layer: to, was,
+    ...(asked ? { asked } : {}), ...(why ? { why } : {}), before: kept, hash,
+  }]);
+  return { path, text, version: hash, layer: to, was };
+}
+
 // ---- The bridge ----
 
 const digest = value => createHash('sha256').update(value).digest();
@@ -390,6 +425,44 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const done = await withCollectLock(layout.vault, DatabaseSync, () => renameAsPerson({ vault: layout.vault, change }));
         return send(res, 200, done);
       }
+      if (url.pathname === '/vault/visibility' && req.method === 'POST') {
+        const match = req.headers['if-match'];
+        if (match === undefined) return said(res, 428, 'Say which version you read: If-Match: "<version>"');
+        let asked;
+        try { asked = JSON.parse((await body(req, 16 * 1024)).toString('utf8')); } catch { return said(res, 400, 'Send the move as one JSON object'); }
+        if (!asked || typeof asked.path !== 'string' || typeof asked.to !== 'string' || (asked.why !== undefined && typeof asked.why !== 'string')
+          || (asked.asked !== undefined && !/^agent:[A-Za-z0-9._-]{1,100}$/.test(asked.asked))) return said(res, 400, 'A move is { path, to, why?, asked? }, asked naming the agent that asked, approved by the person');
+        try {
+          const done = await withCollectLock(layout.vault, DatabaseSync, () => moveAsPerson({ vault: layout.vault, path: asked.path, to: asked.to, replaces: String(match).replace(/^W\//, '').replace(/^"|"$/g, ''), asked: asked.asked, why: asked.why?.slice(0, 500) }));
+          return send(res, 200, done);
+        } catch (problem) {
+          if (!problem.status) throw problem;
+          return send(res, problem.status, { error: problem.message, ...(problem.version !== undefined ? { version: problem.version } : {}) });
+        }
+      }
+      if (url.pathname === '/vault/requests' && req.method === 'GET') {
+        return send(res, 200, { requests: (await readRequests(layout.vault)).filter(each => each.status === 'waiting') });
+      }
+      const deciding = /^\/vault\/requests\/([0-9a-f-]{36})$/.exec(url.pathname);
+      if (deciding && req.method === 'POST') {
+        let decision;
+        try { decision = JSON.parse((await body(req, 4 * 1024)).toString('utf8')); } catch { return said(res, 400, 'Send { approve: true } or { approve: false }'); }
+        if (typeof decision?.approve !== 'boolean') return said(res, 400, 'Send { approve: true } or { approve: false }');
+        const done = await withCollectLock(layout.vault, DatabaseSync, async () => {
+          const request = (await readRequests(layout.vault)).find(each => each.id === deciding[1]);
+          if (!request) throw new VaultProblem('There is no such request.');
+          if (!decision.approve) return { request: await decideRequest(layout.vault, request.id, 'declined') };
+          try {
+            const file = await moveAsPerson({ vault: layout.vault, path: request.path, to: request.to, asked: request.by, why: request.why });
+            return { request: await decideRequest(layout.vault, request.id, 'approved'), file };
+          } catch (problem) {
+            if (!problem.status && !(problem instanceof VaultProblem)) throw problem;
+            // It cannot be done as asked any more (the file went, or is public now): declined, saying why.
+            return { request: await decideRequest(layout.vault, request.id, 'declined', { note: problem.message }) };
+          }
+        });
+        return send(res, 200, done);
+      }
       if (url.pathname === '/vault/files' && req.method === 'GET') {
         const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });
         return send(res, 200, { home: layout.handle, files: await Promise.all(files.map(async file => ({ ...file, version: await versionOf(file.text) }))) });
@@ -431,10 +504,10 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
         const scanned = await withIndex(db => summary(db).scanned);
         return send(res, 200, {
           home: layout.handle, vault: { scanned }, cortex: Boolean(await cortexReady()),
-          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename' },
+          endpoints: { vault: '/vault/mcp', cortex: '/cortex/mcp', media: '/media/<cid>', files: '/vault/files', file: '/vault/file', journal: '/vault/journal', rename: '/vault/rename', visibility: '/vault/visibility', requests: '/vault/requests' },
         });
       }
-      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename and /media/<cid>');
+      return said(res, 404, 'Not here. The bridge serves /vault/mcp, /cortex/mcp, /vault/files, /vault/file, /vault/journal, /vault/rename, /vault/visibility, /vault/requests and /media/<cid>');
     } catch (problem) {
       // A refusal the vault explains (VaultProblem) is answered with its reason; anything else says nothing.
       if (!res.headersSent) said(res, problem instanceof VaultProblem ? 409 : 500, problem instanceof VaultProblem ? problem.message : 'Internal error');

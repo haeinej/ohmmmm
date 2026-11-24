@@ -15,6 +15,7 @@ import { APP, homeBridge, homeToken, listenHome, pairingLink, TOKEN } from '../h
 import { blobCid } from '../vault/vault/core.mjs';
 import { readEvents } from '../vault/vault/journal.mjs';
 import { readNode } from '../vault/vault/node.mjs';
+import { layerOf } from '../vault/vault/visibility.mjs';
 
 // A 1×1 PNG, as a synthetic image.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -243,4 +244,44 @@ test('the app reads the vault\'s recent changes with their versions, and renames
   assert.equal(taken.status, 409);
   assert.match(taken.json.error, /already a channel/);
   assert.equal((await json('POST', '/vault/rename', { block: '../x.md', home: 'y' })).status, 400);
+});
+
+test('who sees a block is changed by the person, over the version read; an agent\'s request waits for them', async t => {
+  const { layout, call, signed, mcp } = await setUp(t);
+  const json = (method, path, value, headers = {}) => call(method, path, { headers: { ...signed, 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(value) });
+  const walk = await readFile(join(layout.vault, 'notes/walk.md'), 'utf8');
+  const version = await blobCid(Buffer.from(walk, 'utf8'));
+  assert.equal((await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'friends' })).status, 428);
+  assert.equal((await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'friends' }, { 'If-Match': '"bafkreiaaaaaaaaaaaaaaaaaaaaaaaaaaa"' })).status, 412);
+  const moved = await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'friends', why: 'For June.' }, { 'If-Match': `"${version}"` });
+  assert.equal(moved.status, 200);
+  assert.deepEqual([moved.json.layer, moved.json.was], ['friends', 'private']);
+  assert.equal(readNode('notes/walk.md', await readFile(join(layout.vault, 'notes/walk.md'), 'utf8')).node.visibility, 'friends');
+  assert.equal((await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'private', asked: 'someone else' }, { 'If-Match': `"${moved.json.version}"` })).status, 400, 'asked names an agent');
+  const public_ = await json('POST', '/vault/visibility', { path: 'notes/walk.md', to: 'public' }, { 'If-Match': `"${moved.json.version}"` });
+  assert.equal(public_.status, 409);
+  assert.match(public_.json.error, /goes through Publish/);
+
+  // An agent asks to take it back to only you; the person approves in the app.
+  const vault = await mcp('/vault/mcp', 'claude-code');
+  await vault.send('tools/call', { name: 'vault_index' });
+  const asked = JSON.parse((await vault.send('tools/call', { name: 'vault_request_visibility', arguments: { ref: 'walk', to: 'private', why: 'It names a friend.' } })).json.result.content[0].text);
+  const waiting = await call('GET', '/vault/requests', { headers: signed });
+  assert.deepEqual(waiting.json.requests.map(each => [each.by, each.path, each.to, each.why]), [['agent:claude-code', 'notes/walk.md', 'private', 'It names a friend.']]);
+  const approved = await json('POST', `/vault/requests/${asked.request}`, { approve: true });
+  assert.equal(approved.json.request.status, 'approved');
+  assert.equal(approved.json.file.layer, 'private');
+  assert.equal(layerOf('notes/walk.md', await readFile(join(layout.vault, 'notes/walk.md'), 'utf8')), 'private');
+  const { events } = await readEvents(layout.vault);
+  assert.deepEqual(events.filter(event => event.via === 'visibility').map(event => [event.by, event.layer, event.was, event.asked, event.why]), [
+    ['me', 'friends', 'private', undefined, 'For June.'],
+    ['me', 'private', 'friends', 'agent:claude-code', 'It names a friend.'],
+  ]);
+  assert.deepEqual((await call('GET', '/vault/requests', { headers: signed })).json.requests, []);
+  // A declined one changes nothing, and the agent sees how it went.
+  const again = JSON.parse((await vault.send('tools/call', { name: 'vault_request_visibility', arguments: { ref: 'walk', to: 'friends' } })).json.result.content[0].text);
+  assert.equal((await json('POST', `/vault/requests/${again.request}`, { approve: false })).json.request.status, 'declined');
+  assert.equal(layerOf('notes/walk.md', await readFile(join(layout.vault, 'notes/walk.md'), 'utf8')), 'private');
+  const mine = JSON.parse((await vault.send('tools/call', { name: 'vault_requests' })).json.result.content[0].text);
+  assert.deepEqual(mine.requests.map(each => each.status), ['declined', 'approved']);
 });

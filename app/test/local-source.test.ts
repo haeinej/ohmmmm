@@ -4,11 +4,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { blobCid } from "../../vault/vault/core.mjs"
+import { withVisibility } from "../../vault/vault/visibility.mjs"
 import { readProperties, splitFile } from "../../vault/vault/file.mjs"
-import { createLocalSource, mergeFile } from "../src/data/local-source"
+import { createLocalSource, fileId, mergeFile } from "../src/data/local-source"
 import { byId, bySlug, channelRecords, demoJournal } from "../src/data/workspace-data"
 import { memoryBackend, setMediaBackend } from "../src/media/cache"
-import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, sourceChanged } from "../src/workspace/store"
+import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, setVisibility, sourceChanged } from "../src/workspace/store"
 
 const TID = "3m2zx5u6ifk2a"
 const bridge = { url: "http://127.0.0.1:8766", token: "QexdqYGJ2FZs7RkxcsaXaQMMXE0wJv3TqcHALTiddso" }
@@ -16,7 +17,8 @@ const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 const props = (text: string) => readProperties(splitFile(text).head).properties as Record<string, unknown>
 
 /** A bridge over files kept in memory, answering as home/serve.mjs does, with real versions. */
-function fakeHome(initial: Record<string, string>, journal: { events: unknown[]; texts: Record<string, string> } = { events: [], texts: {} }) {
+type Request = { id: string; by: string; path: string; from: string; to: string; why?: string; status: string }
+function fakeHome(initial: Record<string, string>, journal: { events: unknown[]; texts: Record<string, string> } = { events: [], texts: {} }, requests: Request[] = []) {
   const disk = new Map(Object.entries(initial))
   const calls: string[] = []
   const version = (text: string) => blobCid(new TextEncoder().encode(text))
@@ -28,6 +30,25 @@ function fakeHome(initial: Record<string, string>, journal: { events: unknown[];
     const method = init.method ?? "GET"
     calls.push(`${method} ${url.pathname}${url.search ? `?${url.searchParams.get("path") ?? url.searchParams.get("channel")}` : ""}`)
     if (url.pathname === "/vault/journal") return json(200, journal)
+    if (url.pathname === "/vault/visibility") {
+      const { path, to, asked } = JSON.parse(String(init.body)) as { path: string; to: string; asked?: string }
+      if (asked) calls.push(`asked by ${asked}`)
+      if (headers["If-Match"]?.replace(/"/g, "") !== await version(disk.get(path)!)) return json(412, { error: "The file changed since it was read" })
+      const text = withVisibility(path, disk.get(path)!, to)
+      disk.set(path, text)
+      return json(200, { path, text, version: await version(text), layer: to })
+    }
+    if (url.pathname === "/vault/requests") return json(200, { requests: requests.filter(each => each.status === "waiting") })
+    const deciding = /^\/vault\/requests\/(.+)$/.exec(url.pathname)
+    if (deciding) {
+      const request = requests.find(each => each.id === deciding[1])!
+      const { approve } = JSON.parse(String(init.body)) as { approve: boolean }
+      request.status = approve ? "approved" : "declined"
+      if (!approve) return json(200, { request })
+      const text = withVisibility(request.path, disk.get(request.path)!, request.to)
+      disk.set(request.path, text)
+      return json(200, { request, file: { path: request.path, text, version: await version(text) } })
+    }
     if (url.pathname === "/vault/rename") {
       // As vault/vault/rename.mjs does it for these cases: files move, and a path link elsewhere is rewritten.
       const change = JSON.parse(String(init.body)) as { block?: string; home?: string; channel?: string; to?: string }
@@ -80,8 +101,8 @@ const HOME = {
   "essays/on-rain.md": "---\ntitle: On rain\nvisibility: public\n---\n\nA published essay.\n",
 }
 
-async function withHome(t: test.TestContext, files: Record<string, string> = HOME, journal?: Parameters<typeof fakeHome>[1]) {
-  const home = fakeHome(files, journal)
+async function withHome(t: test.TestContext, files: Record<string, string> = HOME, journal?: Parameters<typeof fakeHome>[1], requests?: Request[]) {
+  const home = fakeHome(files, journal, requests)
   const realFetch = globalThis.fetch
   globalThis.fetch = home.fetch
   const problems: string[] = []
@@ -110,7 +131,9 @@ test("the home is read through the bridge, and an edit is written back merged, o
   const walk = byId(TID)!
   assert.deepEqual([walk.title, walk.homeChannel, walk.visibility], ["Slow walk", "notes", "private"])
   const plain = bySlug("no-id")!
-  assert.equal(plain.id, "path:notes/no-id.md", "a block with no ID is known by its path")
+  assert.equal(plain.id, fileId("notes/no-id.md"), "a block with no ID is known by its path")
+  assert.match(plain.id, /^file-[a-z0-9]+$/, "with nothing the tree's row IDs use")
+  assert.notEqual(fileId("notes/a.md"), fileId("notes/b.md"))
   assert.equal(bySlug("on-rain")!.visibility, "public")
 
   open(TID, "edit")
@@ -225,4 +248,47 @@ test("history starts from the vault's journal: who changed what, and the version
   assert.deepEqual(now.map(line => line.op), ["create", "edit", "edit"])
   assert.equal(demoJournal().snapshotAt(now[2].before!)!.body, "Yanaka, lanterns, cats.")
   await source.settled()
+})
+
+test("who sees a block moves in its file once the person approves; public is Publish's; an agent's request waits for them", async t => {
+  const requests: Request[] = [{ id: "5c3f8e6a-0000-4000-8000-000000000001", by: "agent:claude-code", path: "notes/no-id.md", from: "private", to: "friends", why: "To share with June.", status: "waiting" }]
+  const { disk, calls, source, problems } = await withHome(t, HOME, undefined, requests)
+
+  // The person, after the control's approval: the file is rewritten, and still reads as the same block.
+  setVisibility(TID, "friends")
+  assert.equal(byId(TID)!.visibility, "friends", "the workspace has it at once")
+  await source.settled()
+  assert.ok(calls.includes("POST /vault/visibility"))
+  // Only the layer changed: the file gains visibility, and kind so it stays a block, and nothing else.
+  assert.equal(disk.get("notes/walk.md"), HOME["notes/walk.md"].replace(`id: ${TID}\n`, `id: ${TID}\nkind: text\nvisibility: friends\n`))
+  // Back to only you, by the person: the property goes, kind stays.
+  setVisibility(TID, "private")
+  await source.settled()
+  assert.equal(props(disk.get("notes/walk.md")!).visibility, undefined)
+  setVisibility(TID, "friends")
+  await source.settled()
+
+  // An agent's move, approved by the person in the page, is sent with the agent that asked.
+  await demoJournal().actingAs({ kind: "agent", name: "Agent in this page" }, async () => { setVisibility(TID, "private", "It names a friend.") })
+  await source.settled()
+  assert.ok(calls.includes("asked by agent:Agent-in-this-page"))
+  setVisibility(TID, "friends")
+  await source.settled()
+
+  // Public is Publish's: nothing is sent, and the person is told.
+  const before = calls.length
+  setVisibility(TID, "public")
+  await source.settled()
+  assert.equal(calls.length, before)
+  assert.equal(byId(TID)!.visibility, "friends")
+  assert.match(problems.at(-1)!, /goes through Publish/)
+
+  // An agent's request waits; approved, the bridge moves the block and the workspace reads it again.
+  const waiting = await source.requests()
+  assert.deepEqual(waiting.map(each => [each.by, each.to]), [["agent:claude-code", "friends"]])
+  const decided = await source.decide(waiting[0].id, true)
+  assert.equal(decided.status, "approved")
+  assert.equal(bySlug("no-id")!.visibility, "friends")
+  assert.equal(props(disk.get("notes/no-id.md")!).visibility, "friends")
+  assert.deepEqual(await source.requests(), [])
 })

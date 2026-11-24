@@ -7,8 +7,9 @@
 // workspace knows are set, and every other property, the order of the properties and the file's name
 // stay as they were. Moving a block or a channel to another folder goes through the bridge's rename
 // (vault/vault/rename.mjs), which rewrites what used the old path. History starts from the vault's
-// own journal. What this source cannot do yet is said, and the file left as it is: changing who sees
-// a block, the cortex.
+// own journal. Who sees a block moves between Only you and Friends in its file, once the person has
+// approved; an agent's request for a move waits for them (/vault/requests). Public is Publish's.
+// What this source cannot do yet is said, and the file left as it is: public, and the cortex.
 import { isPostId, readProperties, setProperty, splitFile } from "../../../vault/vault/file.mjs"
 import { evidence, newNodeId, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { heldNow, original } from "@/media/cache"
@@ -49,9 +50,10 @@ export function mergeFile(original: string, path: string, written: string, layer
   const now = props(written)
   for (const key of MANAGED) if (!same(was[key], now[key])) text = setProperty(text, key, value(now[key]))
   if (now.id !== undefined && was.id === undefined && isPostId(String(now.id))) text = setProperty(text, "id", now.id)
+  // Visibility first: on a plain note it alone would make the file read as a post, which `kind` then corrects.
+  if (nodeOf(path, text)?.visibility !== layer) text = setProperty(text, "visibility", layer === "private" ? undefined : layer)
   const kind = nodeOf(path, written)?.kind
   if (kind && nodeOf(path, text)?.kind !== kind) text = setProperty(text, "kind", kind)
-  if (nodeOf(path, text)?.visibility !== layer) text = setProperty(text, "visibility", layer)
   return text
 }
 
@@ -60,14 +62,30 @@ type Held = { text: string; version: string | null; sent?: string }
 export type LocalOptions = { onProblem?: (message: string) => void; onChange?: () => void }
 
 const folderOf = (path: string) => path.split("/").slice(0, -1).join("/")
+/**
+ * The workspace's ID for a block whose file has no `id`: `file-` and a hash of the path it was read at,
+ * the same on every load. It has no "/" or ":", which the tree's row IDs use, and is never a TID, so
+ * it is never written into the file.
+ */
+export function fileId(path: string) {
+  let a = 0x811c9dc5, b = 0x01000193
+  for (let i = 0; i < path.length; i++) {
+    a = Math.imul(a ^ path.charCodeAt(i), 0x01000193) >>> 0
+    b = Math.imul(b ^ path.charCodeAt(i), 0x5bd1e995) >>> 0
+  }
+  return `file-${a.toString(36)}${b.toString(36)}`
+}
 const refOf = (path: string, node: Node): BlockRef => {
   const layer = (node.visibility ?? "private") as Layer
-  return { id: node.id ?? `path:${path}`, layer, store: layer === "private" ? "sealed" : node.kind === "post" ? "post" : "block" }
+  return { id: node.id ?? fileId(path), layer, store: layer === "private" ? "sealed" : node.kind === "post" ? "post" : "block" }
 }
 const snapOf = (path: string, text: string) => {
   const node = nodeOf(path, text)
   return node?.type === "block" ? snap(docOf(refOf(path, node), { path, text }).doc) : undefined
 }
+
+/** An agent's request to change who sees a block (vault/vault/visibility.mjs). */
+export type VisibilityRequest = { id: string; at: string; by: string; path: string; from: Layer; to: Layer; why?: string; status: "waiting" | "approved" | "declined"; note?: string }
 
 export type JournalEvent = { at: string; op: string; path: string; from?: string; by: string; via?: string; before?: string; hash?: string }
 const actorOf = (by: string): Actor => (by === "me" ? YOU : by.startsWith("agent:") ? { kind: "agent", name: by.slice(6) } : { kind: "human", name: "outside ohm" })
@@ -83,7 +101,7 @@ export function pastChanges({ events, texts }: { events: readonly JournalEvent[]
   const nodeFor = (path: string) => {
     let at = path
     for (const seen = new Set([at]); forward.has(at) && !seen.has(forward.get(at)!);) { at = forward.get(at)!; seen.add(at) }
-    return nodeAt(at) ?? `path:${at}`
+    return nodeAt(at) ?? fileId(at)
   }
   const last = new Map<string, NonNullable<ReturnType<typeof snapOf>>>()
   const out: PastChange[] = []
@@ -121,7 +139,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     .then(response => (response.ok ? response.json() : undefined)).catch(() => undefined) as { events: JournalEvent[]; texts: Record<string, string> } | undefined
   const files = new Map<string, Held>(listed.files.map(file => [file.path, { text: file.text, version: file.version, sent: file.text }]))
 
-  // Blocks as the workspace knows them. A block with no ID is known by the path it was read at.
+  // Blocks as the workspace knows them. A block with no ID is known by the path it was read at (fileId).
   const pathOf = new Map<string, string>()
   const blocks: Doc[] = []
   for (const [path, held] of files) {
@@ -233,6 +251,20 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     if (id) pathOf.set(id, to)
   }
 
+  // A move between layers, sent as the person's (via: visibility); the bridge writes it and answers the file.
+  const visibilityBack = (path: string, to: Layer, asked?: { by: string; why?: string }) => later(path, async () => {
+    const held = files.get(path)
+    if (!held?.version) return
+    const response = await bridgeFetch("/vault/visibility", {
+      method: "POST", body: JSON.stringify({ path, to, ...(asked ? { asked: asked.by, ...(asked.why ? { why: asked.why } : {}) } : {}) }),
+      headers: { "Content-Type": "application/json", "If-Match": `"${held.version}"` },
+    }, bridge)
+    if (!response.ok) throw await failed(response)
+    const done = await response.json() as { path: string; text: string; version: string }
+    settle([done])
+  })
+  const PUBLISH = "Showing a block to everyone, or taking a public one back, goes through Publish (ohm publish), which is not in the app yet."
+
   const findDoc = (ref: BlockRef) => {
     const doc = blocks.find(each => each.id === ref.id)
     if (!doc) throw missing()
@@ -289,7 +321,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
           return { version: versionOf(ref.id) }
         }
         if ((written.visibility ?? "private") !== (was.visibility ?? "private")) {
-          onProblem("Who sees a block in your home is changed through Publish, which is not built here yet.")
+          onProblem("Who sees a block is changed with its visibility control, which asks you first.")
           return { version: versionOf(ref.id) }
         }
         const text = mergeFile(held.text, path, file.text, ref.layer)
@@ -377,8 +409,37 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       renameBack(`${to}/${CHANNEL_FILE}`, { channel: from, to })
       journal.syncJournal()
     },
-    markVisibility() {
-      onProblem("Who sees a block in your home is changed through Publish, which is not built here yet.")
+    /** Moves a block between Only you and Friends, once the person has approved (the visibility control asks). Public is Publish's. */
+    markVisibility(ref: BlockRef, layer: Layer, replaces: string, why?: string) {
+      const doc = findDoc(ref)
+      if (versionOf(ref.id) !== replaces) throw stale()
+      if (layer === "public" || doc.visibility === "public" || doc.kind === "post") { onProblem(PUBLISH); return }
+      if (doc.visibility === layer) return
+      const path = pathOf.get(doc.id)!
+      const held = files.get(path)!
+      // Only the layer changes: visibility, and kind where the property alone would make a note read as a post.
+      held.text = mergeFile(held.text, path, held.text, layer)
+      touch(doc.id)
+      Object.assign(doc, docOf({ ...refOf(path, nodeOf(path, held.text)!), id: doc.id }, { path, text: held.text }).doc)
+      // An agent's move, approved by the person in the page, is journaled with the agent that asked.
+      const actor = journal.actor()
+      visibilityBack(path, layer, actor.kind === "agent" ? { by: `agent:${actor.name.replace(/[^A-Za-z0-9._-]+/g, "-")}`, why } : undefined)
+      journal.syncJournal()
+    },
+    /** What agents asked to change about who sees a block, waiting for the person. */
+    async requests(): Promise<VisibilityRequest[]> {
+      const response = await bridgeFetch("/vault/requests", {}, bridge)
+      if (!response.ok) throw await failed(response)
+      return ((await response.json()) as { requests: VisibilityRequest[] }).requests
+    },
+    /** The person's answer to a request. Approved, the bridge moves the block, and the workspace reads it again. */
+    async decide(id: string, approve: boolean) {
+      await queue
+      const response = await bridgeFetch(`/vault/requests/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ approve }), headers: { "Content-Type": "application/json" } }, bridge)
+      if (!response.ok) throw await failed(response)
+      const done = await response.json() as { request: VisibilityRequest; file?: { path: string; text: string; version: string } }
+      if (done.file) settle([done.file])
+      return done.request
     },
     vault(layers: readonly Layer[] = visibleLayers) {
       return readVault([...files].filter(([path, held]) => {
@@ -417,7 +478,10 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     async listShared() { return [] },
     async readShared(): Promise<never> { throw missing() },
     async publishPlan() { return emptyPlan() },
-  } satisfies HomeSource<"sync"> & { demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean; moveChannel(from: string, to: string): void }
+  } satisfies HomeSource<"sync"> & {
+    demo: unknown; home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean; moveChannel(from: string, to: string): void
+    requests(): Promise<VisibilityRequest[]>; decide(id: string, approve: boolean): Promise<VisibilityRequest>
+  }
   return source
 }
 

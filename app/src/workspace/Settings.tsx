@@ -66,6 +66,8 @@ const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] =
   { name: "workspace.create", title: "New block", does: "Starts a private draft", reads: false },
   { name: "workspace.save-draft", title: "Save draft", does: "Saves the open draft as private", reads: false },
   { name: "workspace.add-image", title: "Image", does: "Adds an image to the open private block, as a media block it embeds", reads: false },
+  { name: "visibility.preview", title: "Who can see it", does: "Says what moving a block to other people would do", reads: true },
+  { name: "visibility.move", title: "Change visibility", does: "Asks you to move a block between only you and friends; nothing moves until you approve", reads: false },
   { name: "history.list", title: "History", does: "Reads who changed what, and when", reads: true },
   { name: "history.save", title: "Save", does: "Names this point in history; changes nothing", reads: false },
   { name: "history.session", title: "Finish task", does: "Records what an agent did and its dead ends", reads: false },
@@ -105,7 +107,7 @@ function Page({ tab }: { tab: SettingsTab }) {
         <Section title="Tools">
           {TOOLS.map(t => (
             <Row key={t.name} title={<span className="flex flex-wrap items-center gap-2">{t.title} <code className="text-small text-muted-foreground">{t.name}</code></span>}
-              note={<>{t.does} · {t.reads ? "Reads only" : "Changes private drafts"}</>}
+              note={<>{t.does} · {t.reads ? "Reads only" : t.name === "visibility.move" ? "Asks you first" : "Changes private drafts"}</>}
               action={<Switch aria-label={`Offer ${t.title}`} disabled={!agentsAllowed} checked={agentsAllowed && offered[t.name]} onCheckedChange={v => setOffered(t.name, v)} />} />
           ))}
         </Section>

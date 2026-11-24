@@ -11,6 +11,7 @@ import { setProperty } from '../vault/file.mjs';
 import { CACHE, INDEX, inspect, openIndex, scan, search, summary } from '../vault/indexer.mjs';
 import { appendEvents, HISTORY, JOURNAL, readEvents } from '../vault/journal.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
+import { layerOf, LAYERS, readRequests, requestVisibility, THROUGH_PUBLISH } from '../vault/visibility.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
 
 // Every version an agent replaced or wrote, by content address, so any agent change can be undone.
@@ -56,11 +57,15 @@ export const LOCAL_TOOLS = [
   tool('vault_restore', 'Put a vault file back to a version kept in history (an address from vault_history), if the person granted you write on its folder. Pass the file\'s current content address as replaces when it exists.', {
     path: text, to: text, replaces: text,
   }, ['path', 'to']),
+  tool('vault_request_visibility', 'Ask the person to change who can see a block: to private (only them) or friends. You never change it yourself; the request waits until they approve or decline it in the app. Public goes through Publish. Say why in one line.', {
+    ref: text, to: { enum: LAYERS }, why: text,
+  }, ['ref', 'to']),
+  tool('vault_requests', 'Your requests to change who can see a block, newest first: waiting, approved or declined.', { limit: integer(1, 100) }, [], true),
   tool('vault_rename', 'Rename or move a block or a channel, if the person granted you write where it is and where it goes. Every file that used the old name is rewritten to the new one where you may write it; any other keeps working through the old name, and is listed in left. For a channel, give it as ref and its new path as to. For a block, give it as ref and any of: its new slug as to, a title, or a new home channel.', {
     ref: text, to: text, title: text, channel: text,
   }, ['ref']),
 ];
-const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename'];
+const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename', 'vault_request_visibility'];
 
 const refuse = message => { throw new VaultProblem(message); };
 const present = value => typeof value === 'string' && value.trim() && !value.includes('\0');
@@ -242,6 +247,12 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
     if (read.problems.length) refuse(`Fix the file first: ${read.problems.join(' ')}`);
     return read.node;
   };
+  // Who can see a block is the person's to change: an agent asks with vault_request_visibility.
+  const sameLayer = (path, before, after) => {
+    const was = before === undefined ? 'private' : layerOf(path, before) ?? 'private';
+    const now = layerOf(path, after) ?? 'private';
+    if (was !== now) refuse(`This would make the block ${now} where it is ${was}. Who can see a block is the person's to change: ask with vault_request_visibility.`);
+  };
   const calls = {
     vault_local_search: (db, { query, limit = 20 }) => {
       if (!present(query) || query.length > 1000 || !Number.isInteger(limit) || limit < 1 || limit > 50) refuse('Give up to 1,000 characters of search text and a limit from 1 to 50.');
@@ -299,6 +310,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       const node = readable(path, after);
       if (before === undefined && node.type === 'block' && !node.post && !node.by) after = setProperty(after, 'by', by);
       readable(path, after);
+      sameLayer(path, before, after);
       await mkdir(dirname(join(vault, path)), { recursive: true });
       await recordChange(path, before, after, 'write');
       await rescan(db);
@@ -347,10 +359,30 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       readable(path, kept);
       const before = await current(parts);
       await checkReplaces(before, replaces);
+      sameLayer(path, before, kept);
       await mkdir(dirname(join(vault, path)), { recursive: true });
       await recordChange(path, before, kept, 'restore');
       await rescan(db);
       return { path, restored: to, unchanged: before === kept };
+    },
+
+    async vault_request_visibility(db, { ref, to, why }) {
+      const found = lookedUp(db, ref);
+      if (found.root !== CANONICAL || found.node.type !== 'block') refuse('Ask about a block in the vault.');
+      if (!LAYERS.includes(to)) refuse(`to is one of: ${LAYERS.join(', ')}.`);
+      const path = found.node.path;
+      const text = await current(path.split('/'));
+      if (text === undefined) refuse('The block is not there any more. Run vault_index.');
+      const from = layerOf(path, text) ?? 'private';
+      if (from === to) return { path, visibility: to, unchanged: true };
+      if (to === 'public' || from === 'public') refuse(THROUGH_PUBLISH);
+      const request = await requestVisibility(vault, { by, path, from, to, why });
+      return { request: request.id, path, from, to, status: request.status, next: 'The person approves or declines it in the app. Check with vault_requests.' };
+    },
+
+    async vault_requests(db, { limit = 30 }) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) refuse('Give a limit from 1 to 100.');
+      return { requests: (await readRequests(vault)).filter(each => each.by === by).reverse().slice(0, limit) };
     },
 
     async vault_rename(db, { ref, to, title, channel }) {
@@ -433,7 +465,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       await beneath(vault, CACHE.split('/'));
       const db = await openIndex(vault, { DatabaseSync });
       try {
-        if (!['vault_index', 'vault_capture', 'vault_history'].includes(name) && !summary(db).scanned) {
+        if (!['vault_index', 'vault_capture', 'vault_history', 'vault_requests'].includes(name) && !summary(db).scanned) {
           refuse('Run vault_index to scan this vault first.');
         }
         const invoke = () => calls[name](db, args);

@@ -224,6 +224,8 @@ npx github:haeinej/ohmmmm vault revoke claude-code               # take everythi
 
 Nothing is lost. Each time an agent writes, links, removes or restores, the version before and the version after are kept in `.vault/history/`, and the journal says which agent did it. To undo one, look up the version with `ohm vault inspect` or ask the agent for `vault_history`, then run `ohm vault restore notes/idea.md <address>`. An agent can't change its own grant, `.vault/`, or your captured sources, and it must show it read the latest version before replacing a file, so it never writes over an edit you just made.
 
+An agent never changes who can see a block, even where it may write. It asks instead (`vault_request_visibility`, with its reason), and the request waits for you. With `ohmmmm serve` running, the app shows each request: approve it and the block moves, or decline it and nothing changes. The agent can see how its requests went (`vault_requests`).
+
 ### Telling agents where your data lives
 
 Give each root a `note` in `.vault/config.json`: what is there, what to trust, how to use it ("Board queries. Join on account_id, not user_id."). Agents read it with `vault_where` before they search, together with the counts and kinds of files in each root and what you let them change. A root without a note is one an agent will ask you about.

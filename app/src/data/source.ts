@@ -48,7 +48,8 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   /** Channel records are editable in the sample workspace. The service has no channel write API. */
   saveChannels?(channels: readonly ChannelRecord[]): Result<Mode, void>
   /** Changes the sample's visibility marker for previewing the audiences. */
-  markVisibility?(ref: BlockRef, layer: Layer, replaces: string): Result<Mode, void>
+  /** `why`: the reason an agent gave, when the move was its request (the person approved it). */
+  markVisibility?(ref: BlockRef, layer: Layer, replaces: string, why?: string): Result<Mode, void>
   search: SearchProvider
   history(ref: BlockRef): Result<Mode, HistoryVersion[]>
   readVersion(ref: BlockRef, rev: HistoryVersion["rev"]): Result<Mode, HomeFile>

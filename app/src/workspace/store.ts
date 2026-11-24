@@ -66,6 +66,7 @@ const savedWidth = () => {
   try { const w = Number(localStorage.getItem("ohm-ux:side-width")); return w >= SIDE_WIDTH.min && w <= SIDE_WIDTH.max ? w : SIDE_WIDTH.initial } catch { return SIDE_WIDTH.initial }
 }
 export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph" | "workspace.create" | "workspace.save-draft" | "workspace.add-image"
+  | "visibility.preview" | "visibility.move"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
 
 type State = {
@@ -117,6 +118,7 @@ let state: State = {
   history: [], at: -1, returnTo: null, reveal: null, lastSide: "repo",
   offered: {
     "workspace.search": true, "workspace.open": true, "workspace.graph": true, "workspace.create": true, "workspace.save-draft": true, "workspace.add-image": true,
+    "visibility.preview": true, "visibility.move": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
   },
 }
@@ -217,11 +219,11 @@ export const setAudience = (audience: Audience) => set({ audience })
 export const setShowVisibility = (showVisibility: boolean) =>
   set({ showVisibility, side: "repo", repoMode: "tree", ...(showVisibility ? {} : { audience: "private" as Audience }) })
 /** Marks who a block is for in the sample. The panel asks first when widening the audience. */
-export function setVisibility(id: string, visibility: Visibility) {
+export function setVisibility(id: string, visibility: Visibility, why?: string) {
   const doc = byId(id)
   if (!isBlock(doc)) throw new DOMException("Only blocks have visibility", "DataError")
   const held = blockVersion(id)!
-  editable().markVisibility!(held.ref, visibility, held.version)
+  editable().markVisibility!(held.ref, visibility, held.version, why)
   set(refresh())
 }
 

@@ -14,7 +14,8 @@
 //   via    add (ohm vault add or vault_capture), collect (vault_collect), hook (an agent's hook),
 //          scan (found by indexing), editor, sync, write (vault_write or vault_remove), link
 //          (vault_link), restore (vault_restore or ohm vault restore), rename (vault_rename or
-//          ohm vault rename)
+//          ohm vault rename), visibility (the person moved a block between layers; `layer` is
+//          where it went, `was` where it was, `asked` the agent that asked, if one did, `why` its reason)
 //   before the content address of the file as it was, kept in .vault/history/ (agent writes only)
 //   hash   the content address of the file as it is now
 import { execFile, spawn } from 'node:child_process';
@@ -27,7 +28,7 @@ export const JOURNAL = '.vault/journal.jsonl';
 // and `hash` point at, so a change can be shown and undone. Written by the tools, the bridge, and the scan.
 export const HISTORY = '.vault/history';
 export const OPS = ['added', 'changed', 'moved', 'removed', 'written', 'copied-from', 'downloaded-from', 'renamed'];
-export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename'];
+export const VIAS = ['add', 'collect', 'hook', 'scan', 'editor', 'sync', 'write', 'link', 'restore', 'rename', 'visibility'];
 const BY = /^(?:me|unknown|agent:[A-Za-z0-9._-]+)$/;
 
 // Why an event cannot go in the journal. Empty when it can.
