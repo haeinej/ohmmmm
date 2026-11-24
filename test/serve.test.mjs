@@ -1,9 +1,10 @@
-// `ohmmmm serve`, the home's bridge on this machine (docs/serve.md): only this machine, only with the
-// home's token, only to the app's origins; the vault's and the cortex's tools over MCP; and images by
+// `ohmmmm serve`, the home's bridge on this machine (docs/serve.md): only this machine, only with one
+// of the home's keys (the agent key reaching only MCP), only to the app's origins; the vault's and the cortex's tools over MCP; and images by
 // CID, written into the home as media blocks by the person. Every person here is invented.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { initHome } from '../bin/ohmmmm.mjs';
-import { APP, homeBridge, homeToken, listenHome, pairingLink, TOKEN } from '../home/serve.mjs';
+import { AGENT_KEY, agentKey, APP, APP_KEYS, homeBridge, listenHome, OLD_TOKEN, pairApp, pairingLink } from '../home/serve.mjs';
 import { blobCid } from '../vault/vault/core.mjs';
 import { readEvents } from '../vault/vault/journal.mjs';
 import { readNode } from '../vault/vault/node.mjs';
@@ -26,8 +27,9 @@ async function setUp(t) {
   const layout = await initHome(parent, 'mira.example.com');
   await mkdir(join(layout.vault, 'notes'), { recursive: true });
   await writeFile(join(layout.vault, 'notes/walk.md'), '---\ntitle: Slow walk\n---\n\nYanaka, lanterns, cats.\n');
-  const token = await homeToken(layout.home);
-  const server = await listenHome(homeBridge({ layout, token, DatabaseSync }), { port: 0 });
+  const agent = (await agentKey(layout.home)).key;
+  const token = await pairApp(layout.home);
+  const server = await listenHome(homeBridge({ layout, DatabaseSync }), { port: 0 });
   t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
   const port = server.address().port;
   // node:http, so the Host and Origin headers are exactly what each check sends.
@@ -45,22 +47,20 @@ async function setUp(t) {
     req.end(body);
   });
   const signed = { Authorization: `Bearer ${token}` };
-  const mcp = async (endpoint, name) => {
-    const init = await call('POST', endpoint, { headers: { ...signed, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', clientInfo: { name } } }) });
+  // Agents use the agent key, as they are given it.
+  const mcp = async (endpoint, name, key = agent) => {
+    const auth = { Authorization: `Bearer ${key}` };
+    const init = await call('POST', endpoint, { headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', clientInfo: { name } } }) });
     const session = init.headers['mcp-session-id'];
     let id = 1;
-    const send = (method, params = {}) => call('POST', endpoint, { headers: { ...signed, 'Content-Type': 'application/json', 'Mcp-Session-Id': session }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+    const send = (method, params = {}) => call('POST', endpoint, { headers: { ...auth, 'Content-Type': 'application/json', 'Mcp-Session-Id': session }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
     return { init, session, send };
   };
-  return { layout, token, port, call, signed, mcp };
+  return { layout, token, agent, port, call, signed, mcp };
 }
 
-test('the bridge answers only this machine, only with the token, and only to the app', async t => {
+test('the bridge answers only this machine, only with one of the home\'s keys, and only to the app', async t => {
   const { layout, token, port, call, signed } = await setUp(t);
-  // The token is kept for the person alone, and stays the same until replaced.
-  assert.equal((await stat(join(layout.home, TOKEN))).mode & 0o777, 0o600);
-  assert.equal(await homeToken(layout.home), token);
-  assert.notEqual(await homeToken(layout.home, { replace: true }), token);
   assert.equal(pairingLink(APP, 'http://127.0.0.1:8766', 'abc'), 'https://app.ohmmmm.com/#bridge=http%3A%2F%2F127.0.0.1%3A8766&token=abc');
 
   assert.equal((await call('GET', '/')).status, 401);
@@ -81,6 +81,74 @@ test('the bridge answers only this machine, only with the token, and only to the
   assert.deepEqual([status.json.home, status.json.cortex], ['mira.example.com', true]);
   // The app in development, on this machine, is let in too.
   assert.equal((await call('GET', '/', { headers: { ...signed, Origin: 'http://localhost:5190' } })).status, 200);
+});
+
+test("agents have a key of their own, which reaches only MCP; the app's keys are kept only as hashes", async t => {
+  const { layout, token, agent, call, signed, mcp } = await setUp(t);
+  const asAgent = { Authorization: `Bearer ${agent}` };
+  assert.match(agent, /^ohm_agent_[A-Za-z0-9_-]{43}$/);
+  assert.match(token, /^ohm_app_[A-Za-z0-9_-]{43}$/);
+  // The agent key is kept as it is, for the person to give to agents; it stays until replaced.
+  assert.equal((await stat(join(layout.home, AGENT_KEY))).mode & 0o777, 0o600);
+  assert.equal((await stat(join(layout.home, '.ohmmmm'))).mode & 0o777, 0o700);
+  assert.equal((await agentKey(layout.home)).key, agent);
+  // The app's key is nowhere in the home: only its SHA-256.
+  assert.equal((await stat(join(layout.home, APP_KEYS))).mode & 0o777, 0o600);
+  const kept = JSON.parse(await readFile(join(layout.home, APP_KEYS), 'utf8')).keys;
+  assert.deepEqual(kept.map(each => each.hash), [createHash('sha256').update(token).digest('hex')]);
+  for (const name of await readdir(join(layout.home, '.ohmmmm'))) assert.ok(!(await readFile(join(layout.home, '.ohmmmm', name), 'utf8')).includes(token), name);
+
+  // The agent key opens the vault's and the cortex's tools, and nothing of the person's.
+  assert.equal((await call('GET', '/', { headers: asAgent })).status, 200);
+  assert.equal((await mcp('/vault/mcp', 'helper')).init.status, 200);
+  assert.equal((await mcp('/cortex/mcp', 'helper')).init.status, 200);
+  const json = { ...asAgent, 'Content-Type': 'application/json' };
+  for (const [method, path, headers, body] of [
+    ['GET', '/vault/files'], ['GET', '/vault/journal'], ['GET', '/vault/requests'], ['GET', `/media/b${'a'.repeat(58)}`],
+    ['PUT', '/vault/file?path=notes/walk.md', { 'If-None-Match': '*' }, 'Mine.'],
+    ['POST', '/vault/rename', json, '{"channel":"notes","to":"diary"}'],
+    ['POST', '/vault/visibility', { ...json, 'If-Match': '"x"' }, '{"path":"notes/walk.md","to":"friends"}'],
+    ['POST', '/vault/publish/plan', json, '{"path":"notes/walk.md"}'],
+    ['POST', '/vault/publish', { ...json, 'If-Match': '"x"' }, '{"path":"notes/walk.md","confirm":"v"}'],
+    ['POST', '/vault/unpublish', { ...json, 'If-Match': '"x"' }, '{"path":"notes/walk.md","to":"private"}'],
+  ]) {
+    const answer = await call(method, path, { headers: { ...asAgent, ...headers }, body });
+    assert.equal(answer.status, 403, `${method} ${path}`);
+    assert.match(answer.json.error, /agent key/);
+  }
+  assert.equal(await readFile(join(layout.vault, 'notes/walk.md'), 'utf8'), '---\ntitle: Slow walk\n---\n\nYanaka, lanterns, cats.\n');
+  // The app's key opens everything, MCP included.
+  assert.equal((await call('GET', '/vault/files', { headers: signed })).status, 200);
+  assert.equal((await mcp('/cortex/mcp', 'app', token)).init.status, 200);
+
+  // Another browser, paired while the bridge runs, is let in at once; new keys shut out every old one.
+  const second = await pairApp(layout.home);
+  assert.equal((await call('GET', '/vault/files', { headers: { Authorization: `Bearer ${second}` } })).status, 200);
+  assert.equal((await call('GET', '/vault/files', { headers: signed })).status, 200, 'the first browser stays paired');
+  const fresh = await pairApp(layout.home, { replace: true });
+  const renewed = (await agentKey(layout.home, { replace: true })).key;
+  for (const old of [token, second, agent]) assert.equal((await call('GET', '/', { headers: { Authorization: `Bearer ${old}` } })).status, 401);
+  assert.equal((await call('GET', '/vault/files', { headers: { Authorization: `Bearer ${fresh}` } })).status, 200);
+  assert.equal((await call('GET', '/', { headers: { Authorization: `Bearer ${renewed}` } })).status, 200);
+});
+
+test('a home whose bridge had one key for everyone gives that key to its agents, so the app pairs again', async t => {
+  const parent = await mkdtemp(join(tmpdir(), 'ohmmmm-serve-old-'));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  const layout = await initHome(parent, 'mira.example.com');
+  await mkdir(join(layout.home, '.ohmmmm'), { recursive: true });
+  const old = 'QexdqYGJ2FZs7RkxcsaXaQMMXE0wJv3TqcHALTiddso';
+  await writeFile(join(layout.home, OLD_TOKEN), `${old}\n`, { mode: 0o600 });
+  assert.deepEqual(await agentKey(layout.home), { key: old, made: true, fromOldToken: true });
+  await assert.rejects(stat(join(layout.home, OLD_TOKEN)), { code: 'ENOENT' });
+  const server = await listenHome(homeBridge({ layout, DatabaseSync }), { port: 0 });
+  t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
+  const port = server.address().port;
+  const status = path => new Promise((done, fail) => {
+    request({ host: '127.0.0.1', port, path, headers: { Host: `127.0.0.1:${port}`, Authorization: `Bearer ${old}` } }, res => { res.resume(); done(res.statusCode); }).on('error', fail).end();
+  });
+  assert.equal(await status('/'), 200, 'agents given the old key still reach their tools');
+  assert.equal(await status('/vault/files'), 403, "but no longer the person's routes");
 });
 
 test('agents reach the vault and the cortex over MCP, each session named by its client', async t => {
@@ -159,10 +227,20 @@ test('ohmmmm serve starts inside a home and prints the link that pairs the app',
     child.stdout.on('data', chunk => { out += chunk; if (out.includes('/cortex/mcp')) done(out); });
     child.on('exit', code => fail(new Error(`exited ${code}: ${out}`)));
   });
-  const token = (await readFile(join(layout.home, TOKEN), 'utf8')).trim();
+  // The link holds a key for this browser; the home keeps only its hash, and agents get their own.
+  const key = decodeURIComponent(/&token=([^\s]+)/.exec(printed)?.[1] ?? '');
   assert.match(printed, /to this machine only/);
   assert.ok(printed.includes(`http://localhost:5190/#bridge=http%3A%2F%2F127.0.0.1%3A`), printed);
-  assert.ok(printed.includes(`&token=${token}`));
+  assert.match(key, /^ohm_app_/);
+  assert.deepEqual(JSON.parse(await readFile(join(layout.home, APP_KEYS), 'utf8')).keys.map(each => each.hash), [createHash('sha256').update(key).digest('hex')]);
+  assert.ok(printed.includes(join(layout.home, AGENT_KEY)));
+  assert.ok(!printed.includes((await readFile(join(layout.home, AGENT_KEY), 'utf8')).trim()), 'the agent key is named, not printed');
+
+  // Another browser, while it runs: a new link, and the first key still kept.
+  const paired = spawnSync(process.execPath, [cli, 'pair', '--port', '8766', '--app', 'http://localhost:5190'], { cwd: layout.vault, env: { ...process.env, OHMMMM_HOME: '' }, encoding: 'utf8' });
+  assert.equal(paired.status, 0, paired.stderr);
+  assert.match(paired.stdout, /http:\/\/localhost:5190\/#bridge=http%3A%2F%2F127\.0\.0\.1%3A8766&token=ohm_app_/);
+  assert.equal(JSON.parse(await readFile(join(layout.home, APP_KEYS), 'utf8')).keys.length, 2);
 });
 
 test('the person edits files through the bridge only over the version they read, and every version is kept', async t => {

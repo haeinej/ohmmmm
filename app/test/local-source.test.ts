@@ -6,7 +6,7 @@ import test from "node:test"
 import { blobCid } from "../../vault/vault/core.mjs"
 import { publishedLayer, withVisibility } from "../../vault/vault/visibility.mjs"
 import { readProperties, splitFile } from "../../vault/vault/file.mjs"
-import { createLocalSource, fileId, mergeFile } from "../src/data/local-source"
+import { createLocalSource, fileId, mergeFile, UNPAIRED } from "../src/data/local-source"
 import { byId, bySlug, channelRecords, demoJournal } from "../src/data/workspace-data"
 import { memoryBackend, setMediaBackend } from "../src/media/cache"
 import { addImage, autosave, collect, createDraft, deleteDoc, moveBlock, open, renameChannel, saveDraft, setSource, setVisibility, sourceChanged } from "../src/workspace/store"
@@ -345,4 +345,11 @@ test("publishing goes through the plan the person saw, and the file is marked by
   assert.deepEqual(down, { removed: true, address: "https://example.test/posts/notes/walk" })
   assert.equal(byId(TID)!.visibility, "friends")
   assert.equal(props(disk.get("notes/walk.md")!).visibility, "friends")
+})
+
+test("a key the bridge no longer takes says how to pair again, and leaves the workspace on the sample", async t => {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: "This is the agent key." }), { status: 403, headers: { "Content-Type": "application/json" } })) as typeof fetch
+  t.after(() => { globalThis.fetch = realFetch })
+  await assert.rejects(createLocalSource(bridge), (problem: unknown) => problem instanceof DOMException && problem.name === "NotAllowedError" && problem.message === UNPAIRED)
 })

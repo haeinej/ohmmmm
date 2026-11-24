@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { initHome } from '../bin/ohmmmm.mjs';
-import { homeBridge, homeToken, listenHome, SITE_CONFIG } from '../home/serve.mjs';
+import { homeBridge, listenHome, pairApp, SITE_CONFIG } from '../home/serve.mjs';
 import { DOCUMENT, fromDocument, PUBLICATION, PUBLICATION_KEY } from '../vault/feed/standard.mjs';
 import { LOCAL_TOOLS } from '../vault/mcp/local.mjs';
 import { blobCid } from '../vault/vault/core.mjs';
@@ -84,8 +84,8 @@ async function setUp(t, { config = true, password = 'app-password' } = {}) {
   await writeFile(join(layout.vault, 'notes/street.md'), '---\nkind: media\ntitle: Street\nalt: A wet street at dusk\nmime: image/png\n---\n\n![[street.png]]\n');
   await writeFile(join(layout.vault, 'notes/tea-house.md'), '---\ntitle: Tea house\n---\n\nA quiet one.\n');
   if (config) await writeFile(join(layout.home, SITE_CONFIG), JSON.stringify({ vars: { ATPROTO_DID: did, ATPROTO_PDS_ORIGIN: pds.origin, SITE_ORIGIN: site } }));
-  const token = await homeToken(layout.home);
-  const server = await listenHome(homeBridge({ layout, token, DatabaseSync, env: password ? { ATPROTO_APP_PASSWORD: password } : {} }), { port: 0 });
+  const token = await pairApp(layout.home);
+  const server = await listenHome(homeBridge({ layout, DatabaseSync, env: password ? { ATPROTO_APP_PASSWORD: password } : {} }), { port: 0 });
   t.after(() => new Promise(done => { server.closeAllConnections(); server.close(done); }));
   const port = server.address().port;
   const call = (method, path, { headers = {}, body } = {}) => new Promise((done, fail) => {

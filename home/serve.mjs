@@ -15,9 +15,16 @@
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
-// refused, against DNS rebinding), only with the home's token (`Authorization: Bearer`, kept in
-// <home>/.ohmmmm/serve-token), and in a browser only to the app's origins and pages on this machine.
-// A preflight, which carries no token, learns nothing but which headers it may send.
+// refused, against DNS rebinding), only with one of the home's keys (`Authorization: Bearer`), and in a
+// browser only to the app's origins and pages on this machine. A preflight, which carries no key,
+// learns nothing but which headers it may send. There are two kinds of key:
+//
+//   the agent key   <home>/.ohmmmm/agent-key, kept as it is so the person can give it to agents. It
+//                   reaches /vault/mcp, /cortex/mcp and / only.
+//   app keys        one for each browser paired with the home. It reaches everything. Only its
+//                   SHA-256 is kept (<home>/.ohmmmm/app-keys.json): the key itself is in the pairing
+//                   link and in the paired browser, never in the home, so a program that reads the
+//                   home's files does not find it there.
 //
 // MCP sessions are agents: each is named by its client, and the vault's grants decide what it may
 // change. /media and /vault/file are the person, through the app (app/src/data/local-source.ts): their
@@ -52,38 +59,94 @@ import { findHome } from './home.mjs';
 
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
-export const TOKEN = '.ohmmmm/serve-token';
+export const AGENT_KEY = '.ohmmmm/agent-key';
+export const APP_KEYS = '.ohmmmm/app-keys.json';
+// The one key the bridge had before agents had their own. It becomes the agent key.
+export const OLD_TOKEN = '.ohmmmm/serve-token';
+// What an agent key reaches; every other route is the person's, through the app.
+export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/'];
 export const SITE_CONFIG = 'ohm.jsonc';
 export const MAX_IMAGE = 20 * 1024 * 1024;
 export const IMAGE_TYPES = { 'image/avif': 'avif', 'image/gif': 'gif', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]', '::1'];
 const CID = /^b[a-z2-7]{20,}$/;
 
-// ---- The token ----
+// ---- The keys ----
 
-/** The home's token: the one kept, or a new one when there is none or `replace` asks. Only the person can read it. */
-export async function homeToken(home, { replace = false } = {}) {
-  const path = join(home, TOKEN);
-  if (!replace) {
-    const held = (await readFile(path, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; }))?.trim();
-    if (held) return held;
-  }
+const KEY_PART = /^[A-Za-z0-9_-]{20,200}$/;
+const newKey = kind => `ohm_${kind}_${randomBytes(32).toString('base64url')}`;
+const sha256 = value => createHash('sha256').update(value).digest();
+const readText = path => readFile(path, 'utf8').catch(problem => { if (problem.code !== 'ENOENT') throw problem; });
+
+// Written whole to a new file only the person can read, then moved over the old one.
+async function writePrivate(home, path, text) {
   await mkdir(join(home, '.ohmmmm'), { recursive: true, mode: 0o700 });
-  const token = randomBytes(32).toString('base64url');
-  // Written whole to a new file only the person can read, then moved over the old one.
-  const fresh = join(home, '.ohmmmm', `.serve-token-${randomUUID()}.tmp`);
+  const fresh = join(home, '.ohmmmm', `.key-${randomUUID()}.tmp`);
   try {
-    await writeFile(fresh, `${token}\n`, { mode: 0o600, flag: 'wx' });
+    await writeFile(fresh, text, { mode: 0o600, flag: 'wx' });
     await chmod(fresh, 0o600);
-    await rename(fresh, path);
+    await rename(fresh, join(home, path));
   } finally {
     await rm(fresh, { force: true });
   }
-  return token;
 }
 
-/** The link that pairs the app with this bridge. The token rides in the fragment, which a browser never sends to a server. */
-export const pairingLink = (app, url, token) => `${app}/#bridge=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
+/**
+ * The home's agent key: the one kept, or a new one when there is none or `replace` asks. A home whose
+ * bridge had one key for everyone (.ohmmmm/serve-token) keeps that key for its agents, and the file
+ * goes, so it no longer opens the person's routes. Answers `{ key, made, fromOldToken }`.
+ */
+export async function agentKey(home, { replace = false } = {}) {
+  const held = replace ? undefined : (await readText(join(home, AGENT_KEY)))?.trim();
+  if (held && KEY_PART.test(held)) return { key: held, made: false, fromOldToken: false };
+  const old = replace ? undefined : (await readText(join(home, OLD_TOKEN)))?.trim();
+  const key = old && KEY_PART.test(old) ? old : newKey('agent');
+  await writePrivate(home, AGENT_KEY, `${key}\n`);
+  await rm(join(home, OLD_TOKEN), { force: true });
+  return { key, made: true, fromOldToken: key === old };
+}
+
+/** The paired browsers' keys, as kept: `{ keys: [{ hash, made, app? }] }`, each `hash` the key's SHA-256 in hex. */
+export async function appKeys(home) {
+  const text = await readText(join(home, APP_KEYS));
+  if (text === undefined) return [];
+  try {
+    const keys = JSON.parse(text)?.keys;
+    return Array.isArray(keys) ? keys.filter(each => /^[0-9a-f]{64}$/.test(each?.hash ?? '')) : [];
+  } catch {
+    throw new Error(`${join(home, APP_KEYS)} is not JSON. Remove it and pair the app again with: ohmmmm pair`);
+  }
+}
+
+/**
+ * A key for one more browser: kept only as its SHA-256, and answered once, for the pairing link.
+ * `replace` forgets every browser paired before. `app` notes which app origin it was made for.
+ */
+export async function pairApp(home, { replace = false, app } = {}) {
+  const key = newKey('app');
+  const kept = replace ? [] : await appKeys(home);
+  const keys = [...kept, { hash: sha256(key).toString('hex'), made: new Date().toISOString(), ...(app ? { app } : {}) }];
+  await writePrivate(home, APP_KEYS, `${JSON.stringify({ keys }, null, 2)}\n`);
+  return key;
+}
+
+/** What each key the bridge accepts opens: `who(key)` is 'app', 'agent' or null, compared in constant time. */
+export async function homeKeys(home) {
+  const agent = (await readText(join(home, AGENT_KEY)))?.trim();
+  const agentHash = agent && KEY_PART.test(agent) ? sha256(agent) : null;
+  const apps = (await appKeys(home)).map(each => Buffer.from(each.hash, 'hex'));
+  return key => {
+    const presented = sha256(String(key));
+    let found = null;
+    // Every key is compared, so the time taken says nothing about which one was near.
+    for (const hash of apps) if (timingSafeEqual(presented, hash)) found = 'app';
+    if (agentHash && timingSafeEqual(presented, agentHash) && !found) found = 'agent';
+    return found;
+  };
+}
+
+/** The link that pairs the app with this bridge. The key rides in the fragment, which a browser never sends to a server. */
+export const pairingLink = (app, url, key) => `${app}/#bridge=${encodeURIComponent(url)}&token=${encodeURIComponent(key)}`;
 
 // ---- Sessions ----
 
@@ -506,7 +569,6 @@ export async function unpublishAsPerson({ vault, path, replaces, to, config, pas
 
 // ---- The bridge ----
 
-const digest = value => createHash('sha256').update(value).digest();
 const hostOf = header => {
   try { return new URL(`http://${header}`).hostname; } catch { return null; }
 };
@@ -515,13 +577,13 @@ const isLoopbackOrigin = origin => {
 };
 
 /**
- * The request handler: `layout` is the home (home.mjs), `token` the home's token, `origins` the
- * app's origins (pages on this machine are allowed too). `agent`, when given, names every MCP session.
+ * The request handler: `layout` is the home (home.mjs), `origins` the app's origins (pages on this
+ * machine are allowed too). `agent`, when given, names every MCP session. The home's keys are read
+ * on each request (`keys`, homeKeys by default), so a browser paired with `ohmmmm pair` is let in
+ * without a restart, and a key replaced stops working at once.
  * `config` is the site configuration Publish uses; `env` holds ATPROTO_APP_PASSWORD, read when needed.
  */
-export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env }) {
-  if (!token) throw new Error('The bridge needs the home\'s token.');
-  const expected = digest(`Bearer ${token}`);
+export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home) }) {
   const allowed = origin => origins.includes(origin) || isLoopbackOrigin(origin);
   const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent), origins, endpoint: '/vault/mcp' });
   let cortex;
@@ -606,9 +668,11 @@ export function homeBridge({ layout, token, origins = [APP], DatabaseSync, agent
           ...(req.headers['access-control-request-private-network'] === 'true' ? { 'Access-Control-Allow-Private-Network': 'true' } : {}),
         });
       }
-      const signed = req.headers.authorization;
-      if (typeof signed !== 'string' || !timingSafeEqual(digest(signed), expected)) return send(res, 401, undefined, { 'WWW-Authenticate': 'Bearer' });
+      const signed = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+      const who = signed ? (await keys())(signed) : null;
+      if (!who) return send(res, 401, undefined, { 'WWW-Authenticate': 'Bearer' });
       const url = new URL(req.url, 'http://home');
+      if (who === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This is the agent key. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
       if (url.pathname === '/vault/mcp') return await vault(req, res);
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
@@ -761,12 +825,63 @@ export function listenHome(handler, { port = PORT } = {}) {
   });
 }
 
-// ---- The command ----
-//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--new-token]
+// ---- The commands ----
+//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--pair] [--new-keys]
+//   ohmmmm pair  [--port 8766] [--app <origin>]…      one more browser, while the bridge runs
+
+// Makes a key for one more browser and says how to pair it: one link for each app origin.
+async function printPairing(layout, apps, url, { replace = false } = {}) {
+  const key = await pairApp(layout.home, { replace, app: apps[0] });
+  for (const app of apps) console.log(`Open this once, in the browser you use the app in, to pair it: ${pairingLink(app, url, key)}`);
+  console.log('The link holds the key for that browser. It is shown only now; your home keeps no copy of it.');
+}
+
+const options = {
+  port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' },
+  pair: { type: 'boolean' }, 'new-keys': { type: 'boolean' }, 'new-token': { type: 'boolean' },
+};
+
+async function command(args) {
+  const [name, ...rest] = args[0] === 'serve' || args[0] === 'pair' ? args : ['serve', ...args];
+  const { values } = parseArgs({ args: rest, options });
+  const layout = findHome();
+  if (!layout) throw new Error(`Run ohmmmm ${name} inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.`);
+  const port = values.port === undefined ? PORT : Number(values.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port is a port number');
+  const apps = values.app?.length ? values.app.map(app => new URL(app).origin) : [APP];
+
+  if (name === 'pair') {
+    if (port === 0) throw new Error('Say the port the bridge listens on with --port');
+    const url = `http://127.0.0.1:${port}`;
+    await printPairing(layout, apps, url);
+    const answering = await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
+    if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohmmmm serve${port === PORT ? '' : ` --port ${port}`}`);
+    return;
+  }
+
+  const sqlite = await import('node:sqlite');
+  const renew = Boolean(values['new-keys'] || values['new-token']);
+  const agentHeld = await agentKey(layout.home, { replace: renew });
+  const paired = renew ? 0 : (await appKeys(layout.home)).length;
+  const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
+  const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
+    .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
+  if (agentHeld.fromOldToken) console.log('Agents now have a key of their own: the key this home used for everything is now only theirs, and reaches only the vault\'s and the cortex\'s tools. Pair the app again with the link below.');
+  if (renew) console.log('New keys: every browser paired before, and every agent given the old agent key, is shut out.');
+  if (renew || values.pair || paired === 0) await printPairing(layout, apps, url, { replace: renew });
+  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${server.address().port === PORT ? '' : ` --port ${server.address().port}`}`);
+  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, with Authorization: Bearer <the agent key in ${join(layout.home, AGENT_KEY)}>. It reaches only those.`);
+  const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
+  if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
+  else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
+  else if (settings) console.log(`Publishing to ${settings.site}, as ${settings.did}, when you approve it in the app.`);
+}
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const sqlite = await import('node:sqlite').catch(() => null);
-  if (!sqlite) {
+  if (!sqlite && process.argv[2] !== 'pair') {
     if (process.execArgv.includes('--experimental-sqlite')) {
       console.error('This Node has no SQLite. Use Node 22.13 or newer.');
       process.exit(1);
@@ -775,27 +890,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(again.status ?? 1);
   }
   try {
-    const { values } = parseArgs({
-      args: process.argv.slice(2).filter(arg => arg !== 'serve'),
-      options: { port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' }, 'new-token': { type: 'boolean' } },
-    });
-    const layout = findHome();
-    if (!layout) throw new Error('Run ohmmmm serve inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.');
-    const port = values.port === undefined ? PORT : Number(values.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port is a port number');
-    const apps = values.app?.length ? values.app.map(app => new URL(app).origin) : [APP];
-    const token = await homeToken(layout.home, { replace: Boolean(values['new-token']) });
-    const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
-    const server = await listenHome(homeBridge({ layout, token, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
-      .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
-    const url = `http://127.0.0.1:${server.address().port}`;
-    console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
-    for (const app of apps) console.log(`Open this once to connect the app: ${pairingLink(app, url, token)}`);
-    console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, with Authorization: Bearer <the token in ${join(layout.home, TOKEN)}>.`);
-    const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
-    if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
-    else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
-    else if (settings) console.log(`Publishing to ${settings.site}, as ${settings.did}, when you approve it in the app.`);
+    await command(process.argv.slice(2));
   } catch (problem) {
     console.error(problem.message);
     process.exitCode = 1;

@@ -5,7 +5,7 @@ import { installWebMcpShim } from "./webmcp-shim"
 import { App } from "./App"
 import { applyDensity, open, setSource, sourceChanged } from "./workspace/store"
 import { bridgeMedia, currentBridge, pairFromLocation } from "./data/bridge"
-import { createLocalSource } from "./data/local-source"
+import { createLocalSource, UNPAIRED } from "./data/local-source"
 import { setMediaRemote } from "./media/cache"
 import { notify } from "./components/ui/notice"
 
@@ -16,6 +16,9 @@ applyDensity()
 // The link `ohmmmm serve` prints pairs this browser with the home on this machine; images the
 // browser lacks are then read from the home folder.
 pairFromLocation()
+// A pairing link opened in a tab already on the app changes only the fragment, which loads nothing:
+// pair from it, and open again on the home it names.
+addEventListener("hashchange", () => { if (pairFromLocation()) location.reload() })
 setMediaRemote(cid => bridgeMedia(cid))
 // Paired, the workspace opens on the home itself (docs/serve.md); otherwise, and if it does not answer, on the sample.
 const bridge = currentBridge()
@@ -27,7 +30,10 @@ if (bridge) {
       await setSource(home)
       if (opening) { try { open(opening) } catch { /* not in this home */ } }
     })
-    .catch(() => notify({ message: "Your home on this computer did not answer, so this is the sample. Run ohmmmm serve in your home, then reload.", tone: "info" }))
+    .catch(problem => notify({
+      message: problem instanceof DOMException && problem.name === "NotAllowedError" ? UNPAIRED : "Your home on this computer did not answer, so this is the sample. Run ohmmmm serve in your home, then reload.",
+      tone: "info",
+    }))
 }
 // "Open in › New tab" arrives as ?open=<id>.
 const opening = new URLSearchParams(location.search).get("open")
