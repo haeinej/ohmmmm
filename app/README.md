@@ -8,26 +8,27 @@ A person moves through screens built from the [ohm design system](https://design
 
 An agent that clicks through pixels is slow and fragile. It can also do things the person never meant. WebMCP lets the page say exactly what can be done at each step and run it with its own code. Pairing each tool with a step that is on screen keeps the person able to see what's happening and in charge of what happens.
 
-## The workspace wireframe
+## The workspace
 
-A light, Obsidian-like workspace, the first flow ([flows/workspace.md](flows/workspace.md)):
+A light, Obsidian-like workspace over the signed-in member's own home, the first flow ([flows/workspace.md](flows/workspace.md)). **Production first:** it reads and writes the member's vault service and nothing else. There is no sample data in the app; synthetic fixtures live only in `test/fixtures/` for tests. Signed out, it shows sign-in.
 
-- A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), **inbox**, notifications, and you.
-- A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. The graph puts you in the middle, Obsidian-style, with cortex items (green diamonds) close around you and vault blocks (grey dots) further out, clustered by channel or category, and grey lines for links, connections and what the cortex drew from the vault. It behaves like Obsidian's: springy, with hover highlighting and drag.
+- A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), notifications, and you.
+- A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. In the graph a node is a block and an edge is a connect ([words](../docs/words.md#in-the-graph)): you are in the middle, blocks are coloured by their label and sized by their backlinks, and a connection an agent only observed is dashed and drawn apart. The cortex is a toggle, off by default. It behaves like Obsidian's: springy, with hover highlighting and drag.
 - A **main panel** card where blocks and cortex files open in the editor:
   - **Path:** the block's path sits in a pill. Drag it out to save the block as `.md`, or onto a channel to move it there.
   - **Editing:** a `/` menu, a floating selection toolbar, and block handles with menus.
   - **Tables:** row and column handles.
   - **Dropping:** images go into the open block and Markdown files open as new blocks.
 
-  Inbox items and settings open here too.
-- **Search** as a sheet over the workspace (⌘K). It goes through the `workspace.search` WebMCP tool's handler, and uses the same sample home as the editor and graph.
+  Settings open here too.
+- **No inbox.** Your coding agent writes blocks straight into the channels you granted it. Each one says it is the agent's (`by: agent:<name>`) and starts private, so it shows in the tree like any block you wrote, and only you show it to more people.
+- **Search** as a sheet over the workspace (⌘K). It goes through the `workspace.search` WebMCP tool's handler, and searches the same home as the editor and graph.
 
-Renaming a sample channel keeps its record and updates its path throughout the tree and graph.
+Channels are files (`_channel.md`) on the service, each with its own version. Renaming or moving one moves it with everything filed in it, at the service, then refiles the sealed blocks on this device; a channel with published posts in it moves through Publish instead.
 
-All data is synthetic. Run the app to explore a sample vault and cortex. Reloading restores the sample.
+New blocks start private: sealed on this device and sent as ciphertext, so writing needs a device that has unlocked the account's keys. Shared blocks (friends) and published posts are read and kept by the service. The cortex is sealed too, under its own context, and opens only on an unlocked device.
 
-To try saving and searching, create a block titled “Alder lantern”, add a line of text, and open Search. Search for “Alder lantern” to find the same block you just edited. This workspace uses the sample adapter, so those edits last for the current session. The service adapter is available for integrating signed-in vault access in the app. Private service files require an unlocked device and reach the service as ciphertext.
+To try it, run the app on the same address as a vault service (`/vault/xrpc/…`) and sign in there. With no service, the workspace shows sign-in.
 
 The editor saves pending typing when you switch blocks. Restoring a version or reverting a change loads the resulting text. Links to a draft keep working after you rename it.
 
@@ -40,14 +41,14 @@ npm --prefix app run dev   # http://localhost:5190
 
 Choose **New block** to start a private draft. Type a title in the editor and press Enter to start writing. The title saves as you type, and you can also change it with **Rename** on any of the block's rows. From a channel's menu, **New block here** uses that channel as the block's home. A block can appear in several channels, each with its own order. A post is a published block.
 
-Choose **Home**, then **History**, to see sample changes by date or author. A block's clock opens its own vault versions. Cortex files have their own history. The connections card shows the observations an agent made about a block, and a sample observation keeps the block versions it was written against. The cortex side holds Mira's profile, observations, a skill and a tool, as in [cortex/docs/model.md](../cortex/docs/model.md).
+Choose **Home**, then **History**, to see changes by date or author: the sealed cortex journal, and the changes made on this device. A private block's clock opens the versions the service keeps. Cortex files have their own history. The connections card shows the observations an agent made about a block. The cortex holds your profile, observations, skills and tools, as in [cortex/docs/model.md](../cortex/docs/model.md).
 
 ## Where things are
 
 - [flows/paths.md](flows/paths.md): every interaction path, what it is for, its end state, and the WebMCP tool for it
 - [AGENTS.md](AGENTS.md): the rules every flow follows
 - Install the app from the repository root with `npm ci --prefix app`. Run `npm --prefix app run build` to build it and `npm --prefix app test` to run its tests. Both use the app install.
-- The editor, tree, graph, connections and search use the same sample home. Create a private draft and add it to a channel to see it in the tree and find it in search. Sample changes live in memory and reset on reload. [Data sources](docs/agents/home-source.md) describes the sample and service contracts.
+- The editor, tree, graph, connections and search use the same home, from one source. [Data sources](docs/agents/home-source.md) describes the source contract, the service adapter and the test fixture.
 - [docs/design.md](docs/design.md): the app's design layer: one radius for every surface, density, compact menus
 - [docs/webmcp.md](docs/webmcp.md): the WebMCP API as of the 13 November 2026 draft, and what changed from earlier guides
 - [flows/TEMPLATE.md](flows/TEMPLATE.md): start a new flow by copying this

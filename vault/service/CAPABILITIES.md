@@ -13,7 +13,10 @@ This page is the whole list. It is written from the same tables the service and 
 | **Posts** | Read and change the posts in a vault, one at a time. Every change names the version it replaces, so two edits never overwrite each other unseen. | `listPosts`, `getPost`, `putPost`, `deletePost` | [posts.mjs](src/capabilities/posts.mjs) |
 | **Friends** | The friends layer: friends-only blocks, kept readable so the friends a member chose can read them, and the friend list that says who they are. A friend reads friends-only posts and blocks alike. Private blocks are never kept here. | `listBlocks`, `getBlock`, `putBlock`, `deleteBlock`, `listFriends`, `addFriend`, `removeFriend`, `listShared`, `getShared` | [friends.mjs](src/capabilities/friends.mjs) |
 | **Private** | The private layer: private blocks, kept only as ciphertext sealed on the member's devices. The service stores and syncs them and cannot read them; no friend or agent can be given their contents by the service. Each is `{ id, ciphertext, version }`, with an opaque ID and compare-and-swap on the version. Several change together or not at all; every version is kept for restoring; the journal is sealed too; and a key rotation re-wraps every kept version and journal entry. | `listPrivateBlocks`, `getPrivateBlock`, `putPrivateBlock`, `putPrivateBlocks`, `listPrivateVersions`, `getPrivateVersion`, `listPrivateJournal`, `beginPrivateRotation`, `getPrivateRotation`, `listPrivateBelow`, `rewrapPrivate`, `finishPrivateRotation`, `deletePrivateBlock` | [private.mjs](src/capabilities/private.mjs) |
-| **Structure** | The shape of a vault: its labels, the sublabels inside them, and a line for each post. Enough to draw it or decide where something belongs, without reading any post in full. | `getTree` | [structure.mjs](src/capabilities/structure.mjs) |
+| **Channels** | Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here. | `listChannels`, `getChannel`, `putChannel`, `deleteChannel`, `moveChannel` | [channels.mjs](src/capabilities/channels.mjs) |
+| **Cortex** | The cortex: what the member's agents know about them and can do, as files sealed on the member's devices. The service keeps and syncs them and cannot read them. Each is `{ id, ciphertext, version }` with an opaque ID; several change together or not at all; every version is kept; the journal of who changed what, and why, is sealed too. Agents reach the cortex through the member's device, never through the service. | `listFiles`, `getFile`, `putFile`, `putFiles`, `deleteFile`, `listVersions`, `getVersion`, `listJournal`, `listBelow`, `rewrap` | [cortex.mjs](src/capabilities/cortex.mjs) |
+| **Media** | The media cache. A picture or file in a vault is a block that saves where the file is and what it is; its bytes are sent here once, so the cockpit can show them, and can always be sent again. Public and friends-only media is sent readable under its content address and can be shown smaller; private media is sealed on the member's device first and never rendered here. Nothing here is published: publishing sends a copy to the member's PDS. | `hasMedia`, `putMedia`, `getMedia`, `getRendition` | [media.mjs](src/capabilities/media.mjs) |
+| **Structure** | The shape of a vault: its labels, the sublabels inside them, and a line for each post. Enough to draw it or decide where something belongs, without reading any post in full. | `getTree`, `getAgenda` | [structure.mjs](src/capabilities/structure.mjs) |
 | **Search** | Find posts by the words in them, at every visibility. A title counts for more than a label, and a label for more than the body. | `searchPosts` | [search.mjs](src/capabilities/search.mjs) |
 | **Mirror** | Bring what the member has already published on their PDS into the vault. It only reads the PDS, and it never changes a post the member has since changed in the vault. | `importPublished` | [mirror.mjs](src/capabilities/mirror.mjs) |
 | **Publish** | Work out what would have to change in the member's own repository for what is published to match their vault. The service changes nothing there and holds no permission to: the member, signed in at their own PDS, makes the changes from the list. Only standard.site documents holding an ohm post are touched, with the member's publication made the first time; a record the vault knows nothing about is never removed. | `getPublishPlan`, `getAttachment` | [publish.mjs](src/capabilities/publish.mjs) |
@@ -338,6 +341,227 @@ Removes one private block. Its kept versions stay, so it can be restored.
 | Takes | `id`: the block's opaque ID<br>`replaces`: the version being removed<br>`journal`: optional: a sealed journal entry |
 | Gives | `id`, `removed` |
 
+## Channels
+
+Channels as files: each one's `_channel.md`, with its title, kind, order and description, kept readable like the friends layer. Channels can be moved with everything filed in them, and removed when empty. Private channels are sealed and kept with the private layer, never here.
+
+### `com.ohmmmm.vault.listChannels`
+
+Every channel kept here, with the version it is at. With `since`, a point an earlier list returned, only what changed after it, removals included.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `since`: optional: the `cursor` of an earlier list |
+| Gives | `channels` (path, version, title, kind), `cursor`, and `more` when there is another page |
+
+### `com.ohmmmm.vault.getChannel`
+
+One channel, as its `_channel.md`, and its version.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `path`: the channel's path, such as `writing/collisions` |
+| Gives | `channel` (path, text), `version` |
+
+### `com.ohmmmm.vault.putChannel`
+
+Saves one channel's file. A channel marked `visibility: private` is refused. `replaces` is the version being replaced and is left out for a new channel. Sent twice, it ends the same as sent once.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `channel`: `path` and `text`<br>`replaces`: optional: the version it replaces |
+| Gives | `path`, `version`, and `unchanged` when nothing differed |
+
+### `com.ohmmmm.vault.deleteChannel`
+
+Removes one channel. Refused while a block or post is filed in it or a channel is inside it.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `path`: the channel's path<br>`replaces`: the version being removed |
+| Gives | `path`, `removed` |
+
+### `com.ohmmmm.vault.moveChannel`
+
+Moves a channel to another path, with every channel inside it and every friends-only block filed in or listed under it, all at once or not at all. Refused while a published post is filed in it, because a post's address comes from its label: that changes through Publish.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `from`: the channel's path<br>`to`: its new path<br>`replaces`: the channel's version, or nothing for a folder with no `_channel.md` |
+| Gives | `from`, `to`, and how many `channels` and `blocks` moved |
+
+## Cortex
+
+The cortex: what the member's agents know about them and can do, as files sealed on the member's devices. The service keeps and syncs them and cannot read them. Each is `{ id, ciphertext, version }` with an opaque ID; several change together or not at all; every version is kept; the journal of who changed what, and why, is sealed too. Agents reach the cortex through the member's device, never through the service.
+
+### `com.ohmmmm.cortex.listFiles`
+
+Every cortex file, by opaque ID, with its version, size and key generation. With `since`, only what changed after an earlier list, removals included. With `below`, only files wrapped by an older generation.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `since`: optional: the `cursor` of an earlier list<br>`below`: optional: a generation |
+| Gives | `blocks` (id, version, rev, generation, size), `cursor`, and `more` when there is another page |
+
+### `com.ohmmmm.cortex.getFile`
+
+One cortex file's ciphertext and version.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `id`: the file's opaque ID |
+| Gives | `id`, `ciphertext`, `version`, `rev` |
+
+### `com.ohmmmm.cortex.putFile`
+
+Saves one cortex file's ciphertext, with compare-and-swap on its version. Readable text, or a file sealed under a key older than a rotation started, is refused. The journal entry says, sealed, who made the change and why.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `file`: `id` and `ciphertext` (the sealed file)<br>`replaces`: optional: the version it replaces<br>`journal`: optional: a sealed journal entry |
+| Gives | `id`, `version`, `rev`, and `unchanged` when nothing differed |
+
+### `com.ohmmmm.cortex.putFiles`
+
+Changes several cortex files together, all or none: each a write (`id`, `ciphertext`, `replaces`) or a removal (`id`, `remove: true`, `replaces`). `batchId` makes it safe to send again.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `changes`: the changes, 1 to 100<br>`batchId`: a key the device makes for this batch<br>`journal`: optional: a sealed journal entry |
+| Gives | `blocks` (id, version and rev, or removed), and `replayed` for a repeat |
+
+### `com.ohmmmm.cortex.deleteFile`
+
+Removes one cortex file. Its kept versions stay, for restoring.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `id`: the file's opaque ID<br>`replaces`: the version being removed<br>`journal`: optional: a sealed journal entry |
+| Gives | `id`, `removed` |
+
+### `com.ohmmmm.cortex.listVersions`
+
+A cortex file's kept versions, newest first, each by a `rev` that never changes.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `id`: the file's opaque ID |
+| Gives | `id`, `versions` (rev, version, generation, size, created) |
+
+### `com.ohmmmm.cortex.getVersion`
+
+One kept version of a cortex file, as ciphertext.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `id`: the file's opaque ID<br>`rev`: the version's rev |
+| Gives | `id`, `rev`, `version`, `ciphertext` |
+
+### `com.ohmmmm.cortex.listJournal`
+
+The cortex journal's sealed entries after `since`, oldest first: who changed what, and why, readable only on the member's devices.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `since`: optional: the `cursor` of an earlier list |
+| Gives | `entries` (seq, entry, created), `cursor`, and `more` |
+
+### `com.ohmmmm.cortex.listBelow`
+
+What the member's key rotation to `target` still has to re-wrap in the cortex: kept versions and journal entries.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `target`: the generation being rotated to |
+| Gives | `target`, `versions` (id, rev, generation), `journal` (seq, generation), and `more` |
+
+### `com.ohmmmm.cortex.rewrap`
+
+Re-wrapped copies of cortex versions and journal entries for the rotation under way. Each keeps exactly its contents; only the file key is re-wrapped. All are kept or none.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `target`: the generation being rotated to<br>`versions`: (id, rev, ciphertext)<br>`journal`: (seq, entry) |
+| Gives | `target`, `remaining` across the private layer and the cortex |
+
+## Media
+
+The media cache. A picture or file in a vault is a block that saves where the file is and what it is; its bytes are sent here once, so the cockpit can show them, and can always be sent again. Public and friends-only media is sent readable under its content address and can be shown smaller; private media is sealed on the member's device first and never rendered here. Nothing here is published: publishing sends a copy to the member's PDS.
+
+### `com.ohmmmm.media.hasMedia`
+
+Which of the named media the cache already holds, so a device sends only what is missing.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `names`: up to 100 content addresses or sealed IDs, separated by commas |
+| Gives | `present`, the names held |
+
+### `com.ohmmmm.media.putMedia`
+
+Sends one file's bytes, whole, as the request body (not JSON), up to 25 MB. Readable media is named by its content address, which the bytes must match; sealed media by its opaque ID, as `application/octet-stream`. Sent again, it changes nothing.
+
+| | |
+| --- | --- |
+| Reads or changes | Changes (`POST`) |
+| Who may ask | The member |
+| Takes | `name`: in the address: its content address (sha256-<hex>) or sealed ID<br>`body`: the bytes, with their type as Content-Type |
+| Gives | `name`, `size`, and `unchanged` when it was held already |
+
+### `com.ohmmmm.media.getMedia`
+
+One file's bytes, as they were sent. It answers with the file itself, not JSON.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `name`: its content address or sealed ID |
+| Gives | The file, with its type |
+
+### `com.ohmmmm.media.getRendition`
+
+A smaller copy of a readable picture to show, 160, 480, 960 or 1600 pixels wide, made once and kept. Sealed media is refused: the device renders it.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | `name`: its content address<br>`width`: 160, 480, 960 or 1600 |
+| Gives | The picture, with its type |
+
 ## Structure
 
 The shape of a vault: its labels, the sublabels inside them, and a line for each post. Enough to draw it or decide where something belongs, without reading any post in full.
@@ -352,6 +576,17 @@ Labels, sublabels, and each post with who may see it, what kind of thing it is, 
 | Who may ask | The member |
 | Takes | Nothing |
 | Gives | `posts`, `public`, `friends`, `private` (counts), and `labels`, each with its `posts` and `sublabels` |
+
+### `com.ohmmmm.vault.getAgenda`
+
+What waits for the member and their curator, as counts: posts with no label of their own (`other`) and media with no alt text. Counted from the public and friends-only layers only, without reading anything with a model; the private layer and the cortex are counted on the member's device.
+
+| | |
+| --- | --- |
+| Reads or changes | Reads only (`GET`) |
+| Who may ask | The member |
+| Takes | Nothing |
+| Gives | `unlabelled`, `mediaWithoutAlt`, and `counted`, the layers counted |
 
 ## Search
 
@@ -507,20 +742,24 @@ A refusal is JSON with an `error`, which is one of the names below, and a `messa
 | `InvalidRequest` | 400 | The request is not JSON, or something it says is not what that request takes |
 | `InvalidPost` | 400 | The post is not one the vault can hold. The message lists every reason |
 | `InvalidBlock` | 400 | The block is not one the layer can hold: for the friends layer, it is private or public, a post, or its file has problems; for the private layer, it is not a sealed file under an opaque ID. The message says why |
+| `InvalidChannel` | 400 | The channel is not one the service can hold: its path is not a channel's path, it is private, or its file has problems. The message says why |
 | `InvalidCursor` | 400 | `since` is not a value an earlier list returned |
 | `NotFound` | 404 | There is no such post, block or saved version, or nothing there is shared with the asker |
-| `Changed` | 409 | The post, block or private block has changed since the version the request names. The answer carries the current version |
+| `Changed` | 409 | The post, block, channel or private block has changed since the version the request names. The answer carries the current version |
 | `SlugTaken` | 409 | Another post in the vault already has that slug |
-| `PathTaken` | 409 | Another block in the friends layer is already at that path |
+| `PathTaken` | 409 | Another block in the friends layer, or another channel, is already at that path |
+| `NotEmpty` | 409 | A block or post is filed in the channel, or a channel is inside it. Move them first |
+| `HasPosts` | 409 | Published posts are filed in the channel. Their addresses come from their label, which changes through Publish |
 | `OlderKey` | 409 | The private block is sealed under an older master key than the member is rotating, or rotated, to |
 | `NoRotation` | 409 | No rotation to that generation is under way |
 | `RotationAhead` | 409 | The member already rotated to a later master key than the one asked for |
 | `RotationRemaining` | 409 | A rotation cannot finish while some kept versions or journal entries are still sealed under the older key. The answer says how many |
-| `TooLarge` | 413 | The post or block is more than 600 KB of text, a sealed private block is more than 1 MB, or a file it places is empty or larger than 25 MB |
+| `TooLarge` | 413 | The post or block is more than 600 KB of text, a channel file is more than 200 KB, media is empty or more than 25 MB, a sealed private block is more than 1 MB, or a file it places is empty or larger than 25 MB |
 | `FileUnreachable` | 502 | A file a post places could not be fetched from where the post says it is |
 | `AccountNotFound` | 404 | No AT Protocol account answers to that handle or DID |
 | `NoRepository` | 400 | The account's DID document does not say where its repository is kept |
 | `RepositoryUnreachable` | 502 | The account's PDS would not answer |
+| `MediaUnavailable` | 503 | The media cache is not set up on this service |
 | `InternalError` | 500 | Something went wrong in the service itself |
 
 ## The tools an agent has
@@ -575,6 +814,26 @@ These requests have no MCP tool. They serve the editor, command line, adapters o
 | `rewrapPrivate` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `finishPrivateRotation` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
 | `deletePrivateBlock` | Private | Private contents never reach the service readable. Agents read them only on the person's device, after unlock |
+| `listChannels` | Channels | undefined |
+| `getChannel` | Channels | undefined |
+| `putChannel` | Channels | undefined |
+| `deleteChannel` | Channels | undefined |
+| `moveChannel` | Channels | undefined |
+| `listFiles` | Cortex | undefined |
+| `getFile` | Cortex | undefined |
+| `putFile` | Cortex | undefined |
+| `putFiles` | Cortex | undefined |
+| `deleteFile` | Cortex | undefined |
+| `listVersions` | Cortex | undefined |
+| `getVersion` | Cortex | undefined |
+| `listJournal` | Cortex | undefined |
+| `listBelow` | Cortex | undefined |
+| `rewrap` | Cortex | undefined |
+| `hasMedia` | Media | undefined |
+| `putMedia` | Media | undefined |
+| `getMedia` | Media | undefined |
+| `getRendition` | Media | undefined |
+| `getAgenda` | Structure | undefined |
 | `exportFiles` | Export | The command line and the editor write the vault out. An agent reads posts one at a time |
 | `get` | Account | It rides on an ohm session, which an agent does not have |
 | `connect` | Account | It rides on an ohm session, which an agent does not have |

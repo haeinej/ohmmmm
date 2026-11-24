@@ -1,7 +1,6 @@
 import { evidence, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { isPostId, setProperty } from "../../../vault/vault/file.mjs"
 import type { SearchInput, SearchProvider } from "./search"
-import type { ChannelRecord } from "./workspace-model"
 
 export type Layer = "public" | "friends" | "private"
 export type BlockRef = { id: string; layer: Layer; store: "post" | "block" | "sealed" }
@@ -33,6 +32,18 @@ export type VisibilityMove = {
 }
 export type MoveResult = { ref: BlockRef; version: string; cleanupPending: boolean }
 export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: string }
+/** A channel's `_channel.md` on the vault service, with the version compare-and-set names. */
+export type ChannelHead = { path: string; version: string; title?: string; kind?: string }
+export type ChannelFile = HomeFile & { version: string }
+export type ChannelMove = { from: string; to: string; channels: number; blocks: number }
+/** A cortex file, opened on this device: `id` is its opaque storage ID, `path` where the cortex files it. */
+export type CortexFile = HomeFile & { id: string; version: string }
+export type CortexChange = { id: string; file: HomeFile; replaces: string | null } | { id: string; remove: true; replaces: string }
+/** A cortex journal entry, opened on this device: who changed what, and why. */
+export type CortexEntry = { seq: number; created: string; entry: Record<string, unknown> }
+/** What waits for the member and their curator, counted by the service from the readable layers. */
+export type Agenda = { unlabelled: number; mediaWithoutAlt: number; counted: string }
+export type MediaWidth = 160 | 480 | 960 | 1600
 export type VaultContents = ReturnType<typeof readVault>
 export type VaultEvidence = ReturnType<typeof evidence>
 
@@ -45,10 +56,35 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   deleteBlock(ref: BlockRef, replaces: string): Result<Mode, void>
   vault(layers?: readonly Layer[]): Result<Mode, VaultContents>
   connections(layers?: readonly Layer[]): Result<Mode, VaultEvidence>
-  /** Channel records are editable in the sample workspace. The service has no channel write API. */
-  saveChannels?(channels: readonly ChannelRecord[]): Result<Mode, void>
-  /** Changes the sample's visibility marker for previewing the audiences. */
-  markVisibility?(ref: BlockRef, layer: Layer, replaces: string): Result<Mode, void>
+  /** Channels as files (`_channel.md`), each with its own version. Private channels stay sealed in the private layer. */
+  channels: {
+    list(): Promise<ChannelHead[]>
+    read(path: string): Promise<ChannelFile>
+    save(file: HomeFile, replaces: string | null): Promise<{ version: string }>
+    /** Moves the channel, every channel inside it and every readable block filed in it, all or none. */
+    move(from: string, to: string, replaces: string | null): Promise<ChannelMove>
+    remove(path: string, replaces: string): Promise<void>
+  }
+  /** The sealed cortex: opened and sealed on this device, under `ohm-vault/cortex/v1`. */
+  cortex: {
+    list(): Promise<CortexFile[]>
+    read(id: string): Promise<CortexFile>
+    save(id: string, file: HomeFile, replaces: string | null, journal?: Record<string, unknown>): Promise<{ version: string }>
+    saveMany(changes: readonly CortexChange[], journal?: Record<string, unknown>): Promise<{ id: string; version?: string; removed?: boolean }[]>
+    remove(id: string, replaces: string, journal?: Record<string, unknown>): Promise<void>
+    history(id: string): Promise<HistoryVersion[]>
+    readVersion(id: string, rev: HistoryVersion["rev"]): Promise<HomeFile>
+    journal(): Promise<CortexEntry[]>
+  }
+  /** The media cache: a media block keeps where its file is; only the bytes are sent here. */
+  media: {
+    has(names: readonly string[]): Promise<string[]>
+    /** Sends readable bytes under their content address (sha256-<hex>), which it returns. */
+    put(bytes: Uint8Array<ArrayBuffer>, type: string): Promise<{ name: string; size: number }>
+    get(name: string): Promise<Blob>
+    rendition(name: string, width: MediaWidth): Promise<Blob>
+  }
+  agenda(): Promise<Agenda>
   search: SearchProvider
   history(ref: BlockRef): Result<Mode, HistoryVersion[]>
   readVersion(ref: BlockRef, rev: HistoryVersion["rev"]): Result<Mode, HomeFile>
@@ -62,6 +98,14 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
 }
 
 type Result<Mode, Value> = Mode extends "sync" ? Value : Promise<Value>
+
+export const CORTEX_CONTEXT = "ohm-vault/cortex/v1"
+
+/** sha256-<hex>: the content address the media cache names readable bytes by. */
+export async function mediaName(bytes: Uint8Array<ArrayBuffer>) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+  return `sha256-${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`
+}
 
 export const emptyPlan = (): PublishPlan => ({
   changes: 0, create: [], replace: [], remove: [], unchanged: [], cannot: [], notInVault: [],

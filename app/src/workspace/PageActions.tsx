@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { notify } from "@/components/ui/notice"
 import { byId, titleOf } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
-import { createChannel, deleteDoc, renameDoc, renameChannel, revealFolder } from "./store"
+import { createChannel, deleteDoc, renameDoc, renameChannel, report, revealFolder } from "./store"
 
 /**
  * A name edited in place: the text selected, a forest ring. Enter or leaving keeps it; Escape puts
@@ -49,29 +49,26 @@ export function InlineField({ initial, onCommit, onDone, className, label = "Nam
 export function InlineRename({ id, className, onDone }: { id: string; className?: string; onDone: () => void }) {
   const doc = byId(id)
   if (!doc) return null
-  return <InlineField initial={doc.title} className={className} onDone={onDone} onCommit={next => renameDoc(id, next)} />
+  return <InlineField initial={doc.title} className={className} onDone={onDone} onCommit={next => void report(renameDoc(id, next))} />
 }
 
 /** Makes a channel, shows it in the tree, and starts renaming it in place. */
 export function startChannel(inside?: string) {
-  try {
-    const path = createChannel(inside)
+  createChannel(inside).then(path => {
     revealFolder("vault", path)
     setTimeout(() => window.dispatchEvent(new CustomEvent("ohm:rename-row", { detail: { id: `vault:${path}` } })), 120)
-  } catch (err) { notify({ message: (err as Error).message }) }
+  }).catch(err => notify({ message: (err as Error).message }))
 }
 
 /** A channel's name, in place: `channel` or `channel/inner`. */
 export function InlineRenameChannel({ path, className, onDone }: { path: string; className?: string; onDone: () => void }) {
   const name = path.split("/").at(-1)!
   return <InlineField initial={name} label="Channel name" className={className} onDone={onDone} onCommit={next => {
-    let moved: { published: number }
-    try { moved = renameChannel(path, next) } catch (err) { notify({ message: (err as Error).message }); return }
-    const to = [...path.split("/").slice(0, -1), next.trim().toLowerCase().replace(/\s+/g, "-")].join("/")
-    window.dispatchEvent(new CustomEvent("ohm:channel-renamed", { detail: { from: path, to } }))
-    notify({ message: moved.published
-      ? `Renamed to “${next}”. ${moved.published} ${moved.published === 1 ? "post gets" : "posts get"} the new address when you publish.`
-      : `Renamed to “${next}”`, tone: "info" })
+    renameChannel(path, next).then(() => {
+      const to = [...path.split("/").slice(0, -1), next.trim().toLowerCase().replace(/\s+/g, "-")].join("/")
+      window.dispatchEvent(new CustomEvent("ohm:channel-renamed", { detail: { from: path, to } }))
+      notify({ message: `Renamed to “${next}”`, tone: "info" })
+    }).catch(err => notify({ message: (err as Error).message }))
   }} />
 }
 
@@ -103,7 +100,8 @@ export function DeleteDialog() {
             if (!doc) return
             const t = titleOf(doc)
             deleteDoc(doc.id)
-            notify({ message: `Deleted “${t}”`, tone: "info" })
+              .then(() => notify({ message: `Deleted “${t}”`, tone: "info" }))
+              .catch(err => notify({ message: (err as Error).message }))
             close()
           }}>Delete</Button>
         </DialogFooter>

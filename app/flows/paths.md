@@ -1,6 +1,6 @@
 # Every interaction path in the workspace
 
-What a person (or an agent) can do in the ohm workspace wireframe, where each path starts, how it goes, where it ends, and what it is for. This is the end-state record of the wireframe as built. The layout and design are in [workspace.md](workspace.md); the rules are in [../AGENTS.md](../AGENTS.md).
+What a person (or an agent) can do in the ohm workspace, where each path starts, how it goes, where it ends, and what it is for. This is the end-state record of the workspace as built. The layout and design are in [workspace.md](workspace.md); the rules are in [../AGENTS.md](../AGENTS.md).
 
 **The workspace in one sentence:** one person's home for what they write (the **vault**) and what their agents know about them (the **cortex**). Here they find things, write blocks, see how everything connects around them, decide who sees what, and let an agent help through the same steps.
 
@@ -12,7 +12,7 @@ How to read each path:
 - **Agent:** the WebMCP tool that runs the same step, or *UI only*.
 - **Asks first:** for anything other people would see, or anything that can't be undone, the block confirms before acting.
 
-Nothing in the wireframe is saved between reloads. Every end state below is true for the session.
+**Production first.** The workspace shows the signed-in member's home from their vault service and nothing else: no sample data is in the app. Signed out, it shows sign-in. Every change is sent to the service first and shows once the service has answered; it lasts across reloads and devices. The private layer and the cortex open only on a device that has unlocked the account's keys; until then they show as locked. Places with nothing in them show ohm-ui's `Empty`.
 
 ---
 
@@ -77,12 +77,13 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| D1 | **See your graph** | Home → graph icon, or ⌘G | Obsidian-style, in white, grey and green. You (your profile) in the middle; what agents observed about you, skills and tools as green diamonds close around you, each joined to you; vault blocks as grey dots further out, clustered by channel with the channel's name above. Grey lines are your links; dashed green lines are connections an agent observed. No areas, no names for the two parts, no key | See how your home is organised around you and how it connects | `workspace.graph` |
-| D2 | Explore | Hover an item or a collecting channel | It, its lines and its folders' names light up; the rest fades | Read one node's neighbourhood | *UI only* |
-| D2a | Find a folder in the list | Click a cluster's name in the graph | The list opens with that folder revealed | Go from the map to the files | *UI only* |
+| D1 | **See your graph** | Home → graph icon, or ⌘G | Obsidian-style. You in the middle. Each node is a block ([words](../../docs/words.md#in-the-graph)), coloured by its label (its home's top channel) and sized by its backlinks; blocks with one label gather in one direction with the label's name above. Each line is a connect: a link, embed or mention of another block in the text, or a whole-block connection. A connection an agent only observed is its own dashed line, bowed apart from any you made. Channels, `contains` and people a block mentions are not drawn | See how your blocks connect around you | `workspace.graph` |
+| D1a | Show the cortex | Graph settings → Cortex (off by default; only once this device has unlocked your keys) | What agents know about you, their skills and tools gather close around you as diamonds | See your memory beside your writing | *UI only* |
+| D2 | Explore | Hover a block | It and its lines light up; the rest fades | Read one node's neighbourhood | *UI only* |
+| D2a | Find a label in the list | Click a label's name in the graph | The list opens with that channel revealed | Go from the map to the files | *UI only* |
 | D3 | Rearrange | Drag a node | Its neighbours follow on soft springs and settle back | Untangle a part to look at | *UI only* |
 | D4 | Zoom and pan | Wheel or pinch, drag the background, or + / − / fit | The view moves; item names and folders inside folders fade in as you zoom; names that would overlap are left out; fit returns to all | Read detail or the whole | *UI only* |
-| D5 | **Centre on a person** | A person in search results, or an inbox mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
+| D5 | **Centre on a person** | A person in search results, or a mention | The graph shows only your blocks that mention them | See everything around someone | `workspace.graph` with `center` |
 | D6 | Back to you | Back to me | All your blocks again | Return | `workspace.graph` |
 | D7 | Filter the graph | Graph settings → Connections; Lay out again | The lines show or hide; the layout restarts | Simplify or refresh | *UI only* |
 
@@ -113,14 +114,12 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | E16 | **History** | Block toolbar → clock | The block's versions, as in H9 | Go back in time | `history.versions` |
 | E17 | Read a shared block | Open a block for friends or everyone | Read-only, with "changing it asks first" | Protect what others already see | *UI only* |
 
-## F. Inbox and notifications
+## F. Notifications
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| F1 | **Inbox** | Rack Inbox (a dot when there are new items) | The side panel lists replies, mentions, friend requests and cortex observations, newest first | See what came in from others | *UI only* |
-| F2 | Open an inbox item | Click it | About a post: that post opens. Otherwise its own view opens (a friend request: Accept / Not now; a mention: see them in the graph). It counts as read | Respond | *UI only* |
-| F3 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
-| F4 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
+| F1 | **Notifications** | Rack bell (a dot when unread; it pulses while an agent works) | A panel: **Agent** (what an agent is doing now, and what agents did through WebMCP) and **System** (the workspace's notices) | Know what happened, especially what an agent did | *UI only* (every tool run is recorded here) |
+| F2 | Act on a notification | Click one about a block; × removes one; Clear all | Opens the block / removes / empties | Follow up or tidy | *UI only* |
 
 ## G. Profile and settings
 
@@ -134,7 +133,7 @@ Nothing in the wireframe is saved between reloads. Every end state below is true
 | G5 | Vault | Settings → Vault | New blocks start private (always); your channels | Review how your vault is organised | *UI only* |
 | G6 | Cortex | Settings → Cortex | Your profile, how many observations, skills and tools | Review what your agents know about you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
-| G8 | Sign out | Settings → Sign out | A notice (not in the wireframe) | Leave | *Not yet* |
+| G8 | Sign out | Settings → Sign out | Ends the ohm session (`POST /api/auth/sign-out`); the workspace then shows sign-in | Leave | *UI only* |
 
 ## H. History ([flows/history.md](history.md))
 
@@ -179,7 +178,7 @@ Nothing an agent can do here is public. Making a block visible to others, deleti
 | Opening anything | One block is open in the editor; the tree has revealed it and shows it selected; the graph rings it; it is in your back/forward history; its unread dot is gone |
 | Writing | The block is saved and still private |
 | Renaming or moving | The tree, path pill, editor title, search and graph all agree. For a post, its address follows when you next publish |
-| Marking who a block is for | It is marked, not published. Showing it to more people needed your yes |
+| Marking who a block is for | Friends ↔ only you moves it between the friends layer and the sealed private layer at the service, after your yes for wider. Public is reached only through Publish |
 | Viewing as Friends or Public | You see exactly what they would; your cortex is hidden; you are one click from Back to you |
 | Archiving | Out of the tree, kept, restorable |
 | Deleting | Gone from the vault, after your yes; you are on the block you had before. Published copies are handled by a separate take-down step |
@@ -195,5 +194,5 @@ These show a notice saying what they will do. Each will become a path above once
 - **Publishing and taking down.** Its own flow, with an approval card.
 - **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
-- **Signing out.**
-- **Persistence:** saving across reloads.
+- **Unlocking on this device:** the private layer and the cortex open once the account app's keys are wired into the workspace (`privateSession`). The cortex also needs the keys package to seal under `ohm-vault/cortex/v1`.
+- **Media upload from the editor:** the media cache requests are in the source (`HomeSource.media`); dropping a picture does not send its bytes yet.

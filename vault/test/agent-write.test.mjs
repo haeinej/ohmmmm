@@ -56,6 +56,10 @@ test('an agent writes within its grant, replaces only what it read, and every ve
   const made = await call('vault_write', { path: 'notes/new.md', text: 'A new idea about lanterns.' });
   assert.equal(made.made, true);
   assert.match(await readFile(join(vault, 'notes/new.md'), 'utf8'), /by: "?agent:helper/);
+  // A new block from an agent starts private, even when it says otherwise.
+  const loud = await call('vault_write', { path: 'notes/loud.md', text: '---\nvisibility: public\n---\n\nFor everyone.' });
+  assert.match(await readFile(join(vault, 'notes/loud.md'), 'utf8'), /visibility: private/);
+  await call('vault_remove', { path: 'notes/loud.md', replaces: loud.hash });
   await assert.rejects(call('vault_write', { path: 'diary/today.md', text: 'Changed.' }), /no write grant/);
   await assert.rejects(call('vault_write', { path: '.vault/grants.json', text: '{}' }), /Markdown file/);
   await assert.rejects(call('vault_write', { path: 'notes/.hidden.md', text: 'x' }), /hidden files/);

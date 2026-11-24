@@ -53,7 +53,7 @@ test('a block, a channel, an entity and a source each read back from their file 
   const block = readNode('analytics/churn-query.md', [
     '---', 'kind: code', 'title: Q3 churn query', 'channels: [sql-snippets, analytics]', 'origin: ~/work/queries/churn.sql',
     `from: ${ID.s}`, 'excerpt: {"quote": "joins on account_id", "position": 12}', 'tags: [retention, "#board"]', 'by: agent:claude',
-    'status: proposed', 'visibility: friends', 'created: 2026-11-19', 'mood: tired', `id: ${ID.a}`, '---', '',
+    'status: kept', 'visibility: friends', 'created: 2026-11-19', 'mood: tired', `id: ${ID.a}`, '---', '',
     'What I used for the board review.', '', '```sql', 'select 1;', '```', '', '![[churn.sql]]',
   ].join('\n'));
   assert.deepEqual(block.problems, []);
@@ -196,4 +196,15 @@ test('evidence is only what the content shows, and says where each edge was read
   ].sort());
   assert.equal(nodeKey({ type: 'block', path: 'a/b.md' }), 'block:a/b.md');
   assert.match(newNodeId(), /^[234567a-j][2-7a-z]{12}$/);
+});
+
+test('words the inbox used read as if absent: a proposed block is an ordinary block, an inbox channel a collection', () => {
+  const block = readNode('notes/idea.md', '---\nby: agent:helper\nstatus: proposed\n---\n\nAn idea.');
+  assert.deepEqual(block.problems, []);
+  assert.equal(block.node.status, undefined);
+  assert.equal(block.node.by, 'agent:helper');
+  assert.equal(block.node.visibility, 'private');
+  const channel = readNode('inbox/_channel.md', '---\ntitle: Inbox\nkind: inbox\n---\n\nOld.');
+  assert.deepEqual(channel.problems, []);
+  assert.equal(channel.node.kind, undefined);
 });

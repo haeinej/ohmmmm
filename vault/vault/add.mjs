@@ -3,7 +3,7 @@
 // line, adds to a vault; a file dropped in by hand is recognised later, as far as it can be, by
 // indexing.
 //
-//   a Markdown file   copied into the channel, with origin (and, from an agent, by and status) set
+//   a Markdown file   copied into the channel, with origin (and, from an agent, by and visibility) set
 //   any other file    copied in, with a block beside it that embeds it and says where it came from
 //   an address        a source that refers to it, and a link block from that source. Nothing is fetched
 //
@@ -16,7 +16,7 @@ import { VaultProblem } from './core.mjs';
 import { readProperties, setProperty, slugOf, splitFile, writeNoteFile } from './file.mjs';
 import { CODE_ENDINGS } from './indexer.mjs';
 import { appendEvents } from './journal.mjs';
-import { CHANNEL_FILE, inferKind, isChannelPath, newNodeId, nodeFile } from './node.mjs';
+import { inferKind, isChannelPath, newNodeId, nodeFile } from './node.mjs';
 
 const refuse = message => { throw new VaultProblem(message); };
 const taken = async path => Boolean(await lstat(path).catch(() => null));
@@ -30,24 +30,24 @@ async function freeName(folder, name) {
   }
 }
 
-// Make a channel's folder, and give an inbox its _channel.md the first time.
+// Make a channel's folder if it is not there yet.
 async function channelFolder(vault, channel) {
   const folder = join(vault, ...channel.split('/'));
   await mkdir(folder, { recursive: true });
-  if (channel === 'inbox' && !(await taken(join(folder, CHANNEL_FILE)))) {
-    await writeFile(join(folder, CHANNEL_FILE), nodeFile({ type: 'channel', path: 'inbox', title: 'Inbox', kind: 'inbox', order: [], description: 'What came in and is waiting to be put somewhere.', properties: {} }).text, { flag: 'wx' });
-  }
   return folder;
 }
 
 //   vault: the vault's absolute path; source: an absolute path or an HTTP(S) address
-//   by: me, or agent:<name>. An agent's additions are marked proposed, for the person to keep or not
-export async function addToVault({ vault, source, channel = 'inbox', by = 'me', title, move = false, now = new Date() }) {
+//   channel: the channel it goes into. There is no default: every addition is put somewhere
+//   by: me, or agent:<name>. An agent's additions say so, and start private whatever the file said:
+//   showing a block to more people is always the person's move
+export async function addToVault({ vault, source, channel, by = 'me', title, move = false, now = new Date() }) {
+  if (typeof channel !== 'string' || !channel) refuse('Say which channel this goes into');
   if (!isChannelPath(channel)) refuse(`"${channel}" is not a channel's path: folders joined by "/", none starting with "." or "_"`);
   if (!/^(?:me|agent:[A-Za-z0-9._-]+)$/.test(by)) refuse('by is me, or agent: and the agent\'s name');
   const at = now.toISOString();
   const agent = by !== 'me';
-  const marks = { ...(agent ? { by, status: 'proposed' } : {}), created: at };
+  const marks = { ...(agent ? { by, visibility: 'private' } : {}), created: at };
   const folder = await channelFolder(vault, channel);
   const inVault = path => relative(vault, path).split(sep).join('/');
   const written = [];

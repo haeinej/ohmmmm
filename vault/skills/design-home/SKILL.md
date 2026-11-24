@@ -50,7 +50,7 @@ When there is no vault or cortex yet, say so in the report: there are no traces 
 
 ## 2. Report
 
-Fill the [home report template](../../docs/agents/home-report.md), every section in order, and show it to them in the conversation. Writing it is a change, so it waits like any other: keep it only if they say where (their first row in the decisions log), then save it as a **private block** through the vault's tools: `vault_write` where your grant allows, otherwise `vault_capture` into the Inbox as a proposal. Never in a site folder, and never with a plain file write.
+Fill the [home report template](../../docs/agents/home-report.md), every section in order, and show it to them in the conversation. Writing it is a change, so it waits like any other: keep it only if they say where (their first row in the decisions log), then save it as a **private block** through the vault's tools: `vault_write` into one of the channels you set up, which your grant covers. If you have no grant there, ask for one; there is no inbox to drop it in. Never in a site folder, and never with a plain file write.
 
 Propose channels by **shape**, not by name: "one channel would hold the 19 essays; it is `?` (as found: writing/)". Put every naming question in Open label questions, one decision per row.
 

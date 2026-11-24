@@ -137,3 +137,76 @@ CREATE TABLE IF NOT EXISTS friends (
   PRIMARY KEY (did, friend)
 );
 CREATE INDEX IF NOT EXISTS friends_of ON friends (friend);
+
+-- Channels: each member's channel files (`_channel.md`), kept readable like the friends layer.
+-- `path` is the channel's path; `text` is the file exactly as the member's folder holds it. A
+-- removed or moved channel keeps its row with no version, so "what changed since" can say it went.
+-- A private channel, and a mixed channel's private overlay, are sealed in the private layer instead.
+CREATE TABLE IF NOT EXISTS channels (
+  did TEXT NOT NULL,
+  path TEXT NOT NULL,
+  version TEXT,
+  title TEXT,
+  kind TEXT,
+  text TEXT,
+  seq INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (did, path)
+);
+CREATE INDEX IF NOT EXISTS channels_changes ON channels (did, seq);
+
+-- Fails a batch on purpose: a statement inserts a row here only when what it checks has changed,
+-- and the CHECK refuses it, undoing the whole batch. Never holds a row.
+CREATE TABLE IF NOT EXISTS guard (ok INTEGER NOT NULL CHECK (ok = 1));
+
+-- The cortex, sealed: profile, observations, skills and tools as files the member's device seals with
+-- the same master key as the private layer (key context ohm-vault/cortex/v1), so the service keeps
+-- them and cannot read them. The same shape and rules as the private layer's tables: an opaque `id`,
+-- every version kept under a `rev`, a sealed journal saying who changed what and why, and batches
+-- applied once. A key rotation covers both stores. The vault and the cortex stay apart: nothing here
+-- is a vault block, and the cortex is never written into the vault's tables.
+CREATE TABLE IF NOT EXISTS cortex_files (
+  did TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version TEXT,
+  ciphertext TEXT,
+  generation INTEGER,
+  size INTEGER,
+  seq INTEGER NOT NULL,
+  -- The kept version that is this file's contents now.
+  rev INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (did, id)
+);
+CREATE INDEX IF NOT EXISTS cortex_files_changes ON cortex_files (did, seq);
+
+CREATE TABLE IF NOT EXISTS cortex_file_versions (
+  did TEXT NOT NULL,
+  id TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  version TEXT NOT NULL,
+  ciphertext TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (did, id, rev)
+);
+CREATE INDEX IF NOT EXISTS cortex_file_versions_generation ON cortex_file_versions (did, generation);
+CREATE TABLE IF NOT EXISTS cortex_journal (
+  did TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  entry TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (did, seq)
+);
+CREATE INDEX IF NOT EXISTS cortex_journal_generation ON cortex_journal (did, generation);
+CREATE TABLE IF NOT EXISTS cortex_batches (
+  did TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  result TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (did, batch_id)
+);

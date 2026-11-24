@@ -10,5 +10,6 @@ export type SearchProvider = (input: SearchInput, signal?: AbortSignal) => Promi
 /** Both the overlay and the WebMCP step call this path. */
 export async function search(input: SearchInput, signal?: AbortSignal): Promise<SearchHit[]> {
   searchInput(input)
-  return getSource().search(input, signal)
+  const source = getSource()
+  return source ? source.search(input, signal) : []
 }

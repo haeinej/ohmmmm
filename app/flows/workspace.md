@@ -6,7 +6,7 @@ A light, Obsidian-like home for one person's vault and cortex: find something, r
 
 - **Flow id:** `workspace`. Tools are named `workspace.<step>`.
 - **Starts from:** the app's root, with the person signed in.
-- **Ends in:** a block open to read or edit, the graph, a change of who can see a block, or an inbox item.
+- **Ends in:** a block open to read or edit, the graph, or a change of who can see a block.
 
 ## Layout
 
@@ -14,10 +14,10 @@ A light, Obsidian-like home for one person's vault and cortex: find something, r
 ┌──────┬────────────────┬────────────────────────────────────────┐
 │ rack │ side panel     │ main panel                              │
 │ (on  │ (a card, shade │ (a card, shade 2)                       │
-│ the  │  3)            │  post · editor · inbox item · settings  │
+│ the  │  3)            │  post · editor · settings               │
 │ block)│ repo · visib-  │                                         │
-│      │ ility · inbox  │                                         │
-│      │ · you          │                                         │
+│      │ ility · you    │                                         │
+│      │                │                                         │
 └──────┴────────────────┴────────────────────────────────────────┘
           Search: a sheet over the dimmed workspace (⌘K)
 ```
@@ -30,7 +30,6 @@ The rack sits on the block itself. The side panel and the main panel are separat
 | Search (⌘K) | Unchanged. Search opens over everything |
 | New block (⌘N) | Unchanged. A private draft opens in the editor |
 | **Home** | The home, read-only. Its heading is you (picture and name) in a pill. Its menu chooses what shows: **All**, then a divider, then **Cortex** and **Vault**, any combination (checks, not checkboxes; All is both). The two top-level folders, **cortex** (a minimal brain) and **vault** (a minimal box), are bold forest rows that open in place. Their icons are outlines when closed and filled when open. The header has the eye (click: who each block is for; hover: View as), a filter (platform, type, who it is for, edited, status), **history** (Dates, You and Agents on a vertical timeline; every change marked with who made it, and reverted from there: [flows/history.md](history.md)), and one switch between list and graph. The vault groups blocks into **channels**: a block is listed in every channel it is in, its home channel first (`photos › tokyo`) and any channel of your own (`slowness`) as well. **Dragging moves things, as in a file manager:** drag a block's row onto a channel to move it there, or above or below another block to move it to that place (each channel keeps its own order, so a block can be first in one and last in another). Hold ⌥ to add it to the other channel and keep it where it was. Drag a channel's row onto another channel to put it inside, or onto the vault row to bring it to the top; a channel that holds channels cannot go inside another yet. Drag a block onto the main panel to open it. A block's **home channel** is the one its published address comes from (`/posts/<channel>/<slug>`), so moving it out of that one changes its address on the next publish, and the notice says so. **The dot** at the right end of a block's row, on hover: click it for the block's connections card, or press it and pull a line to another block's row, a graph node or the open block to connect the two. Drag the panel's right edge to resize it (220 to 640 px; double-click resets it, arrow keys nudge it). The width is remembered on this device. Hover a block for its **⋯** (right-click opens the same menu): **Open in ›** (this window, a new tab, the graph), **Pin** (P: pinned blocks show on top), **Mark as unread** (U: a bold title until opened), **Rename** (R: in place on the row, the name selected; Enter or leaving keeps it, Escape puts it back), **Move to ›** (moves this row, as dragging does), **Channels ›** (check the channels it is in; its home channel is always checked), **Remove from <channel>** (on a row in a channel that is not its first), **Archive** (A: out of the tree, into Archived at the bottom, with Restore), **Delete** (D, red, asks first). The letters work while the menu is open or the row has focus. A channel has its own **⋯**: **New block here** (N: filed in that home channel), **New channel inside** (C, for a top-level channel), **Rename** (R, in place) and **Delete channel** (D, only when it is empty). The vault row's ⋯ adds **New channel** (C). Channels are records: an empty one stays, and is offered in Move to › and Channels ›. Renaming a channel renames it wherever a block was collected into it, refiles every block whose home channel it is and keeps it open. Posts get the new address when you next publish, and the notice says how many. The cortex and vault rows have a ⋯ too: **Expand all / Collapse all** (E), **Show only cortex / vault** (O), and for the vault, **New block** (N). The folders inside the cortex are fixed categories and have no menu. **Visibility lives here:** the eye in the header shows who each block is for. Every block gets a small round icon at its end (a globe for Everyone, tinted forest; people for Friends; a lock for Only you), labelled on hover, that changes it in place; showing a block to more people asks first, and marking is not publishing. Cortex items always read Only you. **View as** (You, Friends or Public) is in the eye's hover menu, and turning visibility off returns to You |
-| **Inbox** | Replies, mentions, friend requests and cortex observations, newest first, with new ones marked. One about a post opens that post; the others open in the main panel |
 | **Notifications** (bell) | Unchanged. A panel opens beside the rack, after agentic-twitter's notification center. **Agent** shows what an agent is doing now (its status), then what agents did through the block's WebMCP tools. **System** shows the workspace's notices. Each item shows how long ago it happened, can be removed on hover, and opens the block it is about. Clear all empties the list. A dot on the bell means something is unread; it pulses light green while an agent is working. Opening a tab marks it read |
 | You (avatar) | Your picture, then your name with your handle under it. Below that, the settings sections: Your profile, Identity, Agents, Vault, Cortex, Appearance, and Sign out |
 
@@ -53,7 +52,7 @@ How it behaves, as Obsidian's graph view does:
 - **Fit:** the graph stays fitted to the panel as it resizes and settles, until you pan or zoom yourself.
 - **Popover:** turns connections on or off, and lays the graph out again.
 - **Clicking** an item (or focusing it and pressing Enter) opens it in the main panel.
-- **Centred on someone else** (from search or an inbox mention): they are the middle, with only your blocks that mention them and no cortex; "Back to me" returns.
+- **Centred on someone else** (from search or a mention): they are the middle, with only your blocks that mention them and no cortex; "Back to me" returns.
 - **What it draws:** what the home's scope (All, Cortex, Vault) includes, that the current audience can see, through the home's filters. The cortex shows only to you, looking as yourself.
 - **Code:** built in `src/graph/model.ts` (items, folders, lines and their strength) and `src/workspace/GraphView.tsx` (clusters, forces, interaction, drawing).
 - **Private blocks** (see ohmmmm's [`vault/plans/encryption.md`](https://github.com/haeinej/ohmmmm/blob/main/vault/plans/encryption.md)): their channels and connections are inside the encrypted files, so this graph is built on the device from decrypted blocks, never by the server.
@@ -169,7 +168,7 @@ Publishing is not part of this flow. It will be its own flow, with `consequentia
 | --- | --- |
 | State and the shared handlers | `src/workspace/store.ts` |
 | Rack | `src/workspace/Rack.tsx`; the bell: `NotificationCenter.tsx`, `notifications.ts` |
-| Side panel: repo, visibility, inbox, you | `src/workspace/SidePanel.tsx`, `Surface.tsx`; the ⋯ menu: `RowMenu.tsx`; rename in place and delete: `PageActions.tsx` |
+| Side panel: repo, visibility, you | `src/workspace/SidePanel.tsx`, `Surface.tsx`; the ⋯ menu: `RowMenu.tsx`; rename in place and delete: `PageActions.tsx` |
 | Main panel and settings | `src/workspace/MainPanel.tsx`, `Settings.tsx`, `settings-tabs.ts` |
 | The block editor | `src/editor/` |
 | Search sheet and the one search path (vault, cortex, entities, settings) | `src/workspace/SearchOverlay.tsx`, `src/data/search.ts` (selected `HomeSource`) |
@@ -186,4 +185,4 @@ On a phone the side panel lies over the main panel. It starts closed, and closes
 
 ## Not yet tools
 
-Acting on inbox items, and Ask for change in the editor, are only in the UI so far. When they become tools, anything that changes what other people see is `consequentialHint` and asks first (AGENTS.md rule 11). Settings › Agents already turns each tool on or off.
+Ask for change in the editor is only in the UI so far. When it becomes a tool, anything that changes what other people see is `consequentialHint` and asks first (AGENTS.md rule 11). Settings › Agents already turns each tool on or off.

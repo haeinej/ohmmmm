@@ -1,12 +1,13 @@
-// In-memory sample histories. The vault owns block changes. Cortex owns its file changes and
-// agent sessions. The home timeline can read both. An undo is another change in the same history.
+// The home's timeline. The vault owns block changes. Cortex owns its file changes and agent
+// sessions; the sealed cortex journal brings them in (`HomeSource.cortex.journal`), and this
+// device adds the changes made here. An undo is another change in the same history.
 //
 //
 // You and agents both edit directly. Every change says who made it, so an agent's edits are marked
 // as its versions, and you revert what you don't want. When an agent finishes a task it writes a
 // session: what it did, the changes it made, and its dead ends, as ANVC (github.com/yodering/anvc)
 // keeps abandoned attempts so a later agent does not retry them.
-import { blockKey, isBlock, type Connection, type Doc, type Kind } from "./workspace-model"
+import { isBlock, type Connection, type Doc, type Kind } from "./workspace-model"
 
 export type Actor = { kind: "human" | "agent"; name: string }
 export const YOU: Actor = { kind: "human", name: "you" }
@@ -65,10 +66,18 @@ export function diffWords(a: string, b: string): DiffPart[] {
   return out
 }
 
-// ─── Seed: a few days of history, by you and two agents ─────────────────────────
+// ─── The journal ─────────────────────────
 
-export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" | "reading" | "captions" | "privateFirst" | "slowness" | "tokyo" | "dusk", string>) {
-  const byId = (id: string) => all.find(doc => doc.id === id)
+/** A journal entry as the cortex journal keeps it: one line, and the versions it names. */
+export type JournalEntry = { line: Line; snapshots?: Record<string, Snapshot> }
+export const isJournalEntry = (value: unknown): value is JournalEntry => {
+  const line = (value as JournalEntry | null)?.line
+  return !!line && typeof line === "object" && ["change", "session", "save"].includes(line.type)
+    && (line.owner === "vault" || line.owner === "cortex") && typeof line.at === "string"
+}
+
+export function createJournal(nodes: Doc[] | (() => Doc[]), kept: readonly JournalEntry[] = []) {
+  const docs = typeof nodes === "function" ? nodes : () => nodes
   const journals: Record<HistoryOwner, Line[]> = { vault: [], cortex: [] }
   const historyLines = (owner?: HistoryOwner): readonly Line[] =>
     owner ? journals[owner] : [...journals.vault, ...journals.cortex].sort((a, b) => a.seq - b.seq)
@@ -76,6 +85,9 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
   const versions = new Map<string, Snapshot>()
 
   let seq = 0
+  const baseline = new Map<string, string>()
+  /** Every node this device has held while this journal was open. */
+  const held = new Set<string>()
   const lineId = () => `${Date.now().toString(36)}-${(++seq).toString(36)}`
   function push<L extends Line>(line: Omit<L, "seq" | "id">): L {
     const full = { ...line, seq: seq + 1, id: lineId() } as L
@@ -94,7 +106,13 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
 
   const changeById = (id: string) => historyLines().find((l): l is ChangeLine => l.type === "change" && l.id === id)
   const linesFor = (node: string) => historyLines().filter((l): l is ChangeLine => l.type === "change" && l.node === node)
-  const currentVersion = (node: string) => linesFor(node).at(-1)?.after
+  // What a node is now: its last line made on this device, else what it held when this journal
+  // opened. A line the journal brought in is history, not now: the file may have changed since,
+  // on another device, and that is not a change by whoever acts here next.
+  const currentVersion = (node: string): string | undefined => {
+    const last = linesFor(node).at(-1)
+    return last && last.seq > openedAt ? last.after : baseline.get(node) ?? last?.after
+  }
   const snapshotAt = (version: string) => versions.get(version)
 
   const words = (s: string) => s.split(/\s+/).filter(Boolean).length
@@ -155,6 +173,8 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
    * reason for a change that has one, such as a restore.
    */
   function syncJournal(next?: { op: ChangeOp; reason?: string }) {
+    const all = docs()
+    for (const p of all) held.add(p.id)
     for (const p of all) {
       const s = snap(p)
       const held = currentVersion(p.id)
@@ -164,7 +184,9 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     const here = new Set(all.map(p => p.id))
     for (const node of new Set(historyLines().flatMap(l => (l.type === "change" ? [l.node] : [])))) {
       const last = linesFor(node).at(-1)!
-      if (here.has(node) || last.op === "remove") continue
+      // Only what this device held can be seen to go: a node the journal names that never loaded
+      // here (locked, or unreadable) is not removed by anyone.
+      if (here.has(node) || last.op === "remove" || !held.has(node)) continue
       const { seq: _s, id: _i, reason: _r, ...rest } = last
       push<ChangeLine>({ ...rest, at: new Date().toISOString(), actor: acting, op: "remove", fields: [], before: last.after, summary: "Removed it" })
     }
@@ -182,50 +204,24 @@ export function createJournal(all: Doc[], fixtureIds?: Record<"slow" | "monday" 
     return push<SaveLine>({ owner: "vault", at: at.toISOString(), actor: acting, type: "save", name: name.trim(), ...(note?.trim() ? { note: note.trim() } : {}) })
   }
 
-  const day = (d: string, t = "10:00") => new Date(`${d}T${t}:00`)
-  function seed(ids: NonNullable<typeof fixtureIds>) {
-    const claude: Actor = { kind: "agent", name: "Claude Code" }
-    const muse: Actor = { kind: "agent", name: "Muse" }
-    const current = new Map(all.map(p => [p.id, snap(p)]))
-    const doc = (id: string) => byId(id)!
-    const edit = (id: string, s: Snapshot, op: ChangeOp, by: Actor, at: Date, reason?: string) => { applySnapshot(doc(id), s); recordChange(doc(id), op, { by, at, reason }) }
-
-    // Every block and cortex item starts as it is now, made by you on its date, except two with earlier versions.
-    for (const p of all) if (p.id !== ids.monday && p.id !== ids.slow) recordChange(p, "create", { at: day(p.updated, "09:00"), by: YOU })
-
-    const slowNow = current.get(ids.slow)!, mondayNow = current.get(ids.monday)!
-    edit(ids.slow, { ...slowNow, body: "# Slow software\n\nTools that wait for you." }, "create", YOU, day("2026-10-18", "21:10"))
-    edit(ids.slow, { ...slowNow, body: "# Slow software\n\nTools that wait for you. A draft that is private until you say otherwise." }, "edit", YOU, day("2026-10-20", "08:40"))
-    edit(ids.slow, slowNow, "edit", muse, day("2026-10-21", "11:02"), "Linked the two blocks you said say the same thing")
-    recordSession(muse, "Linked Slow software to the blocks it echoes", [
-      { tried: "Filing Slow software under projects", why: "You keep essays in writing, and moved it back the last time" },
-    ], day("2026-10-21", "11:05"))
-
-    edit(ids.monday, { ...mondayNow, body: "# Monday, rain\n\nNothing shipped.", channels: undefined }, "create", YOU, day("2026-11-10", "22:15"))
-    save("Before the slowness channel", "Everything as it was before I started collecting slowness", day("2026-11-10", "23:00"))
-    edit(ids.monday, { ...mondayNow, body: "# Monday, rain\n\nNothing shipped. Read for an hour.", channels: undefined }, "edit", claude, day("2026-11-11", "07:30"), "Added the line you dictated")
-    recordSession(claude, "Added the line you dictated to Monday, rain", [
-      { tried: "Turning the entry into a checklist", why: "You said journal entries stay as prose", recheck: "Read your profile's preferences" },
-    ], day("2026-11-11", "07:32"))
-    edit(ids.monday, mondayNow, "edit", YOU, day("2026-11-11", "08:05"))
-
-    // Recent agent edits, marked as theirs: a cortex item and a connection. Revert either if you don't want it.
-    const captions = current.get(ids.captions)!
-    edit(ids.captions, { ...captions, body: "# Photo captions are one line\n\nSeen in two sessions, project photos. Three recent photo posts used two lines: one for the place, one for the light." },
-      "edit", claude, day("2026-11-18", "18:20"), "Your last three photo captions used two lines")
-    recordSession(claude, "Checked the caption observation against recent photos", [], day("2026-11-18", "18:21"))
-    const reading = current.get(ids.reading)!
-    edit(ids.reading, { ...reading, connect: [{ to: "garden-of-notes", why: "A pattern language is where the garden idea started" }] }, "connect", muse, day("2026-11-19", "09:10"), "Your garden essay quotes the first book on this list")
-    recordSession(muse, "Looked for blocks that belong together", [
-      { tried: "Connecting Reading list to Tokyo walks, day one", why: "Nothing on the list is about the walks" },
-    ], day("2026-11-19", "09:12"))
+  // What the cortex journal already holds comes first, in its order, with the versions it names.
+  for (const { line, snapshots } of kept) {
+    for (const [version, snapshot] of Object.entries(snapshots ?? {})) versions.set(version, snapshot)
+    journals[line.owner].push({ ...line, seq: ++seq } as Line)
   }
-  if (fixtureIds) {
-    seed(fixtureIds)
-    // An observation about blocks keeps the versions they had when it was written.
-    for (const doc of all.filter(each => each.kind === "observation" && each.about?.some(item => !item.startsWith("channel:")))) {
-      doc.evidence = doc.about!.filter(item => !item.startsWith("channel:")).map(id => ({ node: blockKey(id), version: currentVersion(id)! }))
-    }
+  const openedAt = seq
+  // Every node here starts at its current version, so the first change made on this device has a before.
+  for (const doc of docs()) {
+    held.add(doc.id)
+    baseline.set(doc.id, versionOf(snap(doc)))
+    versions.set(versionOf(snap(doc)), snap(doc))
   }
-  return { historyLines, actor, actingAs, changeById, linesFor, currentVersion, snapshotAt, syncJournal, recordSession, save }
+  const entryOf = (line: Line): JournalEntry => ({
+    line, snapshots: Object.fromEntries((line.type === "change" ? [line.before, line.after] : []).flatMap(version => {
+      const held = version && versions.get(version)
+      return held ? [[version, held]] : []
+    })),
+  })
+
+  return { historyLines, actor, actingAs, changeById, linesFor, currentVersion, snapshotAt, syncJournal, recordSession, save, recordChange, entryOf }
 }

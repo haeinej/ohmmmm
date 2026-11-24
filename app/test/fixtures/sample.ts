@@ -1,7 +1,7 @@
-// Synthetic data for the wireframe. No real person, no real records.
+// Synthetic data for tests only. No real person, no real records. The app never loads it.
 
 import { newNodeId } from "../../../vault/vault/node.mjs"
-import type { Doc, Entity, InboxItem } from "./workspace-model"
+import type { Doc, Entity } from "../../src/data/workspace-model"
 
 export const owner: Entity = { did: "did:plc:example0wner", handle: "mira.example", name: "Mira" }
 
@@ -16,7 +16,7 @@ const fixtureId = (index: number) => newNodeId(Date.UTC(2026, 7, 1) + index, 0)
 export const fixtureIds = {
   garden: fixtureId(1), slow: fixtureId(2), address: fixtureId(3), monday: fixtureId(4), tokyo: fixtureId(5), tokyoTwo: fixtureId(6),
   scans: fixtureId(7), workspace: fixtureId(8), reading: fixtureId(9), sketches: fixtureId(10), dusk: fixtureId(11), paragraphs: fixtureId(12),
-  privateFirst: fixtureId(13), captions: fixtureId(14), renameJournal: fixtureId(15), suggestChannels: fixtureId(16), search: fixtureId(17), slowness: fixtureId(18),
+  privateFirst: fixtureId(13), captions: fixtureId(14), renameJournal: fixtureId(15), suggestChannels: fixtureId(16), search: fixtureId(17), slowness: fixtureId(18), byAgent: fixtureId(19),
 }
 
 export const blocks: Doc[] = [
@@ -96,10 +96,9 @@ export const cortex: Doc[] = [
     body: "# Slowness ties the essays to the photos\n\nNoticed, not said. [[slow-software]] links to [[tokyo-walks]]; [[yanaka-dusk]] returns to the same street later; all three were collected into the slowness channel. The essays and the walks argue the same thing in two forms." },
 ]
 
-export const inbox: InboxItem[] = [
-  { id: "i1", kind: "reply", from: "june.example", text: "Writing everything twice is the only way I know.", at: "2026-11-14", ref: fixtureIds.garden, unread: true },
-  { id: "i2", kind: "mention", from: "theo.example", text: "Mentioned you in “Owning nothing, kindly”.", at: "2026-11-13", unread: true },
-  { id: "i3", kind: "friend", from: "sana.example", text: "Wants to be friends. Friends see blocks you mark for friends.", at: "2026-11-12", unread: true },
-  { id: "i4", kind: "observation", from: "cortex", text: "An agent observed: you asked to rename “journal”.", at: "2026-11-13", ref: fixtureIds.renameJournal, unread: false },
-  { id: "i5", kind: "reply", from: "sana.example", text: "Day two was the better light.", at: "2026-09-16", ref: fixtureIds.tokyoTwo, unread: false },
+// A block an agent brought into a channel it was granted. It says who made it and starts private.
+export const byAgent: Doc[] = [
+  { id: fixtureIds.byAgent, kind: "link", title: "A pattern language, online", slug: "pattern-language-online", homeChannel: "reading",
+    by: "agent:claude-code", visibility: "private", updated: "2026-11-20",
+    body: "# A pattern language, online\n\nhttps://example.com/pattern-language\n\nFound while you were reading; it is on your [[reading-list]]." },
 ]

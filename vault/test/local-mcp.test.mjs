@@ -19,6 +19,7 @@ test('local MCP scans and searches, reads journal history, follows evidence, cap
   await mkdir(join(vault, '.vault'), { recursive: true });
   await mkdir(root);
   await writeFile(join(vault, '.vault/config.json'), JSON.stringify({ roots: [{ name: 'inbound', path: root, include: ['*.md'] }] }));
+  await writeFile(join(vault, '.vault/grants.json'), JSON.stringify({ agents: { example: { write: ['notes', 'reading'] } } }));
   const file = join(root, 'garden.md');
   const sourceId = newNodeId();
   await writeFile(file, `---\nid: ${sourceId}\n---\n\nThe garden is quiet.`);
@@ -31,11 +32,15 @@ test('local MCP scans and searches, reads journal history, follows evidence, cap
   await assert.rejects(call('vault_local_search', { query: 'garden' }), /Run vault_index/);
   assert.ok((await call('vault_index')).nodes > 0);
   assert.equal((await call('vault_local_search', { query: 'garden' })).nodes[0].root, 'inbound');
-  await assert.rejects(call('vault_capture', { source: join(root, 'excluded.txt') }), /configured root/);
-  await assert.rejects(call('vault_capture', { source: join(root, 'outside.md') }), /symlinks/);
-  await assert.rejects(call('vault_capture', { source: join(folder, 'outside.md') }), /configured root/);
+  // A capture goes into a channel the person granted, like any write. There is no inbox to fall back on.
+  await assert.rejects(call('vault_capture', { source: file }), /which channel|channel it goes into/);
+  await assert.rejects(call('vault_capture', { source: file, channel: 'inbox' }), /no write grant/);
+  await assert.rejects(call('vault_capture', { source: join(root, 'excluded.txt'), channel: 'notes' }), /configured root/);
+  await assert.rejects(call('vault_capture', { source: join(root, 'outside.md'), channel: 'notes' }), /symlinks/);
+  await assert.rejects(call('vault_capture', { source: join(folder, 'outside.md'), channel: 'notes' }), /configured root/);
   await assert.rejects(call('vault_collect', { block: 'garden', channel: 'reading' }), /read-only root/);
-  const captured = await call('vault_capture', { source: file });
+  const captured = await call('vault_capture', { source: file, channel: 'notes' });
+  assert.equal(captured.status, undefined);
   const read = await call('vault_local_read', { ref: captured.block });
   assert.equal(read.root, 'vault');
   assert.notEqual(read.node.id, sourceId);
@@ -43,10 +48,11 @@ test('local MCP scans and searches, reads journal history, follows evidence, cap
   assert.ok(read.file.size);
   assert.equal(read.node.body.trim(), 'The garden is quiet.');
   assert.equal(read.node.by, 'agent:example');
-  assert.equal(read.node.status, 'proposed');
+  assert.equal(read.node.status, undefined);
+  assert.equal(read.node.visibility, 'private');
   assert.equal(read.history.find(event => event.via === 'add').by, 'agent:example');
-  const letter = await call('vault_capture', { source: join(root, '_letter.md') });
-  assert.equal(letter.block, 'inbox/letter.md');
+  const letter = await call('vault_capture', { source: join(root, '_letter.md'), channel: 'notes' });
+  assert.equal(letter.block, 'notes/letter.md');
   assert.equal((await call('vault_local_read', { ref: letter.node })).node.body.trim(), 'A letter.');
   const link = await call('vault_capture', { source: 'https://example.test/reading', channel: 'reading' });
   const neighbors = await call('vault_neighbors', { ref: link.node, direction: 'out', kind: 'from', depth: 2 });
@@ -68,9 +74,11 @@ test('local MCP scans and searches, reads journal history, follows evidence, cap
 test('a competing local collection refuses while the vault lock is held and can be retried', async t => {
   const vault = await mkdtemp(join(tmpdir(), 'ohm-local-collect-'));
   t.after(() => rm(vault, { recursive: true, force: true }));
+  await mkdir(join(vault, '.vault'), { recursive: true });
+  await writeFile(join(vault, '.vault/grants.json'), JSON.stringify({ agents: { first: { write: ['notes'] } } }));
   const first = createLocalTools({ vault, by: 'agent:first', DatabaseSync });
   const second = createLocalTools({ vault, by: 'agent:second', DatabaseSync });
-  const captured = await first.call('vault_capture', { source: 'https://example.test/reading' });
+  const captured = await first.call('vault_capture', { source: 'https://example.test/reading', channel: 'notes' });
   const lock = new DatabaseSync(join(vault, '.vault', 'collect.sqlite'));
   try {
     lock.exec('BEGIN IMMEDIATE');

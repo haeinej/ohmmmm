@@ -26,8 +26,8 @@ There is no inbox and no review queue. You write or draft with your coding agent
 What keeps you in control, without an inbox:
 
 - **Provenance:** every block an agent made says so (`by: agent:<name>`), and every change goes into the journal with who made it. History keeps each version, so anything can be put back.
-- **Visibility:** what an agent writes starts private (or in the channel's layer if that is narrower), until you move it. Showing a block to more people is always yours (standard.site plan, step 2).
-- **Grants:** an agent writes only where you granted it (`ohm vault grant`, `.vault/grants.json`). Setting up a home (`design-home`) ends by granting the channels you agreed.
+- **Visibility:** what an agent writes starts private, until you move it (decided 24 November 2026). Showing a block to more people is always yours (standard.site plan, step 2).
+- **Grants:** an agent writes only where you granted it (`ohm vault grant`, `.vault/grants.json`). Setting up a home (`design-home`) ends by granting the agent `write` on every channel it set up with you (decided 24 November 2026).
 - **Labels:** still the owner's words. The agent proposes and asks; it never decides.
 
 ## Remove the inbox
@@ -83,7 +83,7 @@ Who builds which, and the prompts to start them: [docs/handoff/content-layer-spl
 
 ## Open: the owner's calls
 
-- Where an agent's new block starts: private (proposed here), or the channel's layer.
-- Whether `design-home` grants the agent `write` on every channel it set up, or only those you name.
+- ~~Where an agent's new block starts~~: **private**, always (decided 24 November 2026). `addToVault`, `vault_capture` and a new block through `vault_write` all write `visibility: private`.
+- ~~Whether `design-home` grants `write` on every channel it set up, or only those you name~~: **every channel it set up** (decided 24 November 2026). The skill is on PR #34 and changes there.
 - The loader's package name and whether it lives in this repo (`vault/astro/`) or its own.
 - The standard.site plan's open questions still stand.

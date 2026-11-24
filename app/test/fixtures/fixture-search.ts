@@ -1,7 +1,7 @@
-import { isBlock, locationOf, type Doc, type Entity } from "./workspace-model"
-import { SETTINGS_TABS } from "@/workspace/settings-tabs"
-import { searchInput } from "./source"
-import type { SearchHit, SearchProvider, SearchScope } from "./search"
+import { isBlock, locationOf, type Doc, type Entity } from "../../src/data/workspace-model"
+import { SETTINGS_TABS } from "../../src/workspace/settings-tabs"
+import { searchInput } from "../../src/data/source"
+import type { SearchHit, SearchProvider, SearchScope } from "../../src/data/search"
 
 const inScope = (doc: Doc, scope: SearchScope) =>
   scope === "all" || (scope === "vault" ? isBlock(doc) : scope === "cortex" ? !isBlock(doc) : false)
@@ -14,13 +14,13 @@ const excerpt = (body: string, q: string) => {
 }
 
 /** In memory, over the synthetic data. */
-export const createSampleSearch = (all: Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
+export const createFixtureSearch = (all: () => Doc[], entities: Entity[]): SearchProvider => async (input, signal) => {
   signal?.throwIfAborted()
   const { query, limit } = searchInput(input)
   const scope = input.scope ?? "all"
   const q = query.trim().toLowerCase()
   if (!q) return []
-  const docs = all
+  const docs = all()
     .filter(d => inScope(d, scope))
     .map(d => ({ d, score: (d.title.toLowerCase().includes(q) ? 2 : 0) + (d.body.toLowerCase().includes(q) ? 1 : 0) }))
     .filter(r => r.score > 0)
