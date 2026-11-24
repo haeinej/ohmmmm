@@ -68,10 +68,27 @@ export function friendshipStore(db) {
       const typed = typeof email === 'string' ? email.trim().toLowerCase() : '';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed) || typed.length > 320) throw new Refused(400, 'InvalidRequest', 'Give their email address');
       if (ownEmail && typed === ownEmail.toLowerCase()) throw new Refused(400, 'InvalidRequest', 'That is your own email');
-      await db.prepare('INSERT INTO friend_asks (viewer, email, asked_at) VALUES (?1, ?2, ?3) ON CONFLICT (viewer, email) DO NOTHING').bind(viewer, typed, now.toISOString()).run();
+      await db.prepare('INSERT INTO friend_asks (viewer, email, message, asked_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (viewer, email) DO UPDATE SET message = excluded.message').bind(viewer, typed, message || null, now.toISOString()).run();
       const owner = await didByEmail(typed);
       if (owner && owner !== viewer) await this.ask(owner, { viewer, name, email: ownEmail, message, now });
       return { asked: true };
+    },
+
+    // Someone joins ohm (or their account gains an email): everyone who asked that email before is
+    // sent to them as a request now, as if they had asked today. An asker they already let in, or
+    // already answered, is not asked again.
+    async deliver(owner, email, { people, now = new Date() }) {
+      const { results } = await db.prepare('SELECT viewer, message, asked_at FROM friend_asks WHERE email = ?1 AND viewer <> ?2').bind(email, owner).all();
+      const known = await people(results.map(each => each.viewer));
+      let sent = 0;
+      for (const each of results) {
+        if (await friendScope(db, owner, each.viewer)) continue;
+        const answered = await db.prepare('SELECT 1 AS yes FROM friend_requests WHERE did = ?1 AND friend = ?2').bind(owner, each.viewer).first();
+        if (answered) continue;
+        await this.ask(owner, { viewer: each.viewer, name: known.get(each.viewer)?.name, email: known.get(each.viewer)?.email, message: each.message ?? undefined, now });
+        sent++;
+      }
+      return { sent };
     },
 
     // What the asker asked, by the email they typed: waiting, or friends once they were let in.

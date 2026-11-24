@@ -117,3 +117,20 @@ test('asking by email: the same answer whether or not the email is on ohm, and t
   assert.deepEqual((await ask('listFriendOf', { as: bo })).people.map(each => [each.did, each.name, each.email]), [[ada, 'Ada', 'ada@example.test']]);
   assert.deepEqual((await ask('listFriendOf', { as: ada })).people, []);
 });
+
+test('someone asked by email before they joined gets the request when they join, once', async () => {
+  const { env, ask } = await setUp();
+  const cy = 'did:web:pds.cy.test';
+  // Bo asks Cy, who has an ohm account but no AT Protocol account connected yet: nothing to deliver to.
+  await ask('listFriendRequests', { cookie: 'session=bo' });
+  assert.deepEqual(await ask('askFriend', { body: { email: 'cy@example.test', message: 'Join me' }, cookie: 'session=bo' }), { asked: true });
+  // Cy connects their account, then signs in: Bo's request is there, with Bo's name and email.
+  await links(env.DB).connect('u-cy', cy);
+  const [request] = (await ask('listFriendRequests', { cookie: 'session=cy' })).requests;
+  assert.deepEqual([request.did, request.name, request.email, request.message], [bo, 'Bo', 'bo@example.test', 'Join me']);
+  // Signing in again does not send it twice; and once declined, it is not sent again.
+  assert.equal((await ask('listFriendRequests', { cookie: 'session=cy' })).requests.length, 1);
+  await ask('declineFriend', { body: { id: request.id }, cookie: 'session=cy' });
+  await env.DB.prepare('UPDATE links SET email = NULL WHERE did = ?1').bind(cy).run();
+  assert.deepEqual((await ask('listFriendRequests', { cookie: 'session=cy' })).requests, []);
+});

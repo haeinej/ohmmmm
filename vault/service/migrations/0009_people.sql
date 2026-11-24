@@ -9,6 +9,7 @@ CREATE INDEX IF NOT EXISTS links_email ON links (email);
 CREATE TABLE IF NOT EXISTS friend_asks (
   viewer TEXT NOT NULL,
   email TEXT NOT NULL,
+  message TEXT,
   asked_at TEXT NOT NULL,
   PRIMARY KEY (viewer, email)
 );

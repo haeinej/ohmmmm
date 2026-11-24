@@ -47,6 +47,12 @@ export function createService({ whoIs, get = fetch } = {}) {
 
       const identify = whoIs ?? (made ??= createIdentity({ audience: env.SERVICE_DID, members: env.MEMBERS }));
       const linked = links(env.DB);
+      // An account's email, from its sign-in: kept, and when it is new here, the friend requests
+      // people sent to that email before are delivered to it.
+      const welcome = async (who, owner) => {
+        const email = await linked.remember(who);
+        if (email) await friendshipStore(env.DB).deliver(owner, email, { people: linked.people });
+      };
       const session = async () => {
         const user = await ohmUser(request, env, get) ?? (() => { throw new Refused(401, 'SignInRequired', 'Sign in to ohm first'); })();
         // A request that rides on a cookie and changes something has to come from ohm's own pages.
@@ -75,7 +81,7 @@ export function createService({ whoIs, get = fetch } = {}) {
         user = await session();
         link = await linked.of(user.id);
         did = link?.did ?? null;
-        if (link) await linked.remember(user);
+        if (link) await welcome(user, link.did);
       } else if (asked.asks === 'member') {
         // A token from the member's own PDS, as the command line and an agent's tools send, or an
         // ohm session, as the page does. A session is worth exactly the one account it was connected to.
@@ -85,7 +91,7 @@ export function createService({ whoIs, get = fetch } = {}) {
           user = await session();
           link = await linked.of(user.id);
           did = link?.did ?? (() => { throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first'); })();
-          await linked.remember(user);
+          await welcome(user, did);
         }
       }
 

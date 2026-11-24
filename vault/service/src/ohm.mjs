@@ -67,11 +67,13 @@ export function links(db) {
       return { did };
     },
     // The account's name and email, as its sign-in says now, so friends can find it by email. Written
-    // only when it changed. An email is kept lower-cased.
+    // only when it changed. An email is kept lower-cased. Returns the email when it is new here.
     async remember(user) {
-      if (!user?.id) return;
+      if (!user?.id) return null;
       const email = typeof user.email === 'string' && user.email.includes('@') ? user.email.trim().toLowerCase() : null;
-      await db.prepare('UPDATE links SET name = ?2, email = ?3 WHERE user_id = ?1 AND (name IS NOT ?2 OR email IS NOT ?3)').bind(user.id, user.name || null, email).run();
+      const before = await db.prepare('SELECT email FROM links WHERE user_id = ?1').bind(user.id).first();
+      const changed = await db.prepare('UPDATE links SET name = ?2, email = ?3 WHERE user_id = ?1 AND (name IS NOT ?2 OR email IS NOT ?3) RETURNING did').bind(user.id, user.name || null, email).first();
+      return changed && email && before?.email !== email ? email : null;
     },
     // The DID an email's ohm account works in, or null.
     didByEmail: async email => (typeof email === 'string' && email.includes('@')
