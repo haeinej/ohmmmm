@@ -23,6 +23,7 @@
     "lexicons",
     "site",
     "skills",
+    "agents",
     "docs",
     ".claude-plugin",
     "AGENTS.md"
