@@ -15,11 +15,15 @@ import { FILE_TYPES, graphemes, isSlug, kindOf as mediaKind, VaultProblem, VISIB
 import { filePost, isPostId, newPostId, postFile, postProblems, readProperties, slugOf, splitFile, writeNoteFile } from './file.mjs';
 
 export const BLOCK_KINDS = ['text', 'excerpt', 'link', 'media', 'file', 'code', 'post'];
-export const CHANNEL_KINDS = ['collection', 'concept', 'inbox', 'import'];
+export const CHANNEL_KINDS = ['collection', 'concept', 'import'];
 export const ENTITY_KINDS = ['person', 'work', 'place', 'org'];
 export const SOURCE_KINDS = ['page', 'post', 'file', 'image', 'video', 'audio', 'thread', 'book', 'other'];
 export const RETAIN = ['reference', 'text', 'full'];
-export const STATUSES = ['proposed', 'kept', 'archived'];
+export const STATUSES = ['kept', 'archived'];
+// Words older vaults still hold, read as if absent: a block once `status: proposed` (the inbox's
+// mark) is an ordinary block, and a channel once `kind: inbox` is a collection.
+const RETIRED_STATUSES = ['proposed'];
+const RETIRED_CHANNEL_KINDS = ['inbox'];
 export const EDGE_KINDS = ['contains', 'links', 'embeds', 'mentions', 'from', 'quotes'];
 
 // The properties each kind of file holds, in the order they are written. `id` is always written last.
@@ -144,7 +148,8 @@ function readBlock(place, path, text_) {
   }
   const by = text(properties.by);
   if (by && by !== 'me' && !/^agent:[A-Za-z0-9._-]+$/.test(by)) problems.push('by is me, or agent: and the agent\'s name');
-  const status = text(properties.status);
+  const statusSaid = text(properties.status);
+  const status = RETIRED_STATUSES.includes(statusSaid) ? undefined : statusSaid;
   if (status && !STATUSES.includes(status)) problems.push(`status is one of: ${STATUSES.join(', ')}`);
   const saidVisibility = text(properties.visibility);
   const visibility = VISIBILITIES.includes(saidVisibility) ? saidVisibility : DEFAULT_VISIBILITY;
@@ -179,7 +184,8 @@ function readChannel(place, text_) {
   const { head, body } = splitFile(text_);
   const { properties, problems } = readProperties(head);
   const id = readId(properties, problems);
-  const kind = text(properties.kind);
+  const kindSaid = text(properties.kind);
+  const kind = RETIRED_CHANNEL_KINDS.includes(kindSaid) ? undefined : kindSaid;
   if (kind && !CHANNEL_KINDS.includes(kind)) problems.push(`A channel's kind is one of: ${CHANNEL_KINDS.join(', ')}`);
   const site = properties.site ?? undefined;
   if (site !== undefined && site !== null && !(isObject(site) && text(site.label))) problems.push('site is written {"label": "Writings"}, with a sublabel if there is one');

@@ -17,7 +17,7 @@ import { sourceChanged } from "./store"
 /** The home on this computer, when the workspace is it and its bridge can publish. */
 export const publisher = (): LocalSource | null => {
   const source = getSource()
-  return "planPublish" in source ? source as LocalSource : null
+  return source && "planPublish" in source ? source as unknown as LocalSource : null
 }
 
 const said = (problem: unknown) => (problem instanceof Error ? problem.message : String(problem))

@@ -182,7 +182,7 @@ function Page({ tab }: { tab: SettingsTab }) {
     case "vault": {
       const paths = channelRecords.map(channel => channel.path)
       const source = getSource()
-      const home = "home" in source ? (source.home as { handle: string; url: string }) : null
+      const home = source && "home" in source ? (source.home as { handle: string; url: string }) : null
       return <>
         <Section title="Where this is">
           {home

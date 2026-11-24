@@ -3,7 +3,7 @@
 // .vault/journal.jsonl.
 //
 //   vault init   [--vault DIR]               make the folder if needed, and .vault/config.json
-//   vault add SOURCE [--channel C] [--title T] [--by agent:NAME] [--move]
+//   vault add SOURCE --channel C [--title T] [--by agent:NAME] [--move]
 //                                            copy a file, or refer to an address, into the vault,
 //                                            recording where it came from; then index
 //   vault index  [--vault DIR]               bring the index into line with the folder and its roots
@@ -126,6 +126,7 @@ try {
     try {
       if (action === 'add') {
         if (rest.length !== 1) throw new Error('Say what to add: one file\'s path, or one address');
+        if (!values.channel) throw new Error('Say which channel it goes into: --channel notes');
         const source = /^https?:\/\//i.test(rest[0]) ? rest[0] : resolve(expand(rest[0]));
         const added = await addToVault({
           vault, source, ...(values.channel ? { channel: values.channel } : {}), ...(values.title ? { title: values.title } : {}),

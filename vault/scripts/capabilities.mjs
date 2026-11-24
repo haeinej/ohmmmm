@@ -16,9 +16,10 @@ const ASKS = {
   token: ['Whoever holds a token from a PDS', 'A token the PDS issued for this one request and no other, signed with the key the account\'s own DID document names'],
   member: ['The member', 'Such a token from their own PDS, as the command line and an agent\'s tools send; or their ohm session, as the editor sends, which is worth exactly the one account it was connected to'],
   ohm: ['The member, signed in to ohm', 'Their ohm session only. A request that changes something must also come from ohm\'s own pages'],
+  viewer: ['Anyone, about the member `did` names', 'Nothing is needed for what the member published. A viewer token (`Authorization: Bearer`, from `content.view`) says who is looking; if the member put them on their friend list, the answer also holds the friends layer. Never the private layer'],
 };
 const FILES = Object.fromEntries(Object.entries({
-  Posts: 'posts', Friends: 'friends', Private: 'private', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Account: 'account', Identity: 'identity',
+  Posts: 'posts', Friends: 'friends', Private: 'private', Visibility: 'visibility', Channels: 'channels', Cortex: 'cortex', Media: 'media', Structure: 'structure', Search: 'search', Mirror: 'mirror', Publish: 'publish', Export: 'export', Content: 'content', Account: 'account', Identity: 'identity',
 }).map(([name, file]) => [name, `src/capabilities/${file}.mjs`]));
 
 // Every way the service says no. The same words go to a person in the editor and to an agent.
@@ -37,20 +38,31 @@ export const REFUSALS = {
   InvalidRequest: [400, 'The request is not JSON, or something it says is not what that request takes'],
   InvalidPost: [400, 'The post is not one the vault can hold. The message lists every reason'],
   InvalidBlock: [400, 'The block is not one the layer can hold: for the friends layer, it is private or public, a post, or its file has problems; for the private layer, it is not a sealed file under an opaque ID. The message says why'],
+  InvalidChannel: [400, 'The channel is not one the service can hold: its path is not a channel\'s path, it is private, or its file has problems. The message says why'],
   InvalidCursor: [400, '`since` is not a value an earlier list returned'],
   NotFound: [404, 'There is no such post, block or saved version, or nothing there is shared with the asker'],
-  Changed: [409, 'The post, block or private block has changed since the version the request names. The answer carries the current version'],
+  Changed: [409, 'The post, block, channel or private block has changed since the version the request names. The answer carries the current version'],
   SlugTaken: [409, 'Another post in the vault already has that slug'],
-  PathTaken: [409, 'Another block in the friends layer is already at that path'],
+  PathTaken: [409, 'Another block in the friends layer, or another channel, is already at that path'],
+  NotEmpty: [409, 'A block or post is filed in the channel, or a channel is inside it. Move them first'],
+  HasPosts: [409, 'Published posts are filed in the channel. Their addresses come from their label, which changes through Publish'],
   OlderKey: [409, 'The private block is sealed under an older master key than the member is rotating, or rotated, to'],
   NoRotation: [409, 'No rotation to that generation is under way'],
   RotationAhead: [409, 'The member already rotated to a later master key than the one asked for'],
   RotationRemaining: [409, 'A rotation cannot finish while some kept versions or journal entries are still sealed under the older key. The answer says how many'],
-  TooLarge: [413, 'The post or block is more than 600 KB of text, a sealed private block is more than 1 MB, or a file it places is empty or larger than 25 MB'],
+  TooLarge: [413, 'The post or block is more than 600 KB of text, a channel file is more than 200 KB, media is empty or more than 25 MB, a sealed private block is more than 1 MB, or a file it places is empty or larger than 25 MB'],
   FileUnreachable: [502, 'A file a post places could not be fetched from where the post says it is'],
   AccountNotFound: [404, 'No AT Protocol account answers to that handle or DID'],
   NoRepository: [400, 'The account\'s DID document does not say where its repository is kept'],
   RepositoryUnreachable: [502, 'The account\'s PDS would not answer'],
+  MediaUnavailable: [503, 'The media cache is not set up on this service'],
+  ViewerTokenInvalid: [401, 'The viewer token is not one this service made, is for another member, or has run out'],
+  ViewersUnavailable: [503, 'Viewer tokens, and so Friends reads for sites, are not set up on this service'],
+  NotFriendsOnly: [409, 'Only a friends-only block or post is hidden on its way to private'],
+  Answered: [409, 'The move request has been approved or declined already'],
+  NotThisMove: [409, 'The move recorded is not the one the request asked for'],
+  InvalidMove: [400, 'The layer named is not public, friends or private, or the block is in it already'],
+  NotTheirSite: [400, 'The return address is not on one of the member\'s sites'],
   InternalError: [500, 'Something went wrong in the service itself'],
 };
 
@@ -151,6 +163,12 @@ const NO_TOOL = {
   Private: 'Private contents never reach the service readable. Agents read them only on the person\'s device, after unlock',
   Account: 'It rides on an ohm session, which an agent does not have',
   Identity: 'It is part of signing in',
+  Channels: 'The cockpit arranges channels. An agent files and orders blocks in the local vault, with vault_collect and vault_write',
+  Visibility: 'Answering a request and recording a move are the member\'s, in the cockpit, signed in to ohm. An agent asks with vault_set_visibility',
+  Media: 'The cockpit sends and shows media. An agent works with the media blocks in the local vault',
+  'com.ohmmmm.vault.getAgenda': 'The cockpit shows it. An agent counts the same things in the local vault with vault_lint',
+  Cortex: 'The cortex is sealed. An agent reads and writes it on the person\'s device, through the cortex\'s own tools',
+  Content: 'It is for sites: a site\'s content loader reads it, for whoever is looking at the site. The member\'s own agent reads their vault through the other tools',
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

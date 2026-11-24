@@ -69,14 +69,22 @@ export default {
     'com.ohmmmm.vault.getPublishPlan': {
       verb: 'GET', asks: 'member', changes: false,
       about: 'What publishing would do: the posts it would publish for the first time, replace and take down, the ones that cannot be published and why, and the published records the vault knows nothing about. With `prepare`, also the changes themselves, ready to be made.',
-      takes: { prepare: 'optional: `1` to include `writes`, the changes to make' },
+      takes: { prepare: 'optional: `1` to include `writes`, the changes to make', only: 'optional: one post\'s ID, for a preview of that post alone, as a visibility move to or from public shows it' },
       gives: '`repository`, `pds`, `collection` (`site.standard.document`), `contentType` (`com.ohmmmm.post`), `publication` when it is to be made, `create`, `replace`, `remove`, `unchanged`, `cannot`, `notInVault`, `changes` (how many); and with `prepare`, `writes` and `plan`, a name for exactly these changes',
       run: async context => {
         const { url, get, did, posts } = context;
         const { pds, site } = await whereabouts(context);
-        const plan = publishPlan({
+        const whole = publishPlan({
           did, site, origin: pds, collection: POST, posts: await posts.all(did), removed: await posts.removed(did), published: await published(get, pds, did, DOCUMENT),
         });
+        // One post alone, for a visibility move: only its own changes, with its old key if it moves.
+        const only = url.searchParams.get('only');
+        const mine = each => each.id === only || each.key === only;
+        const plan = only ? {
+          ...whole, create: whole.create.filter(mine), replace: whole.replace.filter(mine), remove: whole.remove.filter(mine),
+          cannot: whole.cannot.filter(mine), notInVault: [], unchanged: whole.unchanged,
+          writes: whole.writes.filter(write => write.rkey === only || (write.action === 'delete' && whole.writes.some(each => each.rkey === only && each.slug === write.slug))),
+        } : whole;
         const { writes, ...summary } = plan;
         // Posts are written as standard.site documents of the member's publication, their website.
         // The publication is made the first time anything is published.

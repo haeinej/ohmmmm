@@ -1,11 +1,12 @@
 import { evidence, nodeFile, readNode, readVault } from "../../../vault/vault/node.mjs"
 import { isPostId, setProperty } from "../../../vault/vault/file.mjs"
+import { planMove } from "../../../vault/vault/visibility.mjs"
 import type { SearchInput, SearchProvider } from "./search"
-import type { ChannelRecord } from "./workspace-model"
 
 export type Layer = "public" | "friends" | "private"
 export type BlockRef = { id: string; layer: Layer; store: "post" | "block" | "sealed" }
-export type BlockHead = BlockRef & { path?: string; title?: string; version?: string }
+/** `leaving`: hidden from friends on its way to private, for this device to seal. */
+export type BlockHead = BlockRef & { path?: string; title?: string; version?: string; leaving?: string }
 export type HomeFile = { path: string; text: string }
 export type BlockFile = HomeFile & { version: string }
 export type Account = { did: string | null; user: { name: string }; mirrored: boolean; service: string | null }
@@ -32,7 +33,27 @@ export type VisibilityMove = {
   warning: string
 }
 export type MoveResult = { ref: BlockRef; version: string; cleanupPending: boolean }
+/** An agent's request for a move it may not finish, waiting for the member (vault.listMoveRequests). */
+export type MoveRequest = {
+  id: string; block: string; store: BlockRef["store"]; from: Layer; to: Layer; version?: string
+  askedBy: string; reason?: string; asked: string; state: "waiting" | "approved" | "declined"
+}
+/** A move the member made, for the journal (vault.recordMove). */
+export type MoveRecord = { block: string; from: Layer; to: Layer; request?: string; sealedAs?: string; cleanupPending?: boolean; reason?: string }
 export type MoveTarget = { layer: "friends" } | { layer: "private"; opaqueId: string }
+/** A channel's `_channel.md` on the vault service, with the version compare-and-set names. */
+export type ChannelHead = { path: string; version: string; title?: string; kind?: string }
+export type ChannelFile = HomeFile & { version: string }
+/** `everything`: the source moved the sealed blocks too (one folder on this computer), so none is refiled on the device. */
+export type ChannelMove = { from: string; to: string; channels: number; blocks: number; everything?: boolean }
+/** A cortex file, opened on this device: `id` is its opaque storage ID, `path` where the cortex files it. */
+export type CortexFile = HomeFile & { id: string; version: string }
+export type CortexChange = { id: string; file: HomeFile; replaces: string | null } | { id: string; remove: true; replaces: string }
+/** A cortex journal entry, opened on this device: who changed what, and why. */
+export type CortexEntry = { seq: number; created: string; entry: Record<string, unknown> }
+/** What waits for the member and their curator, counted by the service from the readable layers. */
+export type Agenda = { unlabelled: number; mediaWithoutAlt: number; counted: string }
+export type MediaWidth = 160 | 480 | 960 | 1600
 export type VaultContents = ReturnType<typeof readVault>
 export type VaultEvidence = ReturnType<typeof evidence>
 
@@ -45,11 +66,43 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   deleteBlock(ref: BlockRef, replaces: string): Result<Mode, void>
   vault(layers?: readonly Layer[]): Result<Mode, VaultContents>
   connections(layers?: readonly Layer[]): Result<Mode, VaultEvidence>
-  /** Channel records are editable in the sample workspace. The service has no channel write API. */
-  saveChannels?(channels: readonly ChannelRecord[]): Result<Mode, void>
-  /** Changes the sample's visibility marker for previewing the audiences. */
-  /** `why`: the reason an agent gave, when the move was its request (the person approved it). */
-  markVisibility?(ref: BlockRef, layer: Layer, replaces: string, why?: string): Result<Mode, void>
+  /** Channels as files (`_channel.md`), each with its own version. Private channels stay sealed in the private layer. */
+  channels: {
+    list(): Promise<ChannelHead[]>
+    read(path: string): Promise<ChannelFile>
+    save(file: HomeFile, replaces: string | null): Promise<{ version: string }>
+    /** Moves the channel, every channel inside it and every readable block filed in it, all or none. */
+    move(from: string, to: string, replaces: string | null): Promise<ChannelMove>
+    remove(path: string, replaces: string): Promise<void>
+  }
+  /** The sealed cortex: opened and sealed on this device, under `ohm-vault/cortex/v1`. */
+  cortex: {
+    list(): Promise<CortexFile[]>
+    read(id: string): Promise<CortexFile>
+    save(id: string, file: HomeFile, replaces: string | null, journal?: Record<string, unknown>): Promise<{ version: string }>
+    saveMany(changes: readonly CortexChange[], journal?: Record<string, unknown>): Promise<{ id: string; version?: string; removed?: boolean }[]>
+    remove(id: string, replaces: string, journal?: Record<string, unknown>): Promise<void>
+    history(id: string): Promise<HistoryVersion[]>
+    readVersion(id: string, rev: HistoryVersion["rev"]): Promise<HomeFile>
+    journal(): Promise<CortexEntry[]>
+  }
+  /** The media cache: a media block keeps where its file is; only the bytes are sent here. */
+  media: {
+    has(names: readonly string[]): Promise<string[]>
+    /** Sends readable bytes under their content address (sha256-<hex>), which it returns. */
+    put(bytes: Uint8Array<ArrayBuffer>, type: string): Promise<{ name: string; size: number }>
+    get(name: string): Promise<Blob>
+    rendition(name: string, width: MediaWidth): Promise<Blob>
+  }
+  /** Visibility moves: agents' requests waiting for the member, and the journal of moves. */
+  moves: {
+    requests(): Promise<MoveRequest[]>
+    decline(id: string, reason?: string): Promise<void>
+    record(move: MoveRecord): Promise<{ state: string }>
+    /** The Publish page, showing one post alone: where a move to or from public is finished. */
+    publishPage(postId: string): string
+  }
+  agenda(): Promise<Agenda>
   search: SearchProvider
   history(ref: BlockRef): Result<Mode, HistoryVersion[]>
   readVersion(ref: BlockRef, rev: HistoryVersion["rev"]): Result<Mode, HomeFile>
@@ -64,19 +117,27 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
 
 type Result<Mode, Value> = Mode extends "sync" ? Value : Promise<Value>
 
+export const CORTEX_CONTEXT = "ohm-vault/cortex/v1"
+
+/** sha256-<hex>: the content address the media cache names readable bytes by. */
+export async function mediaName(bytes: Uint8Array<ArrayBuffer>) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))
+  return `sha256-${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`
+}
+
 export const emptyPlan = (): PublishPlan => ({
   changes: 0, create: [], replace: [], remove: [], unchanged: [], cannot: [], notInVault: [],
 })
 
 /** Explicitly describe the move so the UI can ask before calling any write. */
+/** A move between the friends and private layers, worded by the shared rules (vault/vault/visibility.mjs). */
 export function visibilityMove(ref: BlockRef, to: Layer): VisibilityMove {
   if (ref.layer === to || ref.layer === "public") {
     throw new DOMException("Choose another layer. A published copy is taken down through publishing.", "NotSupportedError")
   }
-  const move = { from: ref.layer, to }
-  if (to === "public") return { ...move, action: "publish", warning: "Publishing makes a public copy and keeps the original." }
-  if (to === "friends") return { ...move, action: "copy", warning: "The vault service and your friends can read the shared copy." }
-  return { ...move, action: "copy-and-remove", warning: "Backups made while the block was shared may still hold a readable copy." }
+  const plan = planMove({ from: ref.layer, to, title: "checked by the caller" })
+  const action = plan.action === "publish" ? "publish" : plan.action === "share" ? "copy" : "copy-and-remove"
+  return { from: ref.layer, to, action, warning: plan.warning }
 }
 
 /** The caller confirms disclosure or removal before invoking this operation. */

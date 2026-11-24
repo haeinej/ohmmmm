@@ -10,5 +10,12 @@ export default {
       gives: '`posts`, `public`, `friends`, `private` (counts), and `labels`, each with its `posts` and `sublabels`',
       run: ({ posts, did }) => posts.tree(did),
     },
+    'com.ohmmmm.vault.getAgenda': {
+      verb: 'GET', asks: 'member', changes: false,
+      about: 'What waits for the member and their curator, as counts: posts with no label of their own (`other`) and media with no alt text. Counted from the public and friends-only layers only, without reading anything with a model; the private layer and the cortex are counted on the member\'s device.',
+      takes: {},
+      gives: '`unlabelled`, `mediaWithoutAlt`, and `counted`, the layers counted',
+      run: ({ channels, did }) => channels.agenda(did),
+    },
   },
 };

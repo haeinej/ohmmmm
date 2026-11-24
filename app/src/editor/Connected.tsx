@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { bySlug, incoming, outgoing, titleOf, type Doc, type Outgoing } from "@/data/workspace-data"
-import { connectDocs, disconnect, open, setWhy, useWorkspace } from "@/workspace/store"
+import { connectDocs, disconnect, open, report, setWhy, useWorkspace } from "@/workspace/store"
 import { ConnectPicker } from "./ConnectPicker"
 
 const row = "group/row flex min-h-8 items-center gap-2 rounded-lg px-2 py-1 transition-colors duration-(--ohm-duration-state) hover:bg-muted"
@@ -24,7 +24,7 @@ function WhyField({ doc, o }: { doc: Doc; o: Outgoing }) {
   const [value, setValue] = useState(o.why ?? "")
   return (
     <input value={value} onChange={e => setValue(e.target.value)} placeholder="Why? (optional)" aria-label={`Why it connects to ${o.slug}`}
-      onBlur={() => value !== (o.why ?? "") && setWhy(doc.id, o.slug, value)}
+      onBlur={() => value !== (o.why ?? "") && void report(setWhy(doc.id, o.slug, value))}
       onKeyDown={e => {
         if (e.key === "Escape") { e.stopPropagation(); setValue(o.why ?? ""); requestAnimationFrame(() => (e.target as HTMLInputElement).blur()) }
         if (e.key === "Enter") { e.stopPropagation(); e.currentTarget.blur() }
@@ -64,7 +64,7 @@ export function ConnectionList({ doc, editable, onOpen }: { doc: Doc; editable: 
             {editable && own && (
               <Button size="icon-sm" variant="ghost" aria-label={`Disconnect from ${titleOf(target)}`}
                 className="size-6 flex-none text-muted-foreground opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
-                onClick={() => { disconnect(doc.id, o.slug); notify({ message: `Disconnected from “${titleOf(target)}”`, tone: "info" }) }}>
+                onClick={() => { void report(disconnect(doc.id, o.slug)); notify({ message: `Disconnected from “${titleOf(target)}”`, tone: "info" }) }}>
                 <Icon icon={XIcon} size="sm" />
               </Button>
             )}
@@ -97,10 +97,9 @@ export function ConnectionList({ doc, editable, onOpen }: { doc: Doc; editable: 
         <div className="mt-1 rounded-xl bg-muted/60 p-1 animate-in fade-in-0 duration-(--ohm-duration-open)">
           <ConnectPicker fromId={doc.id} className="w-full" onCancel={() => setPicking(false)} onPick={target => {
             setPicking(false)
-            try {
-              const { added } = connectDocs(doc.id, target.id)
-              notify({ message: added ? `Connected to “${titleOf(target)}”` : `Already connected to “${titleOf(target)}”`, tone: "info" })
-            } catch (err) { notify({ message: (err as Error).message }) }
+            connectDocs(doc.id, target.id)
+              .then(({ added }) => notify({ message: added ? `Connected to “${titleOf(target)}”` : `Already connected to “${titleOf(target)}”`, tone: "info" }))
+              .catch(err => notify({ message: (err as Error).message }))
           }} />
         </div>
       ) : (

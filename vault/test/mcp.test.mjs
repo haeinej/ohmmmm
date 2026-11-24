@@ -15,7 +15,7 @@ import { CONTENT, DOCUMENT, fromDocument, notFound, PUBLICATION, PUBLICATION_KEY
 // The tools, against the vault service itself: the real service, on a database in memory, asked
 // the way the tools ask it. Only who is asking is stood in for.
 const did = 'did:web:pds.example.test';
-async function toolsOf({ beforeApply = () => {} } = {}) {
+async function toolsOf({ beforeApply = () => {}, grants = null } = {}) {
   const env = { DB: await testDatabase(), SERVICE_DID: 'did:web:vault.example.test' };
   // What the person has published, as their own PDS lists it: a type of their own from before the
   // shared one. A test changes `published` to change what is there.
@@ -66,6 +66,9 @@ async function toolsOf({ beforeApply = () => {} } = {}) {
     removeFriend: did => ask('removeFriend', { body: { did } }),
     listShared: owner => ask('listShared', { query: { owner } }),
     getShared: (owner, id) => ask('getShared', { query: { owner, id } }),
+    previewMove: (id, to) => ask('previewMove', { query: { id, to } }),
+    hideBlock: move => ask('hideBlock', { body: move }),
+    requestMove: move => ask('requestMove', { body: move }),
     mirror: ({ apply = false, expectedSummary } = {}) => {
       if (apply) beforeApply(published);
       return ask('importPublished', { body: { apply, ...(expectedSummary ? { expectedSummary } : {}) } });
@@ -105,7 +108,7 @@ async function toolsOf({ beforeApply = () => {} } = {}) {
     await vault.put({ id, slug, label: '', sublabel: '', body: 'Seeded post.', visibility: 'friends', ...fields });
     return vault.get(id);
   };
-  return { tools: createTools({ vault }), vault, asked, published, repository, publication, uploads, seed, ask, blocks: blockStore(env.DB) };
+  return { tools: createTools({ vault, by: 'agent:helper', grants }), vault, asked, published, repository, publication, uploads, seed, ask, blocks: blockStore(env.DB) };
 }
 
 test('service tools hide legacy private posts and keep search counts and publish previews free of private content', async () => {
@@ -136,18 +139,21 @@ test('nothing other people are meant to see changes without the second call', as
   const { post: made } = await seed('hello', { title: 'Hello', label: 'Writings', body: 'A first post.' });
   const held = async () => (await vault.get(made.id)).post;
 
-  const asked = await tools.call('vault_set_visibility', { key: 'hello', to: 'public' });
+  const asked = await tools.call('vault_set_visibility', { key: 'hello', to: 'public', reason: 'It is finished.' });
   assert.equal(asked.done, false);
-  assert.deepEqual([asked.willHappen.from, asked.willHappen.to], ['friends', 'public']);
-  // Saying a post is for everyone does not publish it, and the answer says so.
-  assert.match(asked.willHappen.audience, /Saving does not publish it/);
+  assert.deepEqual([asked.willHappen.from, asked.willHappen.to, asked.willHappen.action], ['friends', 'public', 'publish']);
+  assert.match(asked.willHappen.outcome, /request to the person/);
   assert.equal((await held()).visibility, 'friends');
   await assert.rejects(tools.call('vault_set_visibility', { key: 'hello', to: 'public', confirm: 'c0000000000000000' }), /has changed since it was shown/);
   // The value given for one request does not unlock another.
   await assert.rejects(tools.call('vault_delete', { key: 'hello', confirm: asked.confirm }), /has changed since it was shown/);
-  const moved = await tools.call('vault_set_visibility', { key: 'hello', to: 'public', confirm: asked.confirm });
-  assert.deepEqual([moved.done, moved.visibility], [true, 'public']);
-  assert.equal((await tools.call('vault_set_visibility', { key: 'hello', to: 'public' })).unchanged, true);
+  // The second call asks the person; it never shows the post to more people itself.
+  const moved = await tools.call('vault_set_visibility', { key: 'hello', to: 'public', reason: 'It is finished.', confirm: asked.confirm });
+  assert.deepEqual([moved.done, moved.requested, moved.waitsFor], [true, true, 'the person, in their cockpit']);
+  assert.equal((await held()).visibility, 'friends');
+  const again = await tools.call('vault_set_visibility', { key: 'hello', to: 'public', reason: 'It is finished.' });
+  assert.equal(again.willHappen.alreadyAsked.length, 1);
+  assert.equal((await tools.call('vault_set_visibility', { key: 'hello', to: 'public', reason: 'It is finished.', confirm: again.confirm })).alreadyWaiting, true);
 
   // Editing a post that is not private is shown first too, with what changes.
   const read = await tools.call('vault_read', { key: 'hello' });
@@ -278,7 +284,7 @@ test('invalid protocol params and unexpected handlers do not poison the ordered 
 });
 
 test('an agent publishes: it shows what would change first, and the repository changes only on the second call', async () => {
-  const { tools, repository, publication, uploads, seed } = await toolsOf();
+  const { tools, vault, repository, publication, uploads, seed } = await toolsOf();
   const confirmed = async (name, args) => tools.call(name, { ...args, confirm: (await tools.call(name, args)).confirm });
   const { post: made } = await seed('the-hill', { title: 'The hill', label: 'Photographs', date: '2026-02-01', body: 'Up early.\n\n![The hill at dawn](https://photos.example.test/hill.png)' });
   await seed('mine', { body: 'Only for me.', visibility: 'private' });
@@ -287,7 +293,9 @@ test('an agent publishes: it shows what would change first, and the repository c
 
   // Nothing is for everyone yet, so there is nothing to publish.
   assert.deepEqual([(await tools.call('vault_status')).changes, (await tools.call('vault_publish')).nothingToPublish], [0, true]);
-  await confirmed('vault_set_visibility', { key: 'the-hill', to: 'public' });
+  // The person marks it for everyone; an agent cannot.
+  const marked = await vault.get(made.id);
+  await vault.put({ ...marked.post, visibility: 'public' }, marked.version);
   // Marking it for everyone published nothing.
   assert.equal(repository.size, 1);
   const status = await tools.call('vault_status');
@@ -329,8 +337,11 @@ test('an agent publishes: it shows what would change first, and the repository c
   assert.deepEqual([repository.get(made.id).title, repository.get(made.id).subtitle], ['The hill, again', 'At dawn']);
 
   // Changing it back to friends takes it down, on publish and not before.
-  await assert.rejects(tools.call('vault_set_visibility', { key: 'the-hill', to: 'private' }), /requires the person/);
-  await confirmed('vault_set_visibility', { key: 'the-hill', to: 'friends' });
+  // An agent may only ask for a takedown; the person changes it.
+  assert.equal((await confirmed('vault_set_visibility', { key: 'the-hill', to: 'friends' })).requested, true);
+  assert.equal((await vault.get(made.id)).post.visibility, 'public');
+  const back = await vault.get(made.id);
+  await vault.put({ ...back.post, visibility: 'friends' }, back.version);
   assert.ok(repository.has(made.id));
   const down = await tools.call('vault_publish');
   assert.deepEqual(down.willHappen.remove, [{ key: made.id, why: 'The published record will be taken down.' }]);
@@ -343,15 +354,19 @@ test('friends tools preview changes, enforce versions and use the reader’s own
   const { tools, asked, blocks, ask } = await toolsOf();
   const reader = 'did:web:reader.example.test';
   const block = { id: newPostId(), path: 'reading/first.md', text: '---\nkind: text\nvisibility: friends\n---\n\nCollected words.' };
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: 'A private block.' } }), /visibility: friends/);
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text.replace('friends', 'public') } }), /visibility: friends/);
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: 'A private block.' }, replaces: 'v' }), /visibility: friends/);
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text.replace('friends', 'public') }, replaces: 'v' }), /visibility: friends/);
+  // An agent never makes a new friends-only block: a new block starts private.
+  await assert.rejects(tools.call('vault_friends_save', { block }), /A new block starts private/);
   assert.deepEqual(asked, []);
-  const preview = await tools.call('vault_friends_save', { block });
+  assert.deepEqual((await tools.call('vault_friends_list')).blocks, []);
+  // The person shares it; the agent may then change it, from the version it read.
+  const { version: first } = await blocks.write(did, block);
+  const preview = await tools.call('vault_friends_save', { block, replaces: first });
   assert.equal(preview.done, false);
   assert.match(preview.willHappen.warning, /can read/);
-  assert.deepEqual((await tools.call('vault_friends_list')).blocks, []);
-  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text + ' Changed.' }, confirm: preview.confirm }), /has changed since it was shown/);
-  const { version } = await tools.call('vault_friends_save', { block, confirm: preview.confirm });
+  await assert.rejects(tools.call('vault_friends_save', { block: { ...block, text: block.text + ' Changed.' }, replaces: first, confirm: preview.confirm }), /has changed since it was shown/);
+  const version = first;
   const list = await tools.call('vault_friends_list');
   assert.equal(list.blocks[0].id, block.id);
   assert.deepEqual(await tools.call('vault_friends_read', { id: block.id }), { block, version });
@@ -389,7 +404,8 @@ test('friends tools preview changes, enforce versions and use the reader’s own
 
 test('each tool names real API requests, and vault tools ask only for what they declare', async () => {
   const { tools, asked, seed } = await toolsOf();
-  const made = await seed('hello', { body: 'A first post.', visibility: 'public' });
+  // Dated, so the publish plan is the same on both calls.
+  const made = await seed('hello', { body: 'A first post.', visibility: 'public', date: '2026-11-01' });
   await seed('another');
   const calls = {
     vault_tree: [{}], vault_list: [{}], vault_read: [{ key: 'hello' }], vault_search: [{ query: 'first' }],

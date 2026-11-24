@@ -8,7 +8,6 @@
 //   related    pairs of blocks with no edge between them that share several uncommon words: a
 //              connection to draw, two notes saying the same thing, or two that disagree
 //   sameTitle  blocks with the same title: a duplicate, or two versions of one thing
-//   proposed   blocks still `status: proposed`, oldest first, for the person to keep or drop
 //
 // Conclusions go to the cortex as observations about the blocks; fixes go through the vault's own
 // tools, within what the person granted. Nothing here writes.
@@ -39,12 +38,8 @@ export function lint(db, { limit = LIMIT } = {}) {
   const sameTitle = db.prepare(`SELECT LOWER(title) AS title, GROUP_CONCAT(key, ' ') AS keys FROM nodes
     WHERE type = 'block' AND title IS NOT NULL AND TRIM(title) != '' GROUP BY LOWER(title) HAVING COUNT(*) > 1 LIMIT ?`).all(limit)
     .map(row => ({ title: row.title, blocks: row.keys.split(' ').map(label) }));
-  const proposed = db.prepare("SELECT key, title, path, node FROM nodes WHERE type = 'block'").all()
-    .map(row => ({ row, node: JSON.parse(row.node) })).filter(({ node }) => node.status === 'proposed')
-    .sort((x, y) => String(x.node.created ?? '').localeCompare(String(y.node.created ?? '')))
-    .slice(0, limit).map(({ row, node }) => ({ key: row.key, title: row.title, path: row.path, by: node.by ?? null, created: node.created ?? null }));
   return {
-    blocks, problems, missing, orphans, related, sameTitle, proposed,
+    blocks, problems, missing, orphans, related, sameTitle,
     next: 'These are candidates, not findings. Read each related pair and each same title with vault_local_read and judge: connected, duplicate, contradicting, or unrelated. '
       + 'Record what you conclude with cortex_observe, about the blocks it concerns. Fix only what the person granted you (vault_where lists it) with vault_link, vault_write or vault_remove; ask before anything else. '
       + 'Then say what is missing that the vault should hold, as questions for the person.',

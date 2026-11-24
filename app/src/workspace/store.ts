@@ -1,57 +1,105 @@
 // Workspace state, and the handlers both the UI and the WebMCP tools call (AGENTS.md rule 2).
+// Every change goes to the home's source (the vault service) first, one at a time, and the
+// workspace shows it once the source has answered.
 import { useSyncExternalStore } from "react"
-import { blockVersion, byId, cortex, channelRecords, channelsOf, demoJournal, inbox, inOrder, owner, blocks, bySlug, isBlock,
-  refreshSample, sampleWorkspace, selectSource, type Audience, type ChannelRecord, type Doc, type Visibility,
+import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
+  inOrder, isBlock, journalOf, landBlock, landChannel, landCortex, heldCortex, owner, blocks, selectSource,
+  type Audience, type Doc, type Visibility,
 } from "@/data/workspace-data"
-import { docOf, fileOf } from "@/data/block-document"
-import { inferKind, isChannelPath, newNodeId } from "../../../vault/vault/node.mjs"
-import { createServiceSource, type ServiceOptions } from "@/data/service-source"
-import type { BlockRef, HomeSource } from "@/data/source"
-import { sampleSource } from "@/data/sample-source"
-import type { Workspace } from "@/data/workspace-data"
+import { fileOf } from "@/data/block-document"
+import { cortexFileOf } from "@/data/cortex-document"
+import { docOf } from "@/data/block-document"
+import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
+import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
+import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
+import { type BlockRef, type HomeSource, type MoveRequest, type MoveTarget } from "@/data/source"
+import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
 import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
-import { applySnapshot, snap, type DeadEnd, type Snapshot } from "@/data/journal"
+import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
 import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
 import { keep, makeSizes, measure } from "@/media/cache"
 
-const editable = () => {
-  const source: Workspace | undefined = sampleWorkspace()
-  if (!source) throw new DOMException("Editing is available in the sample workspace.", "NotSupportedError")
+const live = () => {
+  const source = getSource()
+  if (!source) throw new DOMException("Sign in to change your home.", "InvalidStateError")
   return source
 }
 const draftOf = (id: string) => {
   const doc = byId(id)
   return doc && structuredClone(doc)
 }
-const persist = (doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) => {
-  const held = blockVersion(doc.id)
-  if (!held && cortex.some(node => node.id === doc.id)) {
-    sampleWorkspace()!.demo.saveCortex(doc, change)
-    return
-  }
-  const ref: BlockRef = held?.ref ?? { id: doc.id, layer: "private", store: "sealed" }
-  editable().saveBlock(ref, fileOf(doc), held?.version ?? null, change)
+const today = () => new Date().toISOString().slice(0, 10)
+
+/** Writes run one after another, so each names the version the one before it left. */
+let queue: Promise<unknown> = Promise.resolve()
+function serial<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task)
+  queue = run.catch(() => undefined)
+  return run
 }
-const updateChannels = (channels: ChannelRecord[]) => editable().saveChannels!(channels)
-function ensureChannel(channels: ChannelRecord[], path: string) {
-  const held = channels.find(channel => channel.path === path)
-  if (held) return held
-  const parent = path.split("/").slice(0, -1).join("/")
-  if (parent) ensureChannel(channels, parent)
-  const record = { id: newNodeId(), path, order: [], created: new Date().toISOString().slice(0, 10) }
-  channels.push(record)
-  return record
+/** Something that failed after the UI moved on: the app shows it as a notice. */
+const failureListeners = new Set<(problem: Error) => void>()
+export const onFailure = (listener: (problem: Error) => void) => (failureListeners.add(listener), () => { failureListeners.delete(listener) })
+/** For UI calls that don't wait: a failed write is reported, never swallowed. */
+export function report<T>(work: Promise<T>) {
+  work.catch((problem: Error) => failureListeners.forEach(listener => listener(problem)))
+  return work
+}
+
+/** Saves one block or cortex file as it is now in `doc`. Runs inside `serial`. */
+async function persist(doc: Doc, change?: Parameters<HomeSource["saveBlock"]>[3]) {
+  const source = live()
+  if (!isBlock(doc)) {
+    const held = heldCortex(doc.id)
+    const file = cortexFileOf(doc, held)
+    // The sealed journal entry says who changed it and why, in the shape the journal reads back.
+    const journal = journalOf()
+    const before = journal.currentVersion(doc.id), after = versionOf(snap(doc))
+    const line = {
+      type: "change", owner: "cortex", node: doc.id, op: change?.op ?? (held ? "edit" : "create"), actor: journal.actor(),
+      at: new Date().toISOString(), fields: [], before, after, summary: held ? "Edited it" : "Made it",
+      ...(change?.reason ? { reason: change.reason } : {}), seq: 0, id: `${Date.now().toString(36)}-${doc.id.slice(0, 6)}`,
+    }
+    const { version } = await source.cortex.save(doc.id, file, held?.version ?? null, { line, snapshots: { [after]: snap(doc) } })
+    landCortex({ id: doc.id, ...file, version })
+  } else {
+    const held = blockVersion(doc.id)
+    const ref: BlockRef = held?.ref ?? { id: doc.id, layer: "private", store: "sealed" }
+    // From the file as the source gave it, so properties the workspace doesn't edit are kept.
+    const file = fileOf(doc, heldBlock(doc.id)?.file)
+    const { version } = await source.saveBlock(ref, file, held?.version ?? null, change)
+    landBlock(ref, file, version)
+  }
+  journalOf().syncJournal(change)
+}
+/** Changes a block or cortex file as `change` says, from what the source last answered. */
+function update<T>(id: string, change: (doc: Doc) => T | undefined, opts?: Parameters<HomeSource["saveBlock"]>[3]): Promise<T | undefined> {
+  return serial(async () => {
+    const doc = draftOf(id)
+    if (!doc) throw new DOMException("There is no such block", "NotFoundError")
+    const out = change(doc)
+    if (out === undefined) return undefined
+    await persist(doc, opts)
+    set(bump())
+    return out
+  })
+}
+/** Saves a channel's `_channel.md` with one property changed. */
+async function saveChannelProperty(path: string, key: string, value: unknown) {
+  const held = heldChannel(path)
+  const text = setProperty(held?.text ?? writeNoteFile({ properties: { id: newNodeId(), created: today() } }), key, value)
+  const { version } = await live().channels.save({ path, text }, held?.version ?? null)
+  landChannel(path, text, version)
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "visibility" | "inbox" | "profile" | null
+export type Side = "repo" | "visibility" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
-  | { kind: "inbox"; id: string }
   | { kind: "settings"; tab: SettingsTab }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
@@ -84,6 +132,8 @@ type State = {
   /** What the home's tree and graph are narrowed to. */
   filters: Filters
   graphCenter: string
+  /** The cortex drawn around the person in the graph. Off unless turned on. */
+  graphCortex: boolean
   view: View
   searchOpen: boolean
   agent: { state: AgentState; label: string } | null
@@ -113,7 +163,7 @@ const sideAfterOpen = (): Partial<State> => (narrow() ? { side: null } : {})
 
 let state: State = {
   side: narrow() ? null : "repo", repoMode: "tree", scope: { cortex: true, vault: true }, sideWidth: savedWidth(), audience: "private", showVisibility: false, filters: NO_FILTERS,
-  graphCenter: owner.handle, view: { kind: "empty" }, searchOpen: false, agent: null, rev: 0, restored: null, historyFocus: null,
+  graphCenter: owner.handle, graphCortex: false, view: { kind: "empty" }, searchOpen: false, agent: null, rev: 0, restored: null, historyFocus: null,
   appearance: "system", density: savedDensity(), agentsAllowed: true,
   history: [], at: -1, returnTo: null, reveal: null, lastSide: "repo",
   offered: {
@@ -139,25 +189,61 @@ const set = (patch: Partial<State>) => {
   listeners.forEach(l => l())
 }
 const bump = () => ({ rev: state.rev + 1 })
-const refresh = () => {
-  const sample = sampleWorkspace()
-  if (sample) refreshSample(sample)
-  return bump()
-}
 
+/**
+ * Chooses the home: the vault service (the default, once signed in), a source given directly (tests
+ * give a fixture), or null for signed out.
+ */
 export async function setSource<Master, Sealed>(
-  next: HomeSource | Workspace | { service: ServiceOptions<Master, Sealed> } = sampleSource,
+  next: HomeSource | HomeSource<"sync"> | { service: ServiceOptions<Master, Sealed> } | null = null,
+  { keepView = false } = {},
 ) {
-  if (!await selectSource("service" in next ? createServiceSource(next.service) : next)) return
+  set(bump())
+  if (!await selectSource(next && "service" in next ? createServiceSource(next.service) : next)) return
   usedSlugs.clear()
   for (const doc of [...blocks, ...cortex]) usedSlugs.add(doc.slug)
+  await movesOnOpen()
+  if (keepView) { set(bump()); return }
   bodyReplacements.clear()
   sourceRevision = ++replacementSequence
   Object.values(marks).forEach(mark => mark.clear())
-  const unreadFixture = sampleWorkspace() && bySlug("yanaka-dusk")
-  if (unreadFixture) marks.unread.add(unreadFixture.id)
   set({ ...bump(), graphCenter: owner.handle, view: { kind: "empty" }, history: [], at: -1,
     reveal: null, returnTo: null, restored: null, historyFocus: null, searchOpen: false })
+}
+
+/** Ends the ohm session (ohm's sign-in, Better Auth, on this address) and shows sign-in. */
+export async function signOut() {
+  const response = await fetch(new URL("/api/auth/sign-out", location.origin), {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}",
+  })
+  if (!response.ok) throw new DOMException("Signing out failed. Try again.", "OperationError")
+  await setSource(null)
+}
+
+/** Reads the whole home again from its source, keeping what is open. */
+export const reload = () => serial(async () => {
+  const source = getSource()
+  if (source) await setSource(source, { keepView: true })
+})
+
+/**
+ * Finds who is signed in on this origin and opens their vault service. Signed out, or with no
+ * service here, the workspace shows sign-in. The private layer and the cortex open once this device
+ * has unlocked the account's keys (`privateSession`, from the account app's packages/keys).
+ */
+/** The source changed what it holds by itself (the home's bridge answered): read it again, keeping the view. */
+export const sourceChanged = () => { const source = getSource(); return source ? report(setSource(source, { keepView: true })) : Promise.resolve() }
+
+export async function connectHome<Master, Sealed>(options: Pick<ServiceOptions<Master, Sealed>, "privateSession" | "fetch"> = {}) {
+  const send = options.fetch ?? fetch
+  try {
+    const response = await send(new URL("/vault/xrpc/com.ohmmmm.account.get", location.origin), { credentials: "same-origin", redirect: "error" })
+    const account = response.ok ? await response.json() as { did?: string | null } : null
+    if (!account?.did) return setSource(null)
+    await setSource({ service: { origin: location.origin, did: account.did, ...options } })
+  } catch {
+    await setSource(null)
+  }
 }
 
 export const useWorkspace = () =>
@@ -211,28 +297,146 @@ export function setSideWidth(w: number) {
   try { localStorage.setItem("ohm-ux:side-width", String(sideWidth)) } catch { /* a convenience only */ }
   set({ sideWidth })
 }
-/** The graph filters a scope stands for. */
-export const scopeFolders = (scope: RepoScope) => scope
 
 // Visibility
 export const setAudience = (audience: Audience) => set({ audience })
 export const setShowVisibility = (showVisibility: boolean) =>
   set({ showVisibility, side: "repo", repoMode: "tree", ...(showVisibility ? {} : { audience: "private" as Audience }) })
-/** Marks who a block is for in the sample. The panel asks first when widening the audience. */
-export function setVisibility(id: string, visibility: Visibility, why?: string) {
+/** What moving a block would do, by the shared rules (vault/vault/visibility.mjs): the preview both the panel and `visibility.preview` show. */
+export function previewMove(id: string, to: Visibility) {
   const doc = byId(id)
   if (!isBlock(doc)) throw new DOMException("Only blocks have visibility", "DataError")
-  const held = blockVersion(id)!
-  editable().markVisibility!(held.ref, visibility, held.version, why)
-  set(refresh())
+  try {
+    return { id, title: doc.title, ...planMove({ from: doc.visibility, to, title: doc.title }) }
+  } catch (err) {
+    throw new DOMException((err as Error).message, "DataError")
+  }
 }
 
-// Inbox
-export function openInbox(id: string) {
-  const item = inbox.find(i => i.id === id)
-  if (!item) throw new DOMException(`Nothing in the inbox with id ${id}`, "NotFoundError")
-  sampleWorkspace()?.demo.markInboxRead(id)
-  set({ view: item.ref ? { kind: "doc", id: item.ref, mode: "read" } : { kind: "inbox", id }, ...bump(), ...sideAfterOpen() })
+/**
+ * Moves a block to another layer: the one handler the visibility control, an approved agent request
+ * and the `visibility.move` tool all call, after the person approved what `previewMove` showed.
+ * Friends ↔ private moves between stores here; a post to or from public is changed in place and
+ * finished on the Publish page, which previews that one post. Every move is journalled.
+ */
+export function setVisibility(id: string, visibility: Visibility, { request, reason }: { request?: string; reason?: string } = {}) {
+  const preview = previewMove(id, visibility)
+  // The home on this computer publishes only through its own Publish dialog, which the person runs.
+  if (preview.via === "publish" && "planPublish" in (getSource() ?? {})) {
+    return Promise.reject(new DOMException("Showing a block to everyone, or taking a public one back, goes through Publish: choose Everyone on the block, and approve the plan.", "NotSupportedError"))
+  }
+  if (preview.needs?.includes("title")) return Promise.reject(new DOMException("Give it a title before it is published.", "DataError"))
+  return serial(async () => {
+    const held = blockVersion(id)
+    if (!held) throw new DOMException("There is no such block", "NotFoundError")
+    const { from } = preview
+    if (preview.via === "publish") {
+      // Public is the PDS's. A post is marked here, then published or taken down on the Publish page.
+      if (visibility === "private") throw new DOMException("Move it to friends first; Publish then takes it down.", "NotSupportedError")
+      // Every block is a post once it is public: one that is not yet is made one, at the address its
+      // home channel gives, and the old copy removed (copy, then remove, as between the other layers).
+      if (held.ref.store !== "post") return publishBlock(held, doc(id), { request, reason })
+      const file = await live().readBlock(held.ref)
+      if (file.version !== held.version) throw new DOMException("The block changed. Review it again before moving it.", "InvalidStateError")
+      const ref = { ...held.ref, layer: visibility }
+      const marked = { path: file.path, text: setProperty(file.text, "visibility", visibility) }
+      const saved = await live().saveBlock(ref, marked, held.version)
+      dropBlock(id)
+      landBlock(ref, marked, saved.version)
+      await live().moves.record({ block: id, from, to: visibility, ...(request ? { request } : {}), ...(reason ? { reason } : {}) })
+      set(bump())
+      return { id, visibility, cleanupPending: false, publish: live().moves.publishPage(id) }
+    }
+    // Not public: that went to Publish above.
+    const target: MoveTarget = visibility === "private" ? { layer: "private", opaqueId: newOpaqueId() } : { layer: "friends" }
+    const moved = await live().moveVisibility(held.ref, target, held.version)
+    const file = await live().readBlock(moved.ref)
+    if (moved.ref.id !== id || held.ref.layer !== moved.ref.layer) dropBlock(id)
+    landBlock(moved.ref, { path: file.path, text: file.text }, file.version)
+    await live().moves.record({
+      block: id, from, to: visibility, ...(visibility === "private" ? { sealedAs: moved.ref.id } : {}),
+      ...(moved.cleanupPending ? { cleanupPending: true } : {}), ...(request ? { request } : {}), ...(reason ? { reason } : {}),
+    })
+    set(bump())
+    return { id: moved.ref.id, visibility, cleanupPending: moved.cleanupPending }
+  })
+}
+
+const doc = (id: string) => { const found = byId(id); if (!isBlock(found)) throw new DOMException("Only blocks have visibility", "DataError"); return found }
+/** A friends-only or private block made a post marked public, ready for the Publish page. Runs inside `serial`. */
+async function publishBlock(held: { ref: BlockRef; version: string }, block: Doc, { request, reason }: { request?: string; reason?: string }) {
+  const file = await live().readBlock(held.ref)
+  if (file.version !== held.version) throw new DOMException("The block changed. Review it again before moving it.", "InvalidStateError")
+  const node = readNode(file.path, file.text)?.node
+  const vaultId = held.ref.store === "sealed" ? block.vaultId ?? node?.id : held.ref.id
+  if (!vaultId) throw new DOMException("Only a block with a vault ID can be published.", "DataError")
+  let post
+  try { post = blockAsPost(node, { id: vaultId, slugOf }) } catch (err) { throw new DOMException((err as Error).message, "DataError") }
+  const ref: BlockRef = { id: vaultId, layer: "public", store: "post" }
+  const made = postFile(post)
+  const saved = await live().saveBlock(ref, made, null)
+  // Separate stores have no joint transaction: a failed removal leaves both copies, and says so.
+  let cleanupPending = false
+  try { await live().deleteBlock(held.ref, held.version) } catch { cleanupPending = true }
+  if (!cleanupPending) dropBlock(block.id)
+  landBlock(ref, made, saved.version)
+  await live().moves.record({ block: held.ref.id, from: block.visibility, to: "public", ...(cleanupPending ? { cleanupPending: true } : {}), ...(request ? { request } : {}), ...(reason ? { reason } : {}) })
+  set(bump())
+  return { id: vaultId, visibility: "public" as const, cleanupPending, publish: live().moves.publishPage(vaultId) }
+}
+
+// Agents' requests for moves they may not finish, waiting for the member.
+let moveRequests: MoveRequest[] = []
+/** When the home opens: what agents asked for, and sealing what they hid. Neither keeps the home from opening. */
+async function movesOnOpen() {
+  moveRequests = []
+  try {
+    await loadMoveRequests()
+    await sealHidden()
+  } catch (problem) {
+    failureListeners.forEach(listener => listener(problem as Error))
+  }
+}
+export const waitingRequests = () => moveRequests
+/** Reads the requests waiting for the member. */
+export async function loadMoveRequests() {
+  moveRequests = await live().moves.requests()
+  set(bump())
+  return moveRequests
+}
+/** Approves an agent's request: the same move, by the same handler, recorded as answering it. Consequential: the person approves first. */
+export async function approveMoveRequest(requestId: string) {
+  const request = moveRequests.find(each => each.id === requestId)
+  if (!request) throw new DOMException("That request is no longer waiting", "NotFoundError")
+  const held = blockVersion(request.block)
+  if (!held) throw new DOMException("The block it asks about is not here, or is locked on this device", "NotFoundError")
+  // Pinned to what the agent read: a block changed since then is reviewed again.
+  if (request.version && held.ref.store !== "sealed" && request.version !== held.version) {
+    throw new DOMException("The block changed since the agent asked. Review it again, and move it yourself if you still want to.", "InvalidStateError")
+  }
+  const moved = await setVisibility(request.block, request.to, { request: request.id })
+  await loadMoveRequests()
+  return moved
+}
+export async function declineMoveRequest(requestId: string, reason?: string) {
+  await live().moves.decline(requestId, reason)
+  await loadMoveRequests()
+  return { id: requestId, declined: true }
+}
+/**
+ * Seals what an agent hid on its way to private: friends stopped reading it when it was hidden,
+ * and this device, with the private layer open, finishes the move. Runs when the home opens.
+ */
+export async function sealHidden() {
+  if (privateLayer !== "open") return []
+  const heads = await live().listBlocks(["public", "friends"])
+  const sealed: string[] = []
+  for (const head of heads.filter(each => each.leaving && each.layer === "friends")) {
+    if (!byId(head.id)) continue
+    await setVisibility(head.id, "private")
+    sealed.push(head.id)
+  }
+  return sealed
 }
 
 // Profile and settings
@@ -265,20 +469,21 @@ export const setOffered = (name: ToolName, on: boolean) => set({ offered: { ...s
 export function open(id: string, mode: "read" | "edit" = "read") {
   const doc = byId(id)
   if (!doc) throw new DOMException(`Nothing with id ${id}`, "NotFoundError")
-  if (mode === "edit") editable()
+  if (mode === "edit") live()
   marks.unread.delete(id)
   set({ view: { kind: "doc", id, mode }, searchOpen: false, ...sideAfterOpen() })
   return { id, title: doc.title, view: mode, next: mode === "edit" ? "workspace.save-draft" : "workspace.open" }
 }
 
 /** The graph lives in the side panel, in the home. */
+export const setGraphCortex = (graphCortex: boolean) => set({ graphCortex })
 export function showGraph(center?: string) {
-  const g = buildGraph({ center, audience: state.audience, ...scopeFolders(state.scope), keep: kept })
+  const g = buildGraph({ center, audience: state.audience, vault: state.scope.vault, cortex: state.graphCortex, keep: kept })
   set({ side: "repo", repoMode: "graph", graphCenter: g.center.handle, searchOpen: false })
   return { center: g.center.handle, nodes: g.nodes.length, edges: g.edges.length }
 }
 
-const usedSlugs = new Set([...blocks, ...cortex].map(doc => doc.slug))
+const usedSlugs = new Set<string>()
 /** A slug no other block has, from a title. */
 function freeSlug(title: string, fallback = "untitled") {
   const stem = slugify(title) || fallback
@@ -288,38 +493,40 @@ function freeSlug(title: string, fallback = "untitled") {
   }
   return slug
 }
-export function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
+export async function createDraft(input: { homeChannel?: string; channels?: string[]; title?: string } = {}) {
   const homeChannel = input.homeChannel?.trim() || "other"
   validateChannel(homeChannel)
   const title = input.title?.trim() ?? ""
   const slug = freeSlug(title)
   // Everything about the new block is set here, before the one change that records it.
+  // A new block is private: sealed on this device under an opaque ID, carrying its own vault ID.
   const doc: Doc = {
-    id: newNodeId(), kind: "text", slug, title, homeChannel,
+    id: newOpaqueId(), vaultId: newNodeId(), kind: "text", slug, title, homeChannel,
     ...(input.channels?.length ? { channels: [...input.channels] } : {}), visibility: "private",
-    updated: new Date().toISOString().slice(0, 10), body: "",
+    updated: today(), body: "",
   }
-  persist(doc)
   usedSlugs.add(slug)
-  set({ view: { kind: "doc", id: doc.id, mode: "edit" }, ...refresh(), searchOpen: false, ...sideAfterOpen() })
+  try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
+  set({ view: { kind: "doc", id: doc.id, mode: "edit" }, ...bump(), searchOpen: false, ...sideAfterOpen() })
   return { id: doc.id, slug, view: "edit", next: "workspace.save-draft" }
 }
 
 /** Saves the open block as private. Never publishes. */
-export function saveDraft(input: { title?: string; body?: string }) {
+export async function saveDraft(input: { title?: string; body?: string }) {
   const v = state.view
   if (v.kind !== "doc") throw new DOMException("No block is open in the editor", "InvalidStateError")
-  const doc = draftOf(v.id)
-  if (!isBlock(doc)) throw new DOMException("Only blocks are edited here", "DataError")
+  const open = byId(v.id)
+  if (!isBlock(open)) throw new DOMException("Only blocks are edited here", "DataError")
   // Changing a block other people can see needs the person's approval (AGENTS.md rule 11): its own flow.
-  if (doc.visibility !== "private") throw new DOMException("This block is not private; changing it needs approval", "NotAllowedError")
-  if (input.title !== undefined) doc.title = input.title.trim()
-  if (input.body !== undefined) updateBody(doc, input.body)
+  if (open.visibility !== "private") throw new DOMException("This block is not private; changing it needs approval", "NotAllowedError")
   // The editor keeps the block open; saving changes nothing about what is on screen.
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc)
-  set(refresh())
-  return { id: doc.id, slug: doc.slug, visibility: doc.visibility }
+  const saved = await update(v.id, doc => {
+    if (input.title !== undefined) doc.title = input.title.trim()
+    if (input.body !== undefined) updateBody(doc, input.body)
+    doc.updated = today()
+    return { id: doc.id, slug: doc.slug, visibility: doc.visibility }
+  })
+  return saved!
 }
 
 export const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)
@@ -327,11 +534,7 @@ export { owner as me }
 
 /** A block's icon: an emoji shown above its title. */
 export function setIcon(id: string, icon: string | undefined) {
-  const doc = draftOf(id)
-  if (!doc) return
-  doc.icon = icon
-  persist(doc)
-  set(refresh())
+  return update(id, doc => { doc.icon = icon; return true })
 }
 function updateBody(doc: Doc, body: string) {
   // Every save of a body, the editor's flush on leaving included, comes through here.
@@ -354,22 +557,25 @@ export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 /**
  * Adds an image as a media block of its own, in a channel: its bytes kept by CID in the browser's
- * media cache, its block private. An image the vault already holds is not copied: its media block is
- * collected into the channel, as Are.na connects a block. Returns the media block's id and slug, for
- * an embed (`![[slug]]`). The editor's drop, paste and picker, and the `workspace.add-image` tool, call this.
+ * media cache and sent to the home's media store, its block private. An image the vault already
+ * holds is not copied: its media block is collected into the channel, as Are.na connects a block.
+ * Returns the media block's id and slug, for an embed (`![[slug]]`). The editor's drop, paste and
+ * picker, and the `workspace.add-image` tool, call this. Adding the same image twice is one block.
  */
 export async function addImage(input: { name: string; type: string; bytes: Uint8Array; channel: string; alt?: string }) {
   const ending = IMAGE_TYPES[input.type]
   if (!ending) throw new DOMException(`An image is one of: ${Object.keys(IMAGE_TYPES).join(", ")}`, "DataError")
   if (!input.bytes.length || input.bytes.length > MAX_IMAGE_BYTES) throw new DOMException("An image is up to 20 MB", "DataError")
   validateChannel(input.channel)
-  editable()
+  const source = live()
   const hash = await keep(input.bytes, input.type)
   const held = blocks.find(doc => doc.media?.hash === hash)
   if (held) {
-    if (isBlock(held) && !channelsOf(held).includes(input.channel)) collect(held.id, input.channel)
+    if (isBlock(held) && !channelsOf(held).includes(input.channel)) await collect(held.id, input.channel)
     return { id: held.id, slug: held.slug, created: false }
   }
+  // The bytes first: a block is never saved pointing at bytes the home does not have.
+  await source.media.put(input.bytes.slice() as Uint8Array<ArrayBuffer>, input.type)
   const stem = input.name.replace(/\.[^.]+$/, "").trim() || "image"
   const slug = freeSlug(stem, "image")
   // The file sits beside its block in the home folder, so its name is free in that channel.
@@ -379,72 +585,119 @@ export async function addImage(input: { name: string; type: string; bytes: Uint8
   const size = await measure(input.bytes, input.type)
   const alt = input.alt?.trim() || stem
   const doc: Doc = {
-    id: newNodeId(), kind: "media", slug, title: stem, homeChannel: input.channel, visibility: "private",
-    updated: new Date().toISOString().slice(0, 10), body: `![[${file}]]`,
+    id: newOpaqueId(), vaultId: newNodeId(), kind: "media", slug, title: stem, homeChannel: input.channel, visibility: "private",
+    updated: today(), body: `![[${file}]]`,
     media: { hash, mime: input.type, ...size, alt },
   }
-  persist(doc)
   usedSlugs.add(slug)
-  set(refresh())
+  try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
+  set(bump())
   void makeSizes(hash, input.bytes, input.type)
   return { id: doc.id, slug, created: true }
 }
 
 /** Saves as you type, for private blocks only. */
 export function autosave(id: string, patch: { title?: string; body?: string }) {
-  const doc = draftOf(id)
-  if (!isBlock(doc) || doc.visibility !== "private") return
-  if (patch.title !== undefined) doc.title = patch.title
-  if (patch.body !== undefined) updateBody(doc, patch.body)
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc)
-  set(refresh())
+  return update(id, doc => {
+    if (!isBlock(doc) || doc.visibility !== "private") return undefined
+    if (patch.title !== undefined) doc.title = patch.title
+    if (patch.body !== undefined) updateBody(doc, patch.body)
+    doc.updated = today()
+    return true
+  })
 }
 
 /**
  * Collects a block into a channel, keeping every channel it is already in: a block can be in any
  * number of them. Its home channel changes when you move the home row.
  */
-export function collect(id: string, path: string) {
-  const doc = draftOf(id)
-  if (!isBlock(doc)) throw new DOMException("Only blocks can be collected into channels", "DataError")
+export async function collect(id: string, path: string) {
+  if (!isBlock(byId(id))) throw new DOMException("Only blocks can be collected into channels", "DataError")
   validateChannel(path)
-  if (doc.homeChannel === path || doc.channels?.includes(path)) return { added: false }
-  doc.channels = [...(doc.channels ?? []), path]
-  persist(doc)
-  set(refresh())
-  return { added: true }
+  const added = await update(id, doc => {
+    if (!isBlock(doc) || doc.homeChannel === path || doc.channels?.includes(path)) return undefined
+    doc.channels = [...(doc.channels ?? []), path]
+    return true
+  })
+  return { added: !!added }
 }
 
 /** Moves or adds a block's placement and updates the destination's order. */
-export function moveBlock(id: string, from: string, to: string, opts: { before?: string; after?: string; keep?: boolean } = {}) {
-  const doc = draftOf(id)
-  if (!isBlock(doc)) throw new DOMException("Only blocks move between channels", "DataError")
+export async function moveBlock(id: string, from: string, to: string, opts: { before?: string; after?: string; keep?: boolean } = {}) {
+  if (!isBlock(byId(id))) throw new DOMException("Only blocks move between channels", "DataError")
   validateChannel(to)
-  let homeChannelChanged = false
+  let homeChannelChanged = false, visibility: Visibility = "private"
   if (from !== to) {
-    if (opts.keep) {
-      if (!channelsOf(doc).includes(to)) doc.channels = [...(doc.channels ?? []), to]
-    } else if (doc.homeChannel === from) {
-      doc.homeChannel = to
-      doc.channels = doc.channels?.filter(c => c !== to)
-      homeChannelChanged = true
-    } else {
-      doc.channels = (doc.channels ?? []).filter(c => c !== from)
-      if (doc.homeChannel !== to && !doc.channels.includes(to)) doc.channels.push(to)
+    await update(id, doc => {
+      if (!isBlock(doc)) return undefined
+      visibility = doc.visibility
+      if (opts.keep) {
+        if (!channelsOf(doc).includes(to)) doc.channels = [...(doc.channels ?? []), to]
+      } else if (doc.homeChannel === from) {
+        doc.homeChannel = to
+        doc.channels = doc.channels?.filter(c => c !== to)
+        homeChannelChanged = true
+      } else {
+        doc.channels = (doc.channels ?? []).filter(c => c !== from)
+        if (doc.homeChannel !== to && !doc.channels.includes(to)) doc.channels.push(to)
+      }
+      return true
+    })
+  }
+  let ordered = false
+  // A channel's order names its blocks by slug in its own _channel.md, which the service keeps
+  // readable. So it lists only readable blocks: a private block's slug never goes there, and a
+  // private block's place in an order waits for the sealed private overlay.
+  if ((opts.before || opts.after) && byId(id)?.visibility !== "private") {
+    await serial(async () => {
+      const readable = blocks.filter(post => post.visibility !== "private" && channelsOf(post).includes(to))
+      const list = inOrder(to, readable).map(post => post.id).filter(x => x !== id)
+      const index = opts.before ? list.indexOf(opts.before) : opts.after ? list.indexOf(opts.after) + 1 : -1
+      list.splice(index < 0 ? list.length : index, 0, id)
+      await saveChannelProperty(to, "order", list.map(each => byId(each)?.slug).filter(Boolean))
+      ordered = true
+      set(bump())
+    })
+  }
+  return { homeChannelChanged, ordered, published: homeChannelChanged && visibility !== "private" }
+}
+
+/**
+ * Refiles every sealed block in `from` (and, with `descendants`, in the channels inside it) to `to`.
+ * The service moves the readable blocks itself; sealed ones are refiled on this device.
+ */
+async function refileSealed(from: string, to: string, descendants: boolean) {
+  for (const doc of blocks) {
+    if (!isBlock(doc) || doc.visibility !== "private") continue
+    const home = replacePath(doc.homeChannel, from, to, descendants)
+    const channels = doc.channels?.map(path => replacePath(path, from, to, descendants))
+    if (home === doc.homeChannel && !channels?.some((path, index) => path !== doc.channels?.[index])) continue
+    await persist({ ...structuredClone(doc), homeChannel: home, channels })
+  }
+}
+
+/**
+ * Changing a channel's path or removing it reaches sealed blocks only on a device that can open
+ * them; the service moves only what it can read. Locked, it would leave private blocks filed
+ * under a channel that is gone, so it is refused.
+ */
+function needsPrivateLayer(what: string) {
+  if (privateLayer !== "open") throw new DOMException(`${what} needs your private blocks: unlock them on this device first.`, "InvalidStateError")
+}
+
+/** Moves a channel with everything in it, at the service, then the sealed blocks here, then reads the home again. */
+function relocateChannel(from: string, to: string) {
+  needsPrivateLayer("Moving a channel")
+  return serial(async () => {
+    try {
+      const moved = await live().channels.move(from, to, heldChannel(from)?.version ?? null)
+      if (!moved.everything) await refileSealed(from, to, true)
+      return moved
+    } finally {
+      // Whatever happened, show the home as the service now holds it.
+      await setSource(live(), { keepView: true })
     }
-    persist(doc)
-  }
-  if (opts.before || opts.after) {
-    const records = structuredClone(channelRecords)
-    const list = inOrder(to, blocks.filter(post => channelsOf(post).includes(to))).map(post => post.id).filter(x => x !== id)
-    const index = opts.before ? list.indexOf(opts.before) : list.indexOf(opts.after!) + 1
-    list.splice(index < 0 ? list.length : index, 0, id)
-    ensureChannel(records, to).order = list
-    updateChannels(records)
-  }
-  set(refresh())
-  return { homeChannelChanged, published: homeChannelChanged && doc.visibility !== "private" }
+  })
 }
 
 /**
@@ -452,61 +705,58 @@ export function moveBlock(id: string, from: string, to: string, opts: { before?:
  * Every block in it goes along, and keeps its order. A channel inside a channel holds no channels of
  * its own yet, so a channel that holds some cannot go inside another.
  */
-export function moveChannel(path: string, into: string | null) {
+export async function moveChannel(path: string, into: string | null) {
   const name = path.split("/").at(-1)!
   const next = into ? `${into}/${name}` : name
   validateChannel(next)
   if (into && into.includes("/")) throw new DOMException("A channel inside a channel can't hold channels yet", "DataError")
   if (into && (into === path || into.startsWith(`${path}/`))) throw new DOMException("A channel can't go inside itself", "DataError")
   if (into && channelRecords.some(c => c.path.startsWith(`${path}/`))) throw new DOMException(`“${name}” holds channels of its own, so it can't go inside another yet`, "DataError")
-  if (next === path) return { path, published: 0 }
-  const whole = movedWhole(path, next)
-  if (whole) return { path: next, published: whole.published }
-  const records = structuredClone(channelRecords)
-  const record = ensureChannel(records, path)
-  const there = records.find(channel => channel.path === next)
-  if (there) {
-    there.order = [...there.order, ...record.order.filter(id => !there.order.includes(id))]
-    records.splice(records.indexOf(record), 1)
-  } else record.path = next
-  if (into) ensureChannel(records, into)
-  const published = refile(path, next, false)
-  updateChannels(records)
-  set(refresh())
-  return { path: next, published }
+  if (next === path) return { path, moved: 0 }
+  if (channelByPath(next)) throw new DOMException(`There is already a channel “${next.replace("/", " › ")}”`, "DataError")
+  const moved = await relocateChannel(path, next)
+  return { path: next, moved: moved.blocks }
 }
 
 /**
  * Makes a channel: at the top, or inside a top-level channel. It is empty until something is moved or
  * added into it, and stays when it is emptied again. Returns its path.
  */
-export function createChannel(inside?: string) {
+export async function createChannel(inside?: string) {
   if (inside?.includes("/")) throw new DOMException("A channel inside a channel can't hold channels yet", "DataError")
   let n = 1, path = inside ? `${inside}/untitled` : "untitled"
   while (channelRecords.some(channel => channel.path === path)) path = `${inside ? `${inside}/` : ""}untitled-${++n}`
-  const records = structuredClone(channelRecords)
-  ensureChannel(records, path)
-  updateChannels(records)
-  set(refresh())
+  await serial(async () => {
+    const text = writeNoteFile({ properties: { id: newNodeId(), created: today() } })
+    const { version } = await live().channels.save({ path, text }, null)
+    landChannel(path, text, version)
+    set(bump())
+  })
   return path
 }
 
 /** Removes an empty channel. One with blocks or channels in it is refused: move them out first. */
-export function deleteChannel(path: string) {
+export async function deleteChannel(path: string) {
+  needsPrivateLayer("Removing a channel")
   if (blocks.some(p => channelsOf(p).some(c => c === path || c.startsWith(`${path}/`))) || channelRecords.some(c => c.path.startsWith(`${path}/`)))
     throw new DOMException(`“${path.replace("/", " › ")}” is not empty: move what is in it out first`, "DataError")
-  updateChannels(channelRecords.filter(channel => channel.path !== path))
-  set(refresh())
+  await serial(async () => {
+    const held = heldChannel(path)
+    // A folder with no _channel.md of its own is gone once it is empty.
+    if (held) await live().channels.remove(path, held.version)
+    dropChannel(path)
+    set(bump())
+  })
 }
 
 /** Takes a block out of a channel. Use moveBlock to change its home channel. */
-export function uncollect(id: string, path: string) {
-  const doc = draftOf(id)
-  if (!doc?.channels?.includes(path)) return { removed: false }
-  doc.channels = doc.channels.filter(c => c !== path)
-  persist(doc)
-  set(refresh())
-  return { removed: true }
+export async function uncollect(id: string, path: string) {
+  const removed = await update(id, doc => {
+    if (!doc.channels?.includes(path)) return undefined
+    doc.channels = doc.channels.filter(c => c !== path)
+    return true
+  })
+  return { removed: !!removed }
 }
 
 /**
@@ -514,50 +764,51 @@ export function uncollect(id: string, path: string) {
  * evidence, so no agent tool does it. Like the text, it changes only a private block here; a block
  * other people see is changed through the steps that ask first.
  */
-export function connectDocs(id: string, toId: string, why?: string) {
-  const doc = draftOf(id), target = byId(toId)
-  if (!isBlock(doc) || !isBlock(target)) throw new DOMException("Only blocks connect to blocks", "DataError")
-  if (doc.id === target.id) throw new DOMException("A block does not connect to itself", "DataError")
-  if (doc.visibility !== "private") throw new DOMException("Connecting changes what others see; it is not part of this wireframe yet", "NotAllowedError")
-  if (doc.connect?.some(c => c.to === target.slug)) return { added: false }
-  doc.connect = [...(doc.connect ?? []), { to: target.slug, ...(why?.trim() ? { why: why.trim() } : {}) }]
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc)
-  set(refresh())
-  return { added: true }
+export async function connectDocs(id: string, toId: string, why?: string) {
+  const open = byId(id), target = byId(toId)
+  if (!isBlock(open) || !isBlock(target)) throw new DOMException("Only blocks connect to blocks", "DataError")
+  if (open.id === target.id) throw new DOMException("A block does not connect to itself", "DataError")
+  if (open.visibility !== "private") throw new DOMException("Connecting changes what others see; it asks first, which is not built yet", "NotAllowedError")
+  const added = await update(id, doc => {
+    if (doc.connect?.some(c => c.to === target.slug)) return undefined
+    doc.connect = [...(doc.connect ?? []), { to: target.slug, ...(why?.trim() ? { why: why.trim() } : {}) }]
+    doc.updated = today()
+    return true
+  })
+  return { added: !!added }
 }
 
 /** Says why a connection is there, or clears it. */
 export function setWhy(id: string, toSlug: string, why: string) {
-  const doc = draftOf(id)
-  const c = doc?.connect?.find(c => c.to === toSlug)
-  if (!doc || !c || doc.visibility !== "private") return
-  if (why.trim()) c.why = why.trim(); else delete c.why
-  persist(doc)
-  set(refresh())
+  return update(id, doc => {
+    const c = doc.connect?.find(c => c.to === toSlug)
+    if (!c || doc.visibility !== "private") return undefined
+    if (why.trim()) c.why = why.trim(); else delete c.why
+    return true
+  })
 }
 
 /** Takes a whole-block connection away. A link in the text is removed by editing the text. */
 export function disconnect(id: string, toSlug: string) {
-  const doc = draftOf(id)
-  if (!doc?.connect || doc.visibility !== "private") return
-  doc.connect = doc.connect.filter(c => c.to !== toSlug)
-  persist(doc)
-  set(refresh())
+  return update(id, doc => {
+    if (!doc.connect || doc.visibility !== "private") return undefined
+    doc.connect = doc.connect.filter(c => c.to !== toSlug)
+    return true
+  })
 }
 
 /** Opens a Markdown or text file as a new private block. */
-export function openFile(name: string, text: string) {
+export async function openFile(name: string, text: string) {
   const title = name.replace(/\.(md|markdown|txt)$/i, "")
-  const draft = createDraft({ title })
-  autosave(draft.id, { body: text })
+  const draft = await createDraft({ title })
+  await autosave(draft.id, { body: text })
   return draft
 }
 
 // ─── Row actions: the ⋯ menu on a block in the home ──────────────────────
 
 /** Pinned blocks show on top of the home; unread ones show in weight until opened; archived ones leave the tree. */
-export const marks = { pinned: new Set<string>(), unread: new Set<string>(blocks.filter(doc => doc.slug === "yanaka-dusk").map(doc => doc.id)), archived: new Set<string>() }
+export const marks = { pinned: new Set<string>(), unread: new Set<string>(), archived: new Set<string>() }
 const flip = (set: Set<string>, id: string, on = !set.has(id)) => { if (on) set.add(id); else set.delete(id); set_(bump()) }
 const set_ = (patch: Partial<State>) => set(patch)
 
@@ -570,19 +821,24 @@ export const toggleArchive = (id: string) => {
 
 /** Renames a block and keeps its slug so links and connections still resolve. */
 export function renameDoc(id: string, title: string) {
-  const doc = draftOf(id)
-  if (!doc) return
-  doc.title = title.trim()
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc)
-  set(refresh())
+  return update(id, doc => {
+    doc.title = title.trim()
+    doc.updated = today()
+    return true
+  })
 }
 
 /** Removes a block from the vault. Taking a published one down from the home is its own step. */
-export function deleteDoc(id: string) {
-  const held = blockVersion(id)
-  if (!held) return
-  editable().deleteBlock(held.ref, held.version)
+export async function deleteDoc(id: string) {
+  const removed = await serial(async () => {
+    const held = blockVersion(id)
+    if (!held) return false
+    await live().deleteBlock(held.ref, held.version)
+    dropBlock(id)
+    journalOf().syncJournal()
+    return true
+  })
+  if (!removed) return
   bodyReplacements.delete(id)
   for (const s of Object.values(marks)) s.delete(id)
   const wasOpen = state.view.kind === "doc" && state.view.id === id
@@ -590,7 +846,7 @@ export function deleteDoc(id: string) {
   const idx = state.history.indexOf(id)
   const history = state.history.filter(h => h !== id)
   const at = idx >= 0 && idx <= state.at ? state.at - 1 : state.at
-  set({ ...refresh(), history, at, ...(state.reveal?.target === id ? { reveal: null } : {}) })
+  set({ ...bump(), history, at, ...(state.reveal?.target === id ? { reveal: null } : {}) })
   if (!wasOpen) return
   // Deleting the open block lands on the block before it (or after it), never a blank editor.
   const landing = history[at] ?? history[at + 1]
@@ -604,37 +860,15 @@ export function deleteDoc(id: string) {
 /**
  * Renames a channel and refiles its blocks. A post’s address follows on its next publish.
  */
-export function renameChannel(path: string, name: string) {
+export async function renameChannel(path: string, name: string) {
   const next = name.trim().toLowerCase().replace(/\s+/g, "-")
   const to = [...path.split("/").slice(0, -1), next].join("/")
   validateChannel(to)
-  if (to === path) return { published: 0 }
+  if (to === path) return { moved: 0 }
   if (channelRecords.some(channel => channel.path === to)) throw new DOMException(`There is already a channel “${to.replace("/", " › ")}”`, "DataError")
-  const whole = movedWhole(path, to)
-  if (whole) return whole
-  const records = channelRecords.map(channel => ({ ...channel, path: replacePath(channel.path, path, to, true) }))
-  const published = refile(path, to, true)
-  updateChannels(records)
-  set(refresh())
-  return { published }
+  const moved = await relocateChannel(path, to)
+  return { moved: moved.blocks }
 }
-
-/**
- * A channel moved as one folder by a source that can (the home on this computer), in place of moving
- * each block: what used its old path is rewritten there. Null when the source moves block by block.
- */
-function movedWhole(from: string, to: string) {
-  const source = editable()
-  if (!source.moveChannel) return null
-  const inside = (path?: string) => !!path && (path === from || path.startsWith(`${from}/`))
-  const published = blocks.filter(doc => isBlock(doc) && inside(doc.homeChannel) && doc.visibility !== "private").length
-  source.moveChannel(from, to)
-  set(refresh())
-  return { published }
-}
-
-/** The source changed what it holds by itself (the home's bridge answered): read it again. */
-export const sourceChanged = () => set(refresh())
 
 function validateChannel(path: string) {
   if (!isChannelPath(path) || path.length > 120 || path.split("/").length > 2) {
@@ -645,20 +879,6 @@ function validateChannel(path: string) {
 const replacePath = (value: string, from: string, to: string, descendants: boolean) =>
   value === from || (descendants && value.startsWith(`${from}/`)) ? to + value.slice(from.length) : value
 
-function refile(from: string, to: string, descendants: boolean) {
-  let published = 0
-  for (const doc of blocks) {
-    if (!isBlock(doc)) continue
-    const home = doc.homeChannel
-    const next = replacePath(home, from, to, descendants)
-    const channels = doc.channels?.map(path => replacePath(path, from, to, descendants))
-    if (next === home && !channels?.some((path, index) => path !== doc.channels?.[index])) continue
-    persist({ ...doc, homeChannel: next, channels })
-    if (next !== home && doc.visibility !== "private") published++
-  }
-  return published
-}
-
 // ─── History: restore, revert, save, sessions (flows/history.md) ─────────────────────────────
 
 const bodyReplacements = new Map<string, number>()
@@ -668,7 +888,7 @@ export const bodyRevision = (doc: Doc) => bodyReplacements.get(doc.id) ?? source
 
 function markRestored(doc: Doc) {
   bodyReplacements.set(doc.id, ++replacementSequence)
-  set({ ...refresh(), restored: { id: doc.id, n: bodyRevision(doc) } })
+  set({ ...bump(), restored: { id: doc.id, n: bodyRevision(doc) } })
 }
 
 /**
@@ -676,22 +896,26 @@ function markRestored(doc: Doc) {
  * new change, by whoever restored it, so it can itself be undone the same way. A block other people
  * see changes only through the steps that ask first, so it is refused here.
  */
-export function restoreVersion(id: string, version: string, reason?: string) {
-  const doc = draftOf(id)
+export async function restoreVersion(id: string, version: string, reason?: string) {
+  const open = byId(id)
+  if (!open) throw new DOMException("There is no such block", "NotFoundError")
+  if (open.visibility !== "private") throw new DOMException("Restoring changes what others see; it asks first, which is not built yet", "NotAllowedError")
+  const source = live()
   const held = blockVersion(id)
-  if (!doc) throw new DOMException("There is no such block", "NotFoundError")
-  if (doc.visibility !== "private") throw new DOMException("Restoring changes what others see; it asks first, which is not part of this wireframe yet", "NotAllowedError")
-  const source = editable()
-  const entry = held && source.history(held.ref).find(entry => entry.version === version)
-  const snapshot = held
-    ? entry && snap(docOf(held.ref, source.readVersion(held.ref, entry.rev)).doc)
-    : demoJournal().linesFor(id).some(change => change.after === version) && demoJournal().snapshotAt(version)
+  // A kept version at the service first; a version this device saw in the journal otherwise.
+  const kept = held ? (await source.history(held.ref)).find(entry => entry.version === version) : undefined
+  const snapshot: Snapshot | undefined = kept && held
+    ? snap(docOf(held.ref, { ...await source.readVersion(held.ref, kept.rev) }).doc)
+    : journalOf().snapshotAt(version) || undefined
   if (!snapshot) throw new DOMException("There is no such version", "NotFoundError")
-  applySnapshot(doc, snapshot)
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc, { op: "restore", reason: reason?.trim() || `Restored version ${version}` })
-  markRestored(doc)
-  return { id: doc.id, version, by: demoJournal().actor().name }
+  const by = journalOf().actor().name
+  await update(id, doc => {
+    applySnapshot(doc, snapshot)
+    doc.updated = today()
+    return true
+  }, { op: "restore", reason: reason?.trim() || `Restored version ${version}` })
+  markRestored(byId(id)!)
+  return { id, version, by }
 }
 
 /**
@@ -699,24 +923,27 @@ export function restoreVersion(id: string, version: string, reason?: string) {
  * and later changes to other parts stay. If a later change touched the same part, it is refused, and
  * restoring a whole version is the way. Like a restore, it is a new change, so it can be undone too.
  */
-export function revertChange(lineId: string) {
-  const { changeById, snapshotAt } = demoJournal()
+export async function revertChange(lineId: string) {
+  const { changeById, snapshotAt } = journalOf()
   const line = changeById(lineId)
   if (!line) throw new DOMException("There is no such change", "NotFoundError")
   const doc = draftOf(line.node)
   if (!doc) throw new DOMException("That block is gone and cannot be reverted", "NotFoundError")
-  if (doc.visibility !== "private") throw new DOMException("Reverting changes what others see; it asks first, which is not part of this wireframe yet", "NotAllowedError")
+  if (doc.visibility !== "private") throw new DOMException("Reverting changes what others see; it asks first, which is not built yet", "NotAllowedError")
   if (!line.before || line.op === "create") throw new DOMException("This change created the block. Delete the block to undo it.", "DataError")
-  const before = snapshotAt(line.before)!, after = snapshotAt(line.after)!, now = snap(doc)
+  const before = snapshotAt(line.before), after = snapshotAt(line.after), now = snap(doc)
+  if (!before || !after) throw new DOMException("This device doesn't hold that change's versions: restore a kept version instead", "NotFoundError")
   const fields = line.fields as (keyof Snapshot)[]
   if (!fields.length) throw new DOMException("This change changed nothing to revert", "DataError")
   const later = fields.filter(f => JSON.stringify(now[f]) !== JSON.stringify(after[f]))
   const named = [...new Set(later.map(f => ({ body: "text", homeChannel: "home channel", connect: "connections" } as Record<string, string>)[f] ?? f))]
   if (later.length) throw new DOMException(`A later change also touched its ${named.join(" and ")}: restore a whole version instead`, "DataError")
-  applySnapshot(doc, { ...now, ...Object.fromEntries(fields.map(f => [f, before[f]])) } as Snapshot)
-  doc.updated = new Date().toISOString().slice(0, 10)
-  persist(doc, { op: "revert", reason: `Reverted “${line.summary}” (${new Date(line.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })})` })
-  markRestored(doc)
+  await update(doc.id, next => {
+    applySnapshot(next, { ...snap(next), ...Object.fromEntries(fields.map(f => [f, before[f]])) } as Snapshot)
+    next.updated = today()
+    return true
+  }, { op: "revert", reason: `Reverted “${line.summary}” (${new Date(line.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })})` })
+  markRestored(byId(doc.id)!)
   return { id: doc.id, reverted: line.id, fields }
 }
 
@@ -726,18 +953,18 @@ export const focusHistory = (id: string, line: string) => set({ historyFocus: { 
 /** Names the home as it is now, so you or an agent can come back to it. It changes nothing. */
 export function saveNow(name: string, note?: string) {
   if (!name.trim()) throw new DOMException("A save needs a name", "DataError")
-  editable()
-  const line = demoJournal().save(name, note)
+  live()
+  const line = journalOf().save(name, note)
   set(bump())
   return { name: line.name, seq: line.seq }
 }
 
 /** An agent finishing a task: what it did, and the dead ends a later agent should not retry. */
 export function finishSession(done: string, deadEnds: DeadEnd[] = []) {
-  const who = demoJournal().actor()
+  const who = journalOf().actor()
   if (who.kind !== "agent") throw new DOMException("Sessions are written by agents, when they finish a task", "NotAllowedError")
   if (!done.trim()) throw new DOMException("Say in one line what was done", "DataError")
-  const line = demoJournal().recordSession(who, done, deadEnds)
+  const line = journalOf().recordSession(who, done, deadEnds)
   set(bump())
   return { session: line.id, changes: line.changes.length, deadEnds: line.deadEnds.length }
 }

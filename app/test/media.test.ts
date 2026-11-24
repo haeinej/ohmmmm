@@ -7,16 +7,16 @@ import { MarkdownManager } from "@tiptap/markdown"
 import StarterKit from "@tiptap/starter-kit"
 import { blobCid } from "../../vault/vault/core.mjs"
 import { readNode } from "../../vault/vault/node.mjs"
-import { createSampleSource } from "../src/data/sample-source"
 import { blockOf } from "../src/data/source"
 import { byId, isBlock } from "../src/data/workspace-data"
 import { Embed } from "../src/editor/embed"
-import { heldNow, memoryBackend, setMediaBackend } from "../src/media/cache"
+import { heldNow, memoryBackend, serviceNameOf, setMediaBackend } from "../src/media/cache"
 import { assertDurable, embedsIn, temporaryAddresses, unescapeEmbeds } from "../src/media/embeds"
 import { exportBlock, exportNow, preload } from "../src/media/export"
 import { crc32 } from "../src/media/zip"
 import { downloadUrl } from "../src/workspace/drop"
 import { addImage, autosave, createDraft, deleteDoc, open, saveDraft, setSource } from "../src/workspace/store"
+import { createFixtureSource } from "./fixtures/fixture-source"
 
 // A 1×1 PNG, as a synthetic image.
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), c => c.charCodeAt(0))
@@ -45,7 +45,7 @@ function unzip(bytes: Uint8Array) {
 }
 
 async function workspace() {
-  const source = createSampleSource()
+  const source = createFixtureSource()
   await setSource(source)
   return source
 }
@@ -64,6 +64,8 @@ test("an image becomes a private media block named by its CID, and the same byte
     assert.equal(media.slug, "wet-street")
     assert.equal(media.body, "![[wet-street.png]]")
     assert.equal(media.media?.hash, await blobCid(PNG), "the vault's own blob CID")
+    // The bytes went to the home's media store first, under the name the service gives the same digest.
+    assert.deepEqual(await source.media.has([serviceNameOf(media.media!.hash)]), [serviceNameOf(media.media!.hash)])
     assert.equal(media.media?.mime, "image/png")
     assert.equal(media.media?.alt, "Wet street")
     // The file the vault would keep reads back as the same media block, with no browser address.
@@ -77,7 +79,7 @@ test("an image becomes a private media block named by its CID, and the same byte
 
     // A caption beside the image keeps it a media block, with its image.
     open(first.id, "edit")
-    saveDraft({ body: "![[wet-street.png]]\n\nThe street after the rain." })
+    await saveDraft({ body: "![[wet-street.png]]\n\nThe street after the rain." })
     assert.deepEqual([byId(first.id)!.kind, byId(first.id)!.media?.hash], ["media", media.media?.hash])
 
     // The same bytes again, from another channel: no copy; the media block is collected there, as Are.na connects.
@@ -93,8 +95,8 @@ test("an image becomes a private media block named by its CID, and the same byte
 
     await assert.rejects(addImage({ name: "notes.txt", type: "text/plain", bytes: PNG, channel: "photos" }), { name: "DataError" })
   } finally {
-    for (const id of made) deleteDoc(id)
-    await setSource()
+    for (const id of made) await deleteDoc(id)
+    await setSource(null)
   }
 })
 
@@ -105,17 +107,17 @@ test("no save holds a temporary browser address, on any path", async () => {
   assert.throws(() => assertDurable("![a](blob:http://localhost/1)"), { name: "DataError" })
 
   await workspace()
-  const draft = createDraft({ homeChannel: "photos", title: "Temporary images" })
+  const draft = await createDraft({ homeChannel: "photos", title: "Temporary images" })
   try {
-    assert.throws(() => saveDraft({ body: "![street](blob:http://localhost:5190/1234)" }), { name: "DataError" })
+    await assert.rejects(async () => saveDraft({ body: "![street](blob:http://localhost:5190/1234)" }), { name: "DataError" })
     // The editor's flush on leaving goes through autosave.
-    assert.throws(() => autosave(draft.id, { body: "<img src=\"data:image/png;base64,AAAA\">" }), { name: "DataError" })
+    await assert.rejects(async () => autosave(draft.id, { body: "<img src=\"data:image/png;base64,AAAA\">" }), { name: "DataError" })
     assert.equal(byId(draft.id)!.body, "", "nothing was saved")
-    saveDraft({ body: "![street](https://example.test/street.png)" })
+    await saveDraft({ body: "![street](https://example.test/street.png)" })
     assert.equal(byId(draft.id)!.body, "![street](https://example.test/street.png)")
   } finally {
-    deleteDoc(draft.id)
-    await setSource()
+    await deleteDoc(draft.id)
+    await setSource(null)
   }
 })
 
@@ -135,19 +137,19 @@ test("an export carries the image, so it opens after the tab that made it has cl
   const kept = new Map<string, Uint8Array>() // the browser's storage, which outlives a tab
   setMediaBackend(memoryBackend(kept))
   const source = await workspace()
-  const draft = createDraft({ homeChannel: "photos", title: "Evening walk" })
+  const draft = await createDraft({ homeChannel: "photos", title: "Evening walk" })
   let mediaId = ""
   try {
     // Insert a synthetic image, as dropping it in the editor does, then autosave the text that shows it.
     const image = await addImage({ name: "Wet street.png", type: "image/png", bytes: PNG, channel: "photos", alt: "A wet [street] at dusk" })
     mediaId = image.id
-    autosave(draft.id, { body: `Rain all afternoon.\n\n![[${image.slug}]]\n\nThen the light came back.` })
+    await autosave(draft.id, { body: `Rain all afternoon.\n\n![[${image.slug}]]\n\nThen the light came back.` })
     const ref = (await source.listBlocks(["private"])).find(head => head.id === draft.id)!
     const saved = blockOf(await source.readBlock(ref))!.body
     assert.match(saved, /!\[\[wet-street\]\]/, "the autosaved body names the media block")
     assert.doesNotMatch(saved, /blob:|data:/)
     assert.equal(byId(draft.id)!.kind, "text")
-    assert.ok((await source.connections()).some(edge => edge.kind === "embeds" && edge.to.endsWith(image.id)),
+    assert.ok((await source.connections()).some(edge => edge.kind === "embeds" && edge.to.endsWith(byId(image.id)!.vaultId!)),
       "the vault reads the embed as evidence, so the media block shows where it is used")
 
     // Close the tab: nothing it held in memory or as object URLs is left, only the browser's storage.
@@ -183,9 +185,9 @@ test("an export carries the image, so it opens after the tab that made it has cl
     assert.deepEqual([missing.type, missing.missing], ["text/markdown", ["wet-street"]])
     assert.match(new TextDecoder().decode(missing.bytes), /!\[\[wet-street\]\]/)
   } finally {
-    deleteDoc(draft.id)
-    if (mediaId) deleteDoc(mediaId)
-    await setSource()
+    await deleteDoc(draft.id)
+    if (mediaId) await deleteDoc(mediaId)
+    await setSource(null)
     setMediaBackend(memoryBackend())
   }
 })

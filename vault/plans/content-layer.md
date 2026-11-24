@@ -26,8 +26,8 @@ There is no inbox and no review queue. You write or draft with your coding agent
 What keeps you in control, without an inbox:
 
 - **Provenance:** every block an agent made says so (`by: agent:<name>`), and every change goes into the journal with who made it. History keeps each version, so anything can be put back.
-- **Visibility:** what an agent writes starts private (or in the channel's layer if that is narrower), until you move it. Showing a block to more people is always yours (standard.site plan, step 2).
-- **Grants:** an agent writes only where you granted it (`ohm vault grant`, `.vault/grants.json`). Setting up a home (`design-home`) ends by granting the channels you agreed.
+- **Visibility:** what an agent writes starts private, until you move it (decided 24 November 2026). Showing a block to more people is always yours (standard.site plan, step 2).
+- **Grants:** an agent writes only where you granted it (`ohm vault grant`, `.vault/grants.json`). Setting up a home (`design-home`) ends by granting the agent `write` on every channel it set up with you (decided 24 November 2026).
 - **Labels:** still the owner's words. The agent proposes and asks; it never decides.
 
 ## Remove the inbox
@@ -81,9 +81,21 @@ The mirror, the feed Worker rendering pages, and identical rebuilds. They keep w
 
 Who builds which, and the prompts to start them: [docs/handoff/content-layer-split.md](../../docs/handoff/content-layer-split.md).
 
+## Content reads: decided (24 November 2026)
+
+- Requests are `com.ohmmmm.content.*`: `listChannels`, `getChannel`, `listBlocks`, `getBlock` and `getMedia`, by the member's DID. There is one set, and the caller decides the layer: with no token the answer is public; with a viewer token from a friend it is public and Friends; a viewer who isn't a friend gets exactly the public answer; private is never returned.
+- **Public is what is on the PDS**, read from there. A post marked public but not yet published is not shown.
+- A channel is listed when it holds something the viewer may see.
+- Friends reads use a **short-lived viewer token**. ohm posts it back to the site through `content.view`, only to one of the member's listed sites (`content.addSite`, which only the member, signed in to ohm, can call).
+- Who sees what is decided in one place (`audienceOf`/`sees` in `service/src/content.mjs`), so a later audience of named people for one block is a rule there, not a new set of requests.
+
+## Visibility moves: decided (24 November 2026)
+
+See the standard.site plan › Visibility moves: decided. That plan also leaves room for an audience of named people: a later rule in the shared visibility rules and in content's `audienceOf`/`sees`.
+
 ## Open: the owner's calls
 
-- Where an agent's new block starts: private (proposed here), or the channel's layer.
-- Whether `design-home` grants the agent `write` on every channel it set up, or only those you name.
+- ~~Where an agent's new block starts~~: **private**, always (decided 24 November 2026). `addToVault`, `vault_capture` and a new block through `vault_write` all write `visibility: private`.
+- ~~Whether `design-home` grants `write` on every channel it set up, or only those you name~~: **every channel it set up** (decided 24 November 2026). The skill is on PR #34 and changes there.
 - The loader's package name and whether it lives in this repo (`vault/astro/`) or its own.
 - The standard.site plan's open questions still stand.

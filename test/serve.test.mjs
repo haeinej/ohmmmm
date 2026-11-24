@@ -16,7 +16,7 @@ import { addAgent, AGENT_KEY, AGENT_KEYS, agentKeys, APP, APP_KEYS, appKeys, bro
 import { blobCid } from '../vault/vault/core.mjs';
 import { readEvents } from '../vault/vault/journal.mjs';
 import { readNode } from '../vault/vault/node.mjs';
-import { layerOf } from '../vault/vault/visibility.mjs';
+import { layerOf } from '../vault/vault/visibility-folder.mjs';
 
 // A 1×1 PNG, as a synthetic image.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');

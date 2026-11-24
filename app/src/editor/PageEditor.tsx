@@ -32,7 +32,7 @@ import { isBlock, locationOf, bySlug, channelRecords, channelsOf, blocks, titleO
 import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
 import { DOC_DRAG, dragOut, openDropped, saveExport } from "@/workspace/drop"
-import { addImage, autosave, bodyRevision, canGo, go, marks, MAX_IMAGE_BYTES, me, moveBlock, open, openFile, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
+import { addImage, autosave, bodyRevision, canGo, go, marks, MAX_IMAGE_BYTES, me, moveBlock, open, openFile, report, revealFolder, saveDraft, setIcon, showGraph, toggleArchive, useWorkspace } from "@/workspace/store"
 import { exportBlock, exportNow, preload } from "@/media/export"
 import { unescapeEmbeds } from "@/media/embeds"
 import { InlineRename, requestDelete } from "@/workspace/PageActions"
@@ -180,8 +180,8 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
                 {/* Moves the block from its home channel, the one its address comes from. */}
                 {destinations.map(f => (
                   <DropdownMenuCheckboxItem key={f} checked={f === here} onCheckedChange={() => {
-                    const { published } = moveBlock(doc.id, here, f)
-                    notify({ message: `Moved to ${f.replace("/", " › ")}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })
+                    void report(moveBlock(doc.id, here, f).then(({ published }) =>
+                      notify({ message: `Moved to ${f.replace("/", " › ")}${published ? ". Its address changes when you next publish" : ""}`, tone: "info" })))
                     setMenu(false)
                   }}>{f.replace("/", " › ")}</DropdownMenuCheckboxItem>
                 ))}
@@ -267,8 +267,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
     const body = unsaved.current
     unsaved.current = null
     if (body === null || bodyRevision(doc) !== base.current) return
-    try { autosave(doc.id, { body }) }
-    catch (error) { notify({ message: error instanceof Error ? error.message : "This block could not be saved" }) }
+    void report(autosave(doc.id, { body }))
   }
 
   const editor = useEditor({
@@ -345,7 +344,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
   useEffect(() => {
     if (!offer || !editor) return
     const ac = new AbortController()
-    registerStepTool<{ title?: string; body?: string }, ReturnType<typeof saveDraft>>({
+    registerStepTool<{ title?: string; body?: string }, Awaited<ReturnType<typeof saveDraft>>>({
       name: "workspace.save-draft",
       title: "Save draft",
       description: "Saves the block open in the editor as private. It is never published. Fields left out keep what is on the block. The body is Markdown. Returns its id and slug.",
@@ -358,7 +357,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
       run: withAgent("Saving draft", async input => {
         // Not as you typing: the agent's text is saved once, as its change, not again as your autosave.
         if (input.body !== undefined) editor.commands.setContent(input.body, { contentType: "markdown", emitUpdate: false })
-        const out = saveDraft({ title: input.title ?? titleRef.current?.value ?? doc.title, body: toMarkdown(editor) })
+        const out = await saveDraft({ title: input.title ?? titleRef.current?.value ?? doc.title, body: toMarkdown(editor) })
         dropPending()
         notify({ message: "Saved as private", tone: "info" })
         return out
@@ -397,7 +396,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
         // As with Save draft: the agent's change is saved once, as its own, not again as your autosave.
         const body = `${toMarkdown(editor).trimEnd()}\n\n![[${added.slug}]]\n`
         editor.commands.setContent(body, { contentType: "markdown", emitUpdate: false })
-        saveDraft({ body: toMarkdown(editor) })
+        await saveDraft({ body: toMarkdown(editor) })
         dropPending()
         return { ...added, next: "workspace.save-draft" }
       }),
@@ -494,7 +493,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
                   <Icon icon={SmilePlusIcon} size="sm" />
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-auto">
-                  <IconPicker value={doc.icon} onPick={e => { setIcon(doc.id, e); setIconOpen(false) }} />
+                  <IconPicker value={doc.icon} onPick={e => { void report(setIcon(doc.id, e)); setIconOpen(false) }} />
                 </PopoverContent>
               </Popover>
             )}
@@ -502,7 +501,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
               onChange={e => {
                 const next = e.target.value
                 setTitleDraft(next)
-                autosave(doc.id, { title: next })
+                void report(autosave(doc.id, { title: next }))
               }}
               onBlur={() => setTitleDraft(null)}
               onKeyDown={e => {
@@ -551,7 +550,7 @@ export function PageEditor({ doc }: { doc: Doc }) {
       <input ref={imageInput} type="file" accept="image/*" multiple hidden
         onChange={e => { if (doc.homeChannel) void insertImageFiles(editor, [...(e.target.files ?? [])], doc.homeChannel); e.target.value = "" }} />
       <input ref={fileInput} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden
-        onChange={async e => { const f = e.target.files?.[0]; if (f) openFile(f.name, await f.text()); e.target.value = "" }} />
+        onChange={async e => { const f = e.target.files?.[0]; if (f) void report(openFile(f.name, await f.text())); e.target.value = "" }} />
 
       {editable && <SelectionToolbar editor={editor} docId={doc.id} />}
       <SlashMenu />

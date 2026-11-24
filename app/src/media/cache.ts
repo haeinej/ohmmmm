@@ -160,3 +160,23 @@ export async function makeSizes(cid: string, bytes: Uint8Array, type: string): P
   } catch { /* sizes are a convenience; the original is kept either way */ }
   return made
 }
+
+/**
+ * The vault service's name for bytes (`sha256-<hex>`, source.ts `mediaName`) from their CID here: a
+ * raw CIDv1 is `b` and base32 of [1, 0x55, 0x12, 0x20, ...the SHA-256 digest], so both name the same digest.
+ */
+export function serviceNameOf(cid: string): string {
+  // Already the service's name: a media record read from the service keeps it as its hash.
+  if (/^sha256-[0-9a-f]{64}$/.test(cid)) return cid
+  if (!/^b[a-z2-7]+$/.test(cid)) throw new DOMException("Not a CID", "DataError")
+  const alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+  let bits = 0, value = 0
+  const bytes: number[] = []
+  for (const char of cid.slice(1)) {
+    value = (value << 5) | alphabet.indexOf(char)
+    bits += 5
+    if (bits >= 8) { bytes.push((value >>> (bits - 8)) & 0xff); bits -= 8 }
+  }
+  if (bytes.length !== 36 || bytes[0] !== 1 || bytes[1] !== 0x55 || bytes[2] !== 0x12 || bytes[3] !== 0x20) throw new DOMException("Not a raw SHA-256 CID", "DataError")
+  return `sha256-${bytes.slice(4).map(byte => byte.toString(16).padStart(2, "0")).join("")}`
+}

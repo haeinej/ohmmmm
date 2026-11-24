@@ -1,73 +1,135 @@
-// Who can see a block, in the home folder (vault/vault/visibility.mjs): a move between private and
-// friends rewrites the block's `visibility`; public goes through Publish; and an agent never changes it,
-// only asks. Every note here is invented.
+// Visibility moves (vault/visibility.mjs, service/src/visibility.mjs, the vault_set_visibility tool):
+// one set of rules; only the member shows a block to more people; an agent asks, or with a grant hides
+// a block on its way to private; every move is journalled by ID. Every person here is invented.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createLocalTools } from '../mcp/local.mjs';
-import { blobCid } from '../vault/core.mjs';
-import { readNode } from '../vault/node.mjs';
-import { decideRequest, layerOf, readRequests, withVisibility } from '../vault/visibility.mjs';
+import { createTools } from '../mcp/tools.mjs';
+import { blockStore } from '../service/src/blocks.mjs';
+import { links } from '../service/src/ohm.mjs';
+import { createService } from '../service/src/worker.mjs';
+import { newPostId } from '../vault/file.mjs';
+import { planMove, whyNot } from '../vault/visibility.mjs';
+import { testDatabase } from './d1.mjs';
 
-test('a move rewrites visibility, keeps a plain note a block, and leaves public to Publish', () => {
-  const plain = '---\ntitle: Slow walk\n---\n\nYanaka.\n';
-  const friends = withVisibility('notes/walk.md', plain, 'friends');
-  assert.equal(friends, '---\ntitle: Slow walk\nkind: text\nvisibility: friends\n---\n\nYanaka.\n');
-  const read = readNode('notes/walk.md', friends).node;
-  assert.deepEqual([read.kind, read.visibility, read.post], ['text', 'friends', undefined], 'still a block, not a post');
-  assert.equal(layerOf('notes/walk.md', withVisibility('notes/walk.md', friends, 'private')), 'private');
-  assert.doesNotMatch(withVisibility('notes/walk.md', friends, 'private'), /visibility/, 'private is the default, so it is not written');
-  assert.equal(withVisibility('notes/walk.md', plain, 'private'), plain, 'no move, no change');
-  assert.throws(() => withVisibility('notes/walk.md', plain, 'public'), /goes through Publish/);
-  assert.throws(() => withVisibility('essays/on-rain.md', '---\ntitle: On rain\nvisibility: public\n---\n\nPublished.\n', 'private'), /goes through Publish/);
-  assert.throws(() => withVisibility('notes/_channel.md', '---\ntitle: Notes\n---\n', 'friends'), /Only a block/);
+const ada = 'did:web:pds.ada.test';
+const bo = 'did:web:pds.bo.test';
+const APP = 'https://app.ohmmmm.test';
+let made = 0;
+const id = () => newPostId(Date.parse('2026-11-24T00:00:00Z') + made++, 4);
+
+test('the rules: what each move does, and who may finish it', () => {
+  assert.deepEqual(['private>friends', 'friends>private', 'friends>public', 'public>private'].map(pair => {
+    const [from, to] = pair.split('>');
+    const move = planMove({ from, to, title: 'A walk' });
+    return [move.action, move.widens, move.finishes, move.via];
+  }), [
+    ['share', true, 'member', 'device'], ['seal', false, 'member-or-granted-agent', 'device'],
+    ['publish', true, 'member', 'publish'], ['takedown', false, 'member', 'publish'],
+  ]);
+  assert.deepEqual(planMove({ from: 'friends', to: 'public' }).needs, ['title']);
+  assert.throws(() => planMove({ from: 'friends', to: 'friends' }), { code: 'InvalidMove' });
+  const seal = planMove({ from: 'friends', to: 'private' }), share = planMove({ from: 'private', to: 'friends' });
+  assert.equal(whyNot(seal, { actor: 'agent:helper', granted: true }), null);
+  assert.match(whyNot(seal, { actor: 'agent:helper', granted: false }), /no write grant/);
+  // A grant never lets an agent show a block to more people, or take a published one down.
+  assert.match(whyNot(share, { actor: 'agent:helper', granted: true }), /Only the person/);
+  assert.match(whyNot(planMove({ from: 'public', to: 'private', title: 'x' }), { actor: 'agent:helper', granted: true }), /Only the person/);
+  assert.equal(whyNot(share, { actor: 'me' }), null);
+  assert.match(whyNot(planMove({ from: 'friends', to: 'public' }), { actor: 'me' }), /needs a title/);
 });
 
-async function setUp(t, rights) {
-  const vault = await mkdtemp(join(tmpdir(), 'vault-visibility-'));
-  t.after(() => rm(vault, { recursive: true, force: true }));
-  await mkdir(join(vault, 'notes'), { recursive: true });
-  await mkdir(join(vault, '.vault'), { recursive: true });
-  await writeFile(join(vault, 'notes/walk.md'), '---\ntitle: Slow walk\n---\n\nYanaka.\n');
-  await writeFile(join(vault, '.vault/grants.json'), JSON.stringify({ agents: { helper: rights } }));
-  const tools = createLocalTools({ vault, by: 'agent:helper', DatabaseSync });
-  await tools.call('vault_index');
-  return { vault, call: tools.call };
+async function setUp({ grant = null } = {}) {
+  const env = { DB: await testDatabase(), MEMBERS: '*', OHM_APP_ORIGIN: APP };
+  const sessions = new Map([['session=ada', { id: 'u-ada' }]]);
+  await links(env.DB).connect('u-ada', ada);
+  const get = async (url, options) => (String(url) === `${APP}/api/auth/get-session` ? Response.json({ user: sessions.get(options.headers.Cookie) ?? null }) : Response.json({ records: [] }));
+  // A member's token here is their DID, as in the MCP tests.
+  const service = createService({ whoIs: Object.assign(async request => request.headers.get('Authorization').slice(7), { pdsFor: async () => 'https://pds.ada.test' }), get });
+  const ask = async (name, { query, body, as = ada, cookie } = {}) => {
+    const url = new URL(`https://vault.ohmmmm.test/xrpc/com.ohmmmm.vault.${name}`);
+    if (query) url.search = new URLSearchParams(query);
+    const response = await service(new Request(url, {
+      method: body ? 'POST' : 'GET',
+      headers: { ...(cookie ? { Cookie: cookie, Origin: APP } : { Authorization: `Bearer ${as}` }), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }), env);
+    const data = await response.json();
+    if (!response.ok) throw Object.assign(new Error(data.message), { code: data.error });
+    return data;
+  };
+  const vault = {
+    tree: () => ask('getTree'), get: postId => ask('getPost', { query: { id: postId } }),
+    getBlock: blockId => ask('getBlock', { query: { id: blockId } }),
+    previewMove: (blockId, to) => ask('previewMove', { query: { id: blockId, to } }),
+    hideBlock: move => ask('hideBlock', { body: move }), requestMove: move => ask('requestMove', { body: move }),
+  };
+  const tools = createTools({ vault, by: 'agent:helper', grants: { allowed: async (right, path) => Boolean(grant && right === 'write' && path.startsWith(`${grant}/`)) } });
+  const blocks = blockStore(env.DB);
+  const walk = id();
+  await blocks.write(ada, { id: walk, path: 'walks/yanaka.md', text: '---\nkind: text\nvisibility: friends\ntitle: Yanaka\n---\n\nA slow walk.\n' });
+  await blocks.addFriend(ada, bo);
+  return { env, ask, tools, walk };
 }
-const address = text => blobCid(Buffer.from(text, 'utf8'));
+const twice = async (tools, args) => tools.call('vault_set_visibility', { ...args, confirm: (await tools.call('vault_set_visibility', args)).confirm });
 
-test('an agent never changes who can see a block, even with a write grant: it asks, and the person decides', async t => {
-  const { vault, call } = await setUp(t, { write: ['notes'] });
-  const walk = '---\ntitle: Slow walk\n---\n\nYanaka.\n';
-  await assert.rejects(call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\nkind: text\nvisibility: friends\n---\n\nYanaka.\n', replaces: await address(walk) }), /ask with vault_request_visibility/);
-  await assert.rejects(call('vault_write', { path: 'notes/new.md', text: '---\ntitle: New\nkind: text\nvisibility: friends\n---\n\nHi.\n' }), /ask with vault_request_visibility/);
-  // Writing within its grant, in the same layer, still works.
-  const kept = await call('vault_write', { path: 'notes/walk.md', text: '---\ntitle: Slow walk\n---\n\nYanaka, in the rain.\n', replaces: await address(walk) });
-  // Nor through a kept version in another layer.
-  await writeFile(join(vault, 'notes/walk.md'), '---\ntitle: Slow walk\nkind: text\nvisibility: friends\n---\n\nShared.\n');
-  await call('vault_index');
-  await assert.rejects(call('vault_restore', { path: 'notes/walk.md', to: kept.hash, replaces: await address('---\ntitle: Slow walk\nkind: text\nvisibility: friends\n---\n\nShared.\n') }), /ask with vault_request_visibility/);
-
-  // It asks instead; asking twice is the same request; public is refused.
-  const asked = await call('vault_request_visibility', { ref: 'walk', to: 'private', why: 'It mentions a friend by name.' });
-  assert.deepEqual([asked.path, asked.from, asked.to, asked.status], ['notes/walk.md', 'friends', 'private', 'waiting']);
-  assert.equal((await call('vault_request_visibility', { ref: 'walk', to: 'private' })).request, asked.request);
-  await assert.rejects(call('vault_request_visibility', { ref: 'walk', to: 'public' }), /goes through Publish/);
-  assert.deepEqual(await call('vault_request_visibility', { ref: 'walk', to: 'friends' }), { path: 'notes/walk.md', visibility: 'friends', unchanged: true });
-
-  // The person decides (the bridge does this for the app); the agent sees how it went.
-  await decideRequest(vault, asked.request, 'declined');
-  const { requests } = await call('vault_requests', {});
-  assert.deepEqual(requests.map(each => [each.status, each.to, each.why]), [['declined', 'private', 'It mentions a friend by name.']]);
-  assert.equal((await readRequests(vault)).length, 1);
-  await assert.rejects(decideRequest(vault, asked.request, 'approved'), /declined already/);
+test('an agent with a write grant hides a friends-only block on its way to private: friends stop reading it at once', async () => {
+  const { ask, tools, walk } = await setUp({ grant: 'walks' });
+  assert.equal((await ask('listShared', { query: { owner: ada }, as: bo })).blocks.length, 1);
+  const shown = await tools.call('vault_set_visibility', { key: walk, to: 'private', reason: 'Too personal.' });
+  assert.match(shown.willHappen.outcome, /Friends stop reading it now/);
+  const done = await tools.call('vault_set_visibility', { key: walk, to: 'private', reason: 'Too personal.', confirm: shown.confirm });
+  assert.equal(done.hidden, true);
+  // No friend reads it; the member still holds it, marked as leaving, for their device to seal.
+  assert.deepEqual((await ask('listShared', { query: { owner: ada }, as: bo })).blocks, []);
+  await assert.rejects(ask('getShared', { query: { owner: ada, id: walk }, as: bo }), { code: 'NotFound' });
+  assert.ok((await ask('listBlocks')).blocks.find(block => block.id === walk).leaving);
+  // The device seals it, and records the move done.
+  await ask('recordMove', { body: { block: walk, from: 'friends', to: 'private', sealedAs: 'opaque-1' }, cookie: 'session=ada' });
+  const { moves } = await ask('listMoves');
+  assert.deepEqual(moves.map(move => [move.block, move.action, move.state, move.askedBy, move.approvedBy ?? null]), [
+    ['opaque-1', 'seal', 'done', 'me', 'me'], [walk, 'seal', 'hidden', 'agent:helper', 'agent:helper'],
+  ]);
+  assert.equal(moves[1].reason, 'Too personal.');
+  // The journal holds IDs, never titles or text.
+  assert.doesNotMatch(JSON.stringify(moves), /Yanaka|slow walk/);
 });
 
-test('asking needs no grant: approval is the gate', async t => {
-  const { call } = await setUp(t, {});
-  const asked = await call('vault_request_visibility', { ref: 'walk', to: 'friends', why: 'To share with June.' });
-  assert.equal(asked.status, 'waiting');
+test('without a grant, or to show a block to more people, an agent only asks; only the member answers', async () => {
+  const { ask, tools, walk } = await setUp();
+  const narrow = await twice(tools, { key: walk, to: 'private' });
+  assert.equal(narrow.requested, true);
+  assert.equal((await ask('listShared', { query: { owner: ada }, as: bo })).blocks.length, 1, 'still shared until the member acts');
+  const { requests } = await ask('listMoveRequests');
+  assert.deepEqual(requests.map(request => [request.block, request.from, request.to, request.askedBy, request.state]), [[walk, 'friends', 'private', 'agent:helper', 'waiting']]);
+
+  // Only the member, signed in to ohm, answers. Their PDS token, as an agent holds it, cannot.
+  await assert.rejects(ask('declineMoveRequest', { body: { id: requests[0].id } }), { code: 'SignInRequired' });
+  await assert.rejects(ask('recordMove', { body: { block: walk, from: 'friends', to: 'private', request: requests[0].id } }), { code: 'SignInRequired' });
+  // A record must be the move asked for.
+  await assert.rejects(ask('recordMove', { body: { block: walk, from: 'friends', to: 'public', request: requests[0].id }, cookie: 'session=ada' }), { code: 'NotThisMove' });
+  assert.deepEqual(await ask('declineMoveRequest', { body: { id: requests[0].id, reason: 'Keep sharing it.' }, cookie: 'session=ada' }), { id: requests[0].id, declined: true });
+  await assert.rejects(ask('declineMoveRequest', { body: { id: requests[0].id }, cookie: 'session=ada' }), { code: 'Answered' });
+  assert.deepEqual((await ask('listMoveRequests')).requests, []);
+
+  // A request to show it to everyone waits too, and approving it is recorded with who asked.
+  const wider = await twice(tools, { key: walk, to: 'public', reason: 'Ready.' });
+  const recorded = await ask('recordMove', { body: { block: walk, from: 'friends', to: 'public', request: wider.request }, cookie: 'session=ada' });
+  assert.deepEqual([recorded.state, recorded.approved], ['previewed', true]);
+  const latest = (await ask('listMoves')).moves[0];
+  assert.deepEqual([latest.action, latest.askedBy, latest.approvedBy, latest.request], ['publish', 'agent:helper', 'me', wider.request]);
+  // A request is never made in the member's own name.
+  await assert.rejects(ask('requestMove', { body: { block: walk, store: 'block', from: 'friends', to: 'public', by: 'me' } }), { code: 'InvalidRequest' });
+});
+
+test('a hidden block is not on a site either, and saving it again keeps it hidden until it is sealed', async () => {
+  const { env, ask, walk } = await setUp({ grant: 'walks' });
+  const { version } = await ask('getBlock', { query: { id: walk } });
+  await ask('hideBlock', { body: { id: walk, replaces: version, by: 'agent:helper' } });
+  const { contentStore } = await import('../service/src/content.mjs');
+  const content = contentStore(env.DB, { get: async () => Response.json({ records: [] }), pdsFor: async () => 'https://pds.ada.test' });
+  assert.deepEqual((await content.listBlocks(await content.audience(ada, bo))).blocks, []);
+  const saved = await blockStore(env.DB).write(ada, { id: walk, path: 'walks/yanaka.md', text: '---\nkind: text\nvisibility: friends\ntitle: Yanaka\n---\n\nA slower walk.\n' }, { replaces: version });
+  assert.ok(saved.version);
+  assert.deepEqual((await ask('listShared', { query: { owner: ada }, as: bo })).blocks, []);
+  await assert.rejects(ask('hideBlock', { body: { id: walk, replaces: 'old', by: 'agent:helper' } }), { code: 'Changed' });
 });

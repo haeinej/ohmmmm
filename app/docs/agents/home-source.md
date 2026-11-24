@@ -1,97 +1,54 @@
 # App data sources
 
-[HomeSource](../../src/data/source.ts) is the browser data contract for versioned
-vault files, ordered channels, evidence, entities, sources, search, history,
-visibility, Friends and the publish plan. [The workspace guide](../../README.md)
-walks through the sample experience. The [workspace store](../../src/workspace/store.ts)
-selects the adapter with `setSource()`. The default is the sample adapter.
-The store projects the selected source's account, blocks, channels and evidence
-for synchronous React reads. Sample edits call `saveBlock` or `deleteBlock`
-with the projected version, then refresh the projection. The sample also
-implements `saveChannels` for channel records and `markVisibility` for audience
-previews. History restore reads the source's kept version. Search, the graph,
-and both views of the connections card use the selected source. Cortex, inbox
-and the prototype's journal metadata remain sample features. Sample channel
-renames preserve the UI record ID through the synthetic `sampleId` property.
-Evidence keys still use the channel path.
+The app is **production first**. [HomeSource](../../src/data/source.ts) is the browser data contract for the member's home, and the one the app runs on is the vault service's: [`createServiceSource`](../../src/data/service-source.ts) over the same-origin `/vault/xrpc/com.ohmmmm.*` requests ([CAPABILITIES.md](../../../vault/service/CAPABILITIES.md) is the reference). There is no sample data in `src/`. Synthetic fixtures live in [`test/fixtures/`](../../test/fixtures/) behind `createFixtureSource()`, for tests only.
 
-There are zero direct fixture imports outside the sample adapter. The file
-[`workspace-model.ts`](../../src/data/workspace-model.ts) holds view types and
-pure helpers, and [`workspace-data.ts`](../../src/data/workspace-data.ts) holds
-the projection. Use `createSampleSource()` for an independent fixture in tests.
+## Choosing the source
 
-Call and await `setSource({ service: { origin, did } })` to construct and select
-a service adapter, or pass a constructed adapter to `setSource(source)`. The
-workspace exposes a read-only public and Friends projection for service adapter
-verification. The app starts on samples and live session integration is a later
-step. The local source, `createLocalSource` in `src/data/local-source.ts`, reads
-the home through `ohmmmm serve` and is a `Workspace` like the sample: the store
-edits it at once, and it writes each change back to the file, merged, over the
-version read. Its contract, and what it does not do yet, are in
-[docs/serve.md](../../../docs/serve.md#for-agents-the-contract). `Workspace`
-(`workspace-data.ts`) is any source with the workspace's own part; `sampleWorkspace()`
-returns either.
+On load, [`connectHome()`](../../src/workspace/store.ts) asks `com.ohmmmm.account.get` who is signed in on this origin. With a connected DID it selects `createServiceSource({ origin, did, privateSession })`; otherwise it selects nothing, and the workspace shows sign-in. `setSource(source)` selects a source directly (tests pass the fixture) and `setSource(null)` signs out. `signOut()` ends the ohm session and does the same.
 
-Use `listBlocks` and `readBlock` to find a file and its version. Pass that exact
-version as `replaces` to update it, or `null` to create it. Refresh and review the
-current file after a conflict. `vault()` returns the canonical
-[`readVault`](../../../vault/vault/node.mjs) view, including entities and sources.
-Use `vault.items(channel)` for resolved order and `connections()` for the vault's
-evidence edges. This interface serves the workspace. Cortex continues to read
-through its [read-only vault contract](../../../contract/vault-reader.mjs).
+Paired with `ohmmmm serve`, [`main.tsx`](../../src/main.tsx) selects the home on this computer instead: `createLocalSource` in [`src/data/local-source.ts`](../../src/data/local-source.ts), which answers the same `HomeSource` through the bridge ([docs/serve.md](../../../docs/serve.md#for-agents-the-contract)). If the bridge does not answer, the app falls back to the service.
 
-`createServiceSource({ origin, did })` uses the member's same-origin
-`/vault/xrpc/*` session. The DID selects the signed-in account's vault. The
-[service](../../../vault/service/CAPABILITIES.md) validates access. Shared reads
-require `sharedServiceToken` for the reader's DID and the exact request method.
-Use the account app's browser `packages/keys` exports as `privateSession.keys` and
-supply the active DID and unlocked keyring through `privateSession.unlocked`.
-The callback returns `null` on lock. Private reads and writes use the package's
-`vaultPrivateFiles` with `openFile` and `sealFile`. Sealed files carry a UTF-8 JSON
-vault file with `path` and `text` inside. When unlocked, search matches locally
-and the query stays on the device. With the private layer locked, search covers
-public and Friends content.
+[`workspace-data.ts`](../../src/data/workspace-data.ts) holds the projection for synchronous React reads: blocks, the cortex, channel records, entities, evidence, the agenda and the journal. `selectSource` reads every block once (all three layers when the private layer opens, the shared two when it is locked), every channel file, the cortex and its journal, and the agenda. A file that can't be read (it changed layer since the list, or its key isn't on this device) is left out and counted in `unreadable`; a failed load leaves the home as it was shown. `homeStatus()` is `signed-out`, `loading` or `ready`; `privateLayer` and `cortexState` are `open`, `locked` or `unavailable`.
 
-Call `visibilityMove` before asking the member to confirm. A Friends-to-private
-move writes the sealed copy first, then removes the readable copy using its
-original version. `cleanupPending` means the destination write succeeded and
-removal requires review. For a private destination, supply a random opaque
-storage ID and keep it with the pending move so you can inspect the destination
-if a write response is lost. The vault TID stays inside the sealed file.
-A private-to-Friends copy discloses its contents to
-the vault service and friends. Publication starts with `publishPlan`, which
-previews the changes. The member-facing confirmation and publishing flows can
-use these operations when connected. On the home on this computer, publishing
-one block is built: the local source's `planPublish`, `publishBlock` and
-`unpublishBlock` call the bridge, which holds the app password
-([docs/serve.md](../../../docs/serve.md), "Publishing").
+## Writes
 
-After `npm ci --prefix app`, run `npm --prefix app run build` and
-`npm --prefix app test` with only the app installed. Vite and the Node test
-resolver both use the app's Markdown packages when loading the shared vault
-renderer. CI runs the app tests before installing vault dependencies. For the
-whole repository suite, install the vault and vault service dependencies as
-listed in the [root README](../../../README.md) and run `npm test`. The app
-typecheck includes test files. Adapter tests cover
-the selected workspace, compare-and-set, XRPC routing and a synthetic keys
-fixture. Live sign-in, the account app's unlock screens, and publishing
-through the vault service await app integration and live verification. Kept versions in the service
-adapter currently cover private files. The local source's history starts from
-the vault's own journal (`/vault/journal`, `pastChanges`), and it moves blocks and
-channels through the bridge's rename.
+Every handler in the [store](../../src/workspace/store.ts) is async and writes to the source first, one at a time (`serial`), naming the version the source last gave as `replaces`. The projection changes only after the source answers (`landBlock`, `landChannel`, `landCortex`, `dropBlock`, …), and evidence is recomputed locally from the files held. A UI call that doesn't wait goes through `report()`, so a refused write (a conflict, `AccountChanged`, `PrivateLocked`) becomes a notice instead of disappearing. After a conflict, `reload()` reads the home again.
+
+- **Blocks:** `saveBlock` / `deleteBlock` with compare-and-set. A save starts from the file the source gave (`fileOf(doc, held)`) and changes only what the workspace edits, so a media record's origin, hash and alt text, an excerpt's source, tags and `created` are kept; cortex files likewise (`cortexFileOf(doc, held)`). A new block is private: an opaque storage ID (`newOpaqueId`), with its vault TID inside the sealed file (`Doc.vaultId`). Writing one needs an unlocked device.
+- **Channels:** `channels.list/read/save/move/remove`, each a `_channel.md` with its own version. The path in this API is the channel's path, not the file's. Order and identity (`id`, a TID) are properties of the file, so a moved channel keeps its identity and its evidence key (`channel:<id>`). `move` moves every channel inside and every readable block at the service in one batch; the store then refiles sealed blocks on the device and reads the home again, even if that fails partway. Moving, renaming or removing a channel is refused while the private layer is locked, since sealed blocks filed in it could not follow. A channel holding published posts is refused (`HasPosts`). A channel's `order` lists readable blocks only: a private block's slug never goes into the readable `_channel.md`, and its place waits for the sealed private overlay.
+- **Visibility:** one handler, `setVisibility(id, to, { request?, reason? })`, for the control, an approved request and `visibility.move`. `previewMove` is the shared rules (`vault/vault/visibility.mjs`). Friends ↔ private goes through `moveVisibility` (copy, then remove); a post to or from public is changed in place with `saveBlock` and returns `publish`, `moves.publishPage(id)` (the vault page with `?publish=<id>`, which calls `getPublishPlan?only=<id>`). A non-post block to public and public → private are refused (`NotSupportedError`). Every move calls `moves.record` (`vault.recordMove`, ohm session only) with `sealedAs`, `cleanupPending` and `request`.
+- **Move requests:** `moves.requests()` (`listMoveRequests`) is loaded when the home opens and when the bell opens; `approveMoveRequest` checks the request's pinned `version` against the held one (sealed blocks excepted) and calls `setVisibility` with `request`; `declineMoveRequest` calls `declineMoveRequest`. `sealHidden()` seals every friends head with `leaving` once the private layer is open.
+- **No inbox.** `HomeSource` has no `inbox`, and the projection no `inbox` list. An agent's block is an ordinary block in `blocks`, with `by: agent:<name>`, private until the member moves it. A legacy `status: proposed` reads as no status.
+- **Cortex:** `cortex.list/read/save/saveMany/remove/history/readVersion/journal`, the same rules as the private layer: `{ id, ciphertext, version }`, sealed and opened on the device under the context `ohm-vault/cortex/v1`, with sealed journal entries (file ID `journal`). A cortex file is `profile.md`, `observations/<slug>.md`, `skills/<slug>.md` or `tools/<slug>.md` ([cortex-document.ts](../../src/data/cortex-document.ts)).
+- **Media:** `media.has/put/get/rendition`. A media record is a block of kind `media` with `origin`, hash and metadata; only the bytes go to the cache, raw, under their content address (`mediaName`, `sha256-<hex>`).
+- **The home on this computer** (`createLocalSource`): blocks merged into their files over the version read (If-Match); channels as their `_channel.md` files, moved as one folder through the bridge's rename; `moveVisibility` rewrites the file's `visibility` (one store, so the ID stays); `moves` are the folder's `.vault/requests.json`, and `record` with a `request` marks it approved; public goes through its own Publish dialog (`planPublish`, `publishBlock`, `unpublishBlock`), not `moves.publishPage`. A media block's bytes go to the home with the block. History is the vault's own journal as it was when the home was read. The cortex and the agenda are not read through the bridge yet and refuse with `NotSupportedError`, so the cortex shows as unavailable.
+- **Agenda:** `agenda()` is the service's counts of what waits (`unlabelled` posts and `mediaWithoutAlt`), from the readable layers.
+
+## Keys
+
+Pass the account app's browser `packages/keys` exports as `privateSession.keys`, and the active DID and unlocked keyring through `privateSession.unlocked` (it returns `null` when locked). Private files use the package's `vaultPrivateFiles` with `openFile` and `sealFile`; sealed files carry UTF-8 JSON `{ path, text }`. With the private layer unlocked, search matches on the device and the query stays there; locked, it covers public and Friends content.
+
+**The cortex needs one change in that package.** `packages/keys` binds every sealed file to `ohm-vault/file/v1` and cannot seal under another context. The service source asks the keys module for `CORTEX_CONTEXT === "ohm-vault/cortex/v1"` and passes `{ context: CORTEX_CONTEXT }` to `sealFile` and `openFile`; without that export every cortex request refuses with `CortexKeysMissing`, rather than sealing cortex files as private blocks. What the package needs: an optional `{ context }` on `sealFile`, `openFile` and `rewrapFile` (default unchanged), the exported constant, a `vaultCortexFiles` store for rotation, and rotation re-wrapping the cortex under its context.
+
+`connectHome()` does not yet receive a `privateSession`: the workspace runs with the private layer and the cortex locked until the account app's unlock is wired in.
+
+## The journal
+
+[`journal.ts`](../../src/data/journal.ts) is the home's timeline: the entries the sealed cortex journal holds (each `{ line, snapshots }`), then the changes made on this device. Reading the same home again (a reload, a channel move) carries this device's lines over. A line brought in from the cortex journal is history: the journal takes each node as it is now when it opens, so an edit made on another device is not logged as a change by whoever acts here next, and a node that never loaded here is never logged as removed. Each cortex write sends a sealed journal entry in that same shape, with who made the change and why, so another device reads it back. Block changes are recorded on this device; kept versions of private blocks come from the service (`history`, `readVersion`).
+
+## Tests
+
+Run `npm --prefix app test` (or the root `npm test`). The service source is tested over mocked `/vault/xrpc` responses: compare-and-set, routing, that the source has no inbox, visibility moves (`test/visibility.test.ts`), the cortex refusing without its context and sealing under it, raw media. The workspace is tested over `createFixtureSource()`, which keeps the service's rules (versions, channels as files, the sealed cortex as files, kept versions) in memory. Not covered: live sign-in, the account app's unlock, and publishing.
 
 ## Workspace vocabulary
 
-[Words](../../../docs/words.md) defines the terms. The sample projection uses these contracts.
+[Words](../../../docs/words.md) defines the terms.
 
-- Blocks use the vault's seven kinds. `post` is reserved for published blocks. The shared `createDraft` handler takes `homeChannel`, and body edits use the vault's `inferKind` for ordinary drafts. The legacy post XRPC payload still has its `label` and `sublabel` fields.
-- [PageEditor](../../src/editor/PageEditor.tsx) keeps the title input's whitespace while the draft matches the saved title after trimming. This lets the next word follow a typed space while autosave round-trips through the vault's normalized title. Blurring the field shows the saved title.
-- Use a 13-character TID for a block ID and `block:<id>` for a vault graph key. Secondary tree rows use `<id>/<channel path>`. The same TID identifies every placement. Slugs remain in Markdown wikilinks and published addresses.
-- Channels are navigated by path. The sample's original channel record ID stays a fixture field until channels carry the `id` in `_channel.md` ([vault/plans/renames.md](../../../vault/plans/renames.md)). The vault's evidence kinds are `contains`, `links`, `embeds`, `mentions`, `from` and `quotes`. Whole-block links use `links`; their sample-only reason is presentation metadata.
-- **Media blocks** ([vault/plans/media.md](../../../vault/plans/media.md)). An image is a block of kind `media` whose body embeds its file (`![[wet-street.png]]`) and whose properties are `hash` (the bytes' CID: CIDv1, raw, SHA-256, the vault's `blobCid`), `mime`, `width`, `height` and `alt`; `Doc.media` holds them. `addImage` in `store.ts` makes one (private, in the given channel), or collects the existing one with the same `hash`. A text embeds it with `![[slug]]` on a line of its own: the editor's `embed` node (`src/editor/embed.ts`) keeps that Markdown exactly, and `resolveEmbed` (`src/media/embeds.ts`) finds a block by slug, then a media block by file name (the embedding channel first), then by title. Embeds are evidence of kind `embeds`; `outgoing` and `incoming` list them with links.
+- Blocks use the vault's seven kinds. `post` is reserved for published blocks. Body edits use the vault's `inferKind` for ordinary drafts.
+- A block's ID is a 13-character TID and its graph key `block:<id>`; a sealed block's storage ID is opaque and its TID lives in the file. Secondary tree rows use `<id>/<channel path>`. Slugs remain in Markdown wikilinks and published addresses.
+- A block's `by` is `me` or `agent:<name>`.
+- In the graph a node is a block and an edge is a connect (`links`, `embeds`, `mentions`, whole-block `connect`); `contains` and `from` stay evidence and are not drawn. Cortex observations name the blocks they are about in `about`, and the graph draws an observation about two or more blocks as an observed edge, apart from the person's.
+- **Media blocks** ([vault/plans/media.md](../../../vault/plans/media.md)). An image is a block of kind `media` whose body embeds its file (`![[wet-street.png]]`) and whose properties are `hash` (the bytes' CID: CIDv1, raw, SHA-256, the vault's `blobCid`), `mime`, `width`, `height` and `alt`; `Doc.media` holds them. `addImage` in `store.ts` makes one (private, in the given channel; its bytes go to `media.put` first, named `sha256-<hex>`, which `serviceNameOf` in `cache.ts` derives from the CID), or collects the existing one with the same `hash`. A text embeds it with `![[slug]]` on a line of its own: the editor's `embed` node (`src/editor/embed.ts`) keeps that Markdown exactly, and `resolveEmbed` (`src/media/embeds.ts`) finds a block by slug, then a media block by file name (the embedding channel first), then by title. Embeds are evidence of kind `embeds`; `outgoing` and `incoming` list them with links.
   - **Bytes** live in the media cache, `src/media/cache.ts`: IndexedDB `ohm-media`, store `bytes`, keys `<cid>` and `<cid>@<width>` (320, 960, 1920; WebP where the browser writes it; only below the original's width). `setMediaBackend` swaps it; tests give `memoryBackend(map)`, and calling it again is a closed tab.
   - **The guard:** `updateBody` calls `assertDurable`, so `saveDraft`, `autosave` (the editor's debounce and its flush on leaving) and `openFile` refuse a body with a `blob:` or `data:` address as an image or link target outside code, with `DataError`. The editor's image extension takes only `http(s)` images from pasted HTML.
   - **Export:** `exportBlock` (async, reads the cache) and `exportNow` (sync, for a drag; null until `preload` has loaded the originals) give `{ name, type, bytes, images, missing }`: the `.md` alone, or a stored `.zip` with the `.md` and `assets/<file>`, each media embed rewritten to `![alt](assets/<file>)`. `drop.ts` writes it into the drag's `DownloadURL` as a `data:` URL, so the file needs no open tab.
-- Search uses the `entities` scope and `entity` hits. The sample keeps vault block changes and cortex file changes in separate histories; the home timeline reads both. Cortex observations name the blocks they are about in `about`, keep the versions they were written against as `{ node, version }`, and never become vault edges: the graph draws an observation about two or more blocks as an observed connection.
-
-Run `npm --prefix app test` from the repository root to verify the sample paths and service fixtures. See the [human guide](../../README.md#blocks-channels-and-history) to walk through the workspace.
