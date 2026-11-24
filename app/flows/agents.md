@@ -22,7 +22,7 @@ Only one card is open at a time, so the panel shows one **Approve**, on the acti
 
 - An action that removes something for good (`vault_delete`, `vault_friends_delete`, `vault_friends_remove`) uses its `destructive` variant, so its icon and Approve are red.
 - After an answer, it shows its receipt ("Approved. <agent> can go ahead." or "Declined. Nothing was done.") for a moment, before the list reads again.
-- `src/theme.css` gives it the card radius and keeps a message's line breaks, by slot rules; the installed copy is unchanged.
+- `src/theme.css` gives it the card radius, keeps a message's line breaks, and makes its Approve forest (the view's one primary action) instead of ohm-ui's ink, all by slot rules; the installed copy is unchanged.
 
 ## Tools
 

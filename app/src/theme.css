@@ -173,3 +173,8 @@
    keeps its own line breaks. Unlayered, so these win over the component's utility classes. */
 [data-slot=approval-card] { border-radius: var(--ohm-radius-card); }
 [data-slot=approval-card] dd { white-space: pre-wrap; }
+/* Its Approve is the view's one forest action, like every primary button here (ohm-ui's ink otherwise). */
+[data-slot=approval-card]:not([data-variant=destructive]) [data-slot=approval-card-allow-once] {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
