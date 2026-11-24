@@ -7,6 +7,7 @@ import { isDid, resolveIdentity } from './identity.mjs';
 import { servePrivate } from './private.mjs';
 import { plainName, postPage, renderArchivePost } from './render.mjs';
 import { listRecords, recordByKey, recordBySlug } from './repository.mjs';
+import { publicationUri } from './standard.mjs';
 
 const SNAPSHOT_KEY = 'latest';
 const MAX_AGE = 48 * 60 * 60;
@@ -186,6 +187,10 @@ export default {
     // Handle resolution: a site whose domain is the account's handle answers with its DID here.
     if (url.pathname === '/.well-known/atproto-did' && isDid(env.ATPROTO_DID)) {
       return new Response(env.ATPROTO_DID, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'public, max-age=300' } });
+    }
+    // standard.site verification: the website names its publication, the record its posts belong to.
+    if (url.pathname === '/.well-known/site.standard.publication' && isDid(env.ATPROTO_DID)) {
+      return new Response(publicationUri(env.ATPROTO_DID), { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'public, max-age=300' } });
     }
     const isFeed = ['/notes.json', '/notes/graph.json', '/notes/profile.json', '/notes/identity.json'].includes(url.pathname);
     if (!isFeed && ((url.pathname === '/' && env.STANDALONE_SITE === 'true') || url.pathname.startsWith('/notes/') || folder)) {

@@ -34,7 +34,7 @@ npm run publish:post -- \
 
 ```json
 "connect": [
-  "at://did:web:pds.example.com/com.ohmmmm.post/after-the-rain",
+  "at://did:web:pds.example.com/site.standard.document/after-the-rain",
   "https://example.org/the-article-that-started-it"
 ]
 ```
@@ -50,8 +50,8 @@ The list reads `/notes/graph.json`, which has every post by AT URI with its name
 Publish a Markdown post called “Collisions” with links in the order you want people to read them. Use the DID of the account that holds the records, your site's post collection, and the record keys you used when publishing. The example below assumes the two target records have been published at the example addresses.
 
 ```md
-1. [trap of independency](at://did:web:pds.example.com/com.ohmmmm.post/trap-of-independency)
-2. [just buy that jacket](at://did:web:pds.example.com/com.ohmmmm.post/just-buy-that-jacket)
+1. [trap of independency](at://did:web:pds.example.com/site.standard.document/trap-of-independency)
+2. [just buy that jacket](at://did:web:pds.example.com/site.standard.document/just-buy-that-jacket)
 ```
 
 The site renders links to your archive posts as clickable `/posts/<record-key>` URLs, which lead on to each post's full address. It also renders DID-based Bluesky post links as links to Bluesky. Use the other site's public HTTPS URL when linking to a different personal archive.
@@ -63,7 +63,7 @@ Put the quoted passage in a Markdown blockquote and link to the source underneat
 ```md
 > i had confused independence with defensibility.
 
-[trap of independency](at://did:web:pds.example.com/com.ohmmmm.post/trap-of-independency)
+[trap of independency](at://did:web:pds.example.com/site.standard.document/trap-of-independency)
 ```
 
 That keeps the selected words in your post and gives the reader a link to the source.
@@ -72,8 +72,8 @@ That keeps the selected words in your post and gives the reader a link to the so
 
 | What you are identifying | Form |
 | --- | --- |
-| The post's record type | `com.ohmmmm.post` |
-| A specific post in someone's repo | `at://did:web:pds.example.com/com.ohmmmm.post/trap-of-independency` |
+| The post's record type | `site.standard.document`, with `com.ohmmmm.post` as its content |
+| A specific post in someone's repo | `at://did:web:pds.example.com/site.standard.document/trap-of-independency` |
 | Its public web page | `https://example.com/posts/writings/collisions/trap-of-independency` |
 | The folder it sits in | `https://example.com/posts/writings/collisions/` |
 | The schema, as its authority publishes it | A `com.atproto.lexicon.schema` record named `com.ohmmmm.post`, in the repository ohmmmm.com points to |

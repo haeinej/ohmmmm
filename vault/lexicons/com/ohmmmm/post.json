@@ -1,101 +1,108 @@
 {
   "lexicon": 1,
   "id": "com.ohmmmm.post",
-  "description": "A post: one thing a person publishes, with a Markdown body, optional attachments, and optional information about where it first appeared. These fields are fixed and the same on every site; a site adds its own under `site`.",
+  "description": "A post, as ohm keeps it: the content of a standard.site document (site.standard.document), with a Markdown body, optional attachments, and optional information about where it first appeared. The document holds the title, dates, path and plain text every reader understands; these fields hold the rest, and are the same on every site. A site adds its own under `site`.",
   "defs": {
     "main": {
-      "type": "record",
-      "key": "any",
-      "record": {
-        "type": "object",
-        "required": [
-          "body",
-          "publishedAt",
-          "canonicalUrl"
-        ],
-        "properties": {
-          "title": {
+      "type": "object",
+      "description": "The content of a site.standard.document: the post, in the `content` union.",
+      "required": [
+        "body",
+        "canonicalUrl"
+      ],
+      "properties": {
+        "subtitle": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "maxLength": 3000,
+          "description": "An optional line shown under the title."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 262144,
+          "description": "CommonMark, with footnotes ([^1] in the text and [^1]: for the note). Use media:ID as an image destination to place an attachment at that point in the body. The ID refers to an entry in this post's media array."
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "The post's address on the author's public website. It is the same whoever can see the post: a post that is not public holds the address it would have if it were."
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "The last part of the post's address on the author's website: lowercase Latin letters and digits joined by single hyphens. It can be changed, and the record stays the same record. A record with no slug uses its own key."
+        },
+        "form": {
+          "type": "string",
+          "description": "What kind of object this post is, identified from its format. A writing has a title and free-form content; a note has no title. An image, gallery, video, audio, file, or media post holds only attachments. A link, embed, quote, list, or code post holds only that. Other is anything else. The list can grow: treat a form you do not know as other, and show the title, body, and attachments.",
+          "knownValues": [
+            "writing",
+            "note",
+            "image",
+            "gallery",
+            "video",
+            "audio",
+            "file",
+            "media",
+            "link",
+            "embed",
+            "quote",
+            "list",
+            "code",
+            "other"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "maxGraphemes": 100,
+          "maxLength": 1000,
+          "description": "The author's name for the section of their site this post belongs to, such as Writings or Photographs. Free-form."
+        },
+        "sublabel": {
+          "type": "string",
+          "maxGraphemes": 100,
+          "maxLength": 1000,
+          "description": "The author's name for a group inside the label, such as a series or an album. Free-form."
+        },
+        "connect": {
+          "type": "array",
+          "maxLength": 32,
+          "description": "What this post branches from: earlier posts or web pages. Each entry is an AT URI or an HTTP(S) URL.",
+          "items": {
             "type": "string",
-            "maxGraphemes": 300,
-            "maxLength": 3000
-          },
-          "subtitle": {
-            "type": "string",
-            "maxGraphemes": 300,
-            "maxLength": 3000,
-            "description": "An optional line shown under the title."
-          },
-          "body": {
-            "type": "string",
-            "maxLength": 262144,
-            "description": "CommonMark, with footnotes ([^1] in the text and [^1]: for the note). Use media:ID as an image destination to place an attachment at that point in the body. The ID refers to an entry in this post's media array."
-          },
-          "publishedAt": { "type": "string", "format": "datetime" },
-          "updatedAt": {
-            "type": "string",
-            "format": "datetime",
-            "description": "When the post was last changed after it was published."
-          },
-          "canonicalUrl": {
-            "type": "string",
-            "format": "uri",
-            "description": "The post's address on the author's public website. It is the same whoever can see the post: a post that is not public holds the address it would have if it were."
-          },
-          "slug": {
-            "type": "string",
-            "maxLength": 120,
-            "description": "The last part of the post's address on the author's website: lowercase Latin letters and digits joined by single hyphens. It can be changed, and the record stays the same record. A record with no slug uses its own key."
-          },
-          "form": {
-            "type": "string",
-            "description": "What kind of object this post is, identified from its format. A writing has a title and free-form content; a note has no title. An image, gallery, video, audio, file, or media post holds only attachments. A link, embed, quote, list, or code post holds only that. Other is anything else. The list can grow: treat a form you do not know as other, and show the title, body, and attachments.",
-            "knownValues": ["writing", "note", "image", "gallery", "video", "audio", "file", "media", "link", "embed", "quote", "list", "code", "other"]
-          },
-          "label": {
-            "type": "string",
-            "maxGraphemes": 100,
-            "maxLength": 1000,
-            "description": "The author's name for the section of their site this post belongs to, such as Writings or Photographs. Free-form."
-          },
-          "sublabel": {
-            "type": "string",
-            "maxGraphemes": 100,
-            "maxLength": 1000,
-            "description": "The author's name for a group inside the label, such as a series or an album. Free-form."
-          },
-          "connect": {
-            "type": "array",
-            "maxLength": 32,
-            "description": "What this post branches from: earlier posts or web pages. Each entry is an AT URI or an HTTP(S) URL.",
-            "items": { "type": "string", "format": "uri" }
-          },
-          "link": {
-            "type": "ref",
-            "ref": "#link",
-            "description": "For a link or embed post: the page it points to, as that page described itself when the post was made."
-          },
-          "source": {
-            "type": "ref",
-            "ref": "#source",
-            "description": "Where this post first appeared, if not on the author's own website."
-          },
-          "site": {
-            "type": "unknown",
-            "description": "Optional data the fixed fields have no place for. An object whose $type names the schema that declares each of its fields. This is the only place for anything the fixed schema does not define."
-          },
-          "media": {
-            "type": "array",
-            "description": "Attachments keyed by IDs unique within this post. References in the body determine their placement. The kinds can grow: skip an attachment of a kind you do not know.",
-            "items": {
-              "type": "union",
-              "refs": [
-                "#image",
-                "#video",
-                "#audio",
-                "#file"
-              ]
-            }
+            "format": "uri"
           }
+        },
+        "link": {
+          "type": "ref",
+          "ref": "#link",
+          "description": "For a link or embed post: the page it points to, as that page described itself when the post was made."
+        },
+        "source": {
+          "type": "ref",
+          "ref": "#source",
+          "description": "Where this post first appeared, if not on the author's own website."
+        },
+        "site": {
+          "type": "unknown",
+          "description": "Optional data the fixed fields have no place for. An object whose $type names the schema that declares each of its fields. This is the only place for anything the fixed schema does not define."
+        },
+        "media": {
+          "type": "array",
+          "description": "Attachments keyed by IDs unique within this post. References in the body determine their placement. The kinds can grow: skip an attachment of a kind you do not know.",
+          "items": {
+            "type": "union",
+            "refs": [
+              "#image",
+              "#video",
+              "#audio",
+              "#file"
+            ]
+          }
+        },
+        "untitled": {
+          "type": "boolean",
+          "description": "Set when the post has no title of its own. The document it is in is titled by its first words, and the title is not read back as the post’s."
         }
       }
     },
@@ -105,9 +112,20 @@
         "uri"
       ],
       "properties": {
-        "uri": { "type": "string", "format": "uri" },
-        "title": { "type": "string", "maxGraphemes": 300, "maxLength": 3000 },
-        "description": { "type": "string", "maxGraphemes": 1000, "maxLength": 10000 },
+        "uri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "maxLength": 3000
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 1000,
+          "maxLength": 10000
+        },
         "siteName": {
           "type": "string",
           "maxGraphemes": 100,
@@ -159,7 +177,11 @@
         "file"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "file": {
           "type": "blob",
           "accept": [
@@ -172,10 +194,24 @@
           "format": "uri",
           "description": "Where the original lives or came from, when that is somewhere other than this repository."
         },
-        "alt": { "type": "string", "maxGraphemes": 2000, "maxLength": 20000 },
-        "caption": { "type": "string", "maxGraphemes": 1000, "maxLength": 10000 },
-        "width": { "type": "integer", "minimum": 1 },
-        "height": { "type": "integer", "minimum": 1 }
+        "alt": {
+          "type": "string",
+          "maxGraphemes": 2000,
+          "maxLength": 20000
+        },
+        "caption": {
+          "type": "string",
+          "maxGraphemes": 1000,
+          "maxLength": 10000
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "video": {
@@ -185,7 +221,11 @@
         "file"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "file": {
           "type": "blob",
           "accept": [
@@ -205,8 +245,15 @@
           ],
           "description": "A still image shown before the video plays."
         },
-        "caption": { "type": "string", "maxGraphemes": 1000, "maxLength": 10000 },
-        "durationMs": { "type": "integer", "minimum": 0 }
+        "caption": {
+          "type": "string",
+          "maxGraphemes": 1000,
+          "maxLength": 10000
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "audio": {
@@ -216,7 +263,11 @@
         "file"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "file": {
           "type": "blob",
           "accept": [
@@ -229,8 +280,15 @@
           "format": "uri",
           "description": "Where the original lives or came from, when that is somewhere other than this repository."
         },
-        "caption": { "type": "string", "maxGraphemes": 1000, "maxLength": 10000 },
-        "durationMs": { "type": "integer", "minimum": 0 }
+        "caption": {
+          "type": "string",
+          "maxGraphemes": 1000,
+          "maxLength": 10000
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "file": {
@@ -240,7 +298,11 @@
         "file"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
         "file": {
           "type": "blob",
           "accept": [
@@ -254,7 +316,11 @@
           "format": "uri",
           "description": "Where the original lives or came from, when that is somewhere other than this repository."
         },
-        "caption": { "type": "string", "maxGraphemes": 1000, "maxLength": 10000 }
+        "caption": {
+          "type": "string",
+          "maxGraphemes": 1000,
+          "maxLength": 10000
+        }
       }
     }
   }

@@ -1,6 +1,6 @@
 # ohm vault
 
-Build your own home on AT Protocol from the website you already have. Your posts and profile live in a repository on a Personal Data Server (PDS) you run. Every post is one shared record type, `com.ohmmmm.post`, so other AT Protocol applications can find and read it, and anything only your site needs is described by schemas under your own domain. Your website stays yours and becomes a view of that repository.
+Build your own home on AT Protocol from the website you already have. Your posts and profile live in a repository on a Personal Data Server (PDS) you run. Every post is a [standard.site](https://standard.site) document (`site.standard.document`), the long-form record that Leaflet, pckt, Offprint and other AT Protocol applications already read, with the post as ohm keeps it inside; and anything only your site needs is described by schemas under your own domain. Your website stays yours and becomes a view of that repository.
 
 You can start from an existing website, from an export of your posts on another platform, or from nothing.
 
@@ -74,7 +74,7 @@ Labels are where you start: they are the names in your site's header. The form i
 
 ### A fixed schema, and a layer of your own
 
-The post schema is fixed and identical on every site, and it has one name everywhere: `com.ohmmmm.post`. That is what lets other software find your posts and read them. Your profile uses Bluesky's own fields. Anything only your site needs goes in an optional layer: you declare it in a schema under your domain, and it is saved under the record's `site` field. That layer is unlisted, meaning your own site shows it and applications it does not apply to never see it. When something means the same as a fixed field, fill the fixed field. [The fixed schema and your own fields](docs/schema-layers.md)
+A post is a `site.standard.document` of your publication, your website (`site.standard.publication`). The document carries what every reader understands: title, dates, its path on your site, its words as plain text, and your label and sublabel as tags. Its `content` is the post as ohm keeps it, `com.ohmmmm.post`: the Markdown body, attachments, form, label, sublabel and connections. Both are fixed and the same on every site. Your website names its publication at `/.well-known/site.standard.publication`, and each post page names its document in a `<link rel="site.standard.document">` tag, so readers can tell the site and the records belong together. A post with no title is titled by its first words in the document, and the content says so. Your profile uses Bluesky's own fields. Anything only your site needs goes in an optional layer: you declare it in a schema under your domain, and it is saved under the record's `site` field. That layer is unlisted, meaning your own site shows it and applications it does not apply to never see it. When something means the same as a fixed field, fill the fixed field. [The fixed schema and your own fields](docs/schema-layers.md)
 
 ### Addresses follow labels
 
@@ -84,7 +84,7 @@ The post schema is fixed and identical on every site, and it has one name everyw
 | `/posts/writings/` | One label |
 | `/posts/writings/collisions/` | One sublabel |
 | `/posts/writings/collisions/trap-of-independency` | A post |
-| `at://did:web:pds.example.com/com.ohmmmm.post/trap-of-independency` | The same post's record |
+| `at://did:web:pds.example.com/site.standard.document/trap-of-independency` | The same post's record |
 
 Because the address comes from the label, every post has one; a post published without a label is filed under `other`. An address always ends in the post's slug. The slug can be changed, and the post's record stays the same record, kept under an ID that never changes. The short `/posts/trap-of-independency`, the address a post had before it was refiled, and `/posts/` followed by the record's own key all redirect to the current address. A post published before posts had IDs is kept under its slug, and works as before.
 
@@ -109,8 +109,8 @@ Your picture, name, pronouns, verified handle, description, and links sit above 
 | `configure` | Prints a site configuration from `--site` and `--handle` or `--did` |
 | `import` | Previews or brings the posts you have published into your vault, each compared with the record it came from |
 | `sync` | Says what syncing your own folder with your vault would do, in both directions. With `--apply`, does it. Never publishes |
-| `lexicon` | Prints a schema: `--kind post` for the shared post schema, or `postSite`, `profile`, `profileLink`, `profileSite` for your own, under your domain |
-| `migrate` | Previews or copies posts from an older post type, such as `com.example.post`, to `com.ohmmmm.post` |
+| `lexicon` | Prints a schema: `--kind post` for the post's content inside a standard.site document, or `postSite`, `profile`, `profileLink`, `profileSite` for your own, under your domain |
+| `migrate` | Previews or copies posts from an older post type, such as `com.example.post` or `com.ohmmmm.post`, to `site.standard.document` |
 | `mcp` | Serves the vault's tools to a coding agent |
 | `publish` | Previews or publishes a post |
 | `profile` | Previews or saves your profile |
@@ -190,7 +190,7 @@ ohm keeps a working copy of your vault: every post you have, at all three visibi
 
 1. **Sign in or sign up** with Google, Microsoft or Bluesky.
 2. **Say where your posts live**, once: the handle of your AT Protocol account, which is a PDS of your own or Bluesky, and an app password. The password goes from the page to your own PDS and nowhere else. A passkey works at your PDS's own screen instead. Signing in with Bluesky answers this already.
-3. **Your published posts are brought in on their own** the first time. Nothing has to be named: the service finds your website from your handle and reads the shared post type and any type of your own whose records read as posts.
+3. **Your published posts are brought in on their own** the first time. Nothing has to be named: the service finds your website from your handle and reads your standard.site documents, posts under `com.ohmmmm.post` from before, and any type of your own whose records read as posts.
 
 The side panel is your repository, as folders that open and close. Pills choose what the folders are: your labels, the platforms posts first appeared on, or who can see them, and a filter leaves out what you do not want. The main screen is one post.
 
@@ -200,7 +200,7 @@ Three things to know:
 
 - **Saving never publishes.** A post marked for everyone is in the vault, meant for everyone. It reaches your PDS when you press Publish, which first shows exactly what would change: what would be published, replaced and taken down.
 - **You publish; ohm does not.** The service works out the changes and holds no permission to write to your repository. They are made from your browser, or by your agent, signed in at your own PDS for as long as it takes: with an app password typed on ohm's page, or a passkey at your PDS's own screen.
-- **Publish only touches posts.** It writes and removes records of the shared post type only, and never removes a record the vault knows nothing about.
+- **Publish only touches posts.** It writes and removes only standard.site documents that hold an ohm post, makes your publication the first time, and never removes a record the vault knows nothing about, a document another application wrote included.
 - **This is not the private area on your own site.** "Keep a post private", above, stores a post in your own site's storage. The vault is ohm's working copy. Nothing moves between the two yet.
 - **The vault at ohmmmm.com is not open to everyone yet.** An account that has not been let in is told so when it connects.
 
@@ -267,9 +267,9 @@ ohm render build --slug essay --rules render-rules.json --kind essay \
 
 It runs when your site is built, so the site stays plain HTML. It handles pages that hold one post or several hundred, and stops on markup it does not handle instead of dropping it. [The build-renderer skill](skills/build-renderer/SKILL.md) has the method and what to check.
 
-## Move to the shared post schema
+## Move to standard.site documents
 
-Sites set up before the post schema was shared keep their posts under a type of their own, such as `com.example.post`. The `migrate` command copies them to `com.ohmmmm.post`. Each post keeps its key, so its address on your site does not change, and the older records are left where they are.
+Sites set up earlier keep their posts under a type of their own, such as `com.example.post`, or under `com.ohmmmm.post`, which was the shared record before posts were documents. The `migrate` command copies them to `site.standard.document`, making your publication first. Each post keeps its key, so its address on your site does not change, and the older records are left where they are.
 
 ```sh
 ohm migrate --from com.example.post
@@ -277,27 +277,28 @@ ohm migrate --from com.example.post --key hello
 ohm migrate --from com.example.post --publish
 ```
 
-The first prints a count of what would be copied and changes nothing. `--key` prints one post's new record in full. `--publish` writes, and needs `ATPROTO_APP_PASSWORD`. A site configuration that still has `ATPROTO_POST_COLLECTION` gives `--from` its default.
+The first prints a count of what would be copied and changes nothing. `--key` prints one post's new document in full. `--publish` writes, and needs `ATPROTO_APP_PASSWORD` and `SITE_ORIGIN`. A site configuration that still has `ATPROTO_POST_COLLECTION` gives `--from` its default; otherwise it is `com.ohmmmm.post`.
 
 | In the older record | In the new one |
 | --- | --- |
-| The type `com.example.post`, on the record and on each attachment | `com.ohmmmm.post` |
+| The record | A `site.standard.document`: title, dates, path, plain text and tags, with the post inside as `com.ohmmmm.post` content |
+| The type `com.example.post` on each attachment | `com.ohmmmm.post` |
 | An attachment's `original` | `file` |
 | A link's `site` | `siteName` |
 | `tags`, from before labels | The first is the label and the second the sublabel |
-| Links and connections to your own posts under the older type | The same posts under `com.ohmmmm.post` |
+| Links and connections to your own posts under the older type | The same posts, as documents |
 | A private post's private address in `canonicalUrl` | The address it would have if it were public |
 | A field the shared schema has no place for, such as `summary` | Kept in your own layer, under `site`. Declare it in your `postSite` schema |
 | `source.author`, and an image's `credit` and `extractedText` | Not kept. The preview lists them under `leftBehind` |
 
-Do it in this order, because the site reads only `com.ohmmmm.post` from this version on:
+Do it in this order, because the site reads only documents from this version on:
 
 1. Add `"ATPROTO_SITE_NAMESPACE": "com.example"` to your site configuration, with your own domain written backwards. Your profile and your optional schemas are found under it. A configuration that still has `ATPROTO_POST_COLLECTION` works without this.
 2. Preview, read what would be moved and left behind, and declare the moved fields in your `postSite` schema.
 3. Run it with `--publish`.
 4. Deploy the site Worker. Deploying before step 3 leaves the site with no posts to show.
 
-Private posts need no migration. One saved before this change is read as the shared schema has it, and publishing it again with `--private` saves it in the new shape. A mirror writes each post again under the shared type on its next runs.
+Private posts need no migration. One saved before this change is read as the shared schema has it, and publishing it again with `--private` saves it in the new shape. A mirror writes each post again as a document on its next runs.
 
 ## Run your own PDS and site
 
@@ -321,7 +322,7 @@ npm run --silent configure -- --site https://example.com --handle example.com --
 - `--mode standalone` is for a free hostname such as `journal.example.com`, which serves the posts page at its root. [Cloudflare Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
 - `--name` picks the Worker's name and `--kv` an existing KV namespace. `--namespace` sets where your own optional schemas are declared, when it is not your domain written backwards (`com.example` for `example.com`). It is saved as `ATPROTO_SITE_NAMESPACE`. There is no post type to choose: every post is `com.ohmmmm.post`.
 
-**3. Your schemas.** The post schema is shared and is in this repository at [lexicons/com/ohmmmm/post.json](lexicons/com/ohmmmm/post.json); you do not generate or edit it. Your own fields go in an optional schema under your domain. Generate it once and keep it with your site's source.
+**3. Your schemas.** A post is a `site.standard.document`, whose schema standard.site publishes; its content, `com.ohmmmm.post`, is shared and is in this repository at [lexicons/com/ohmmmm/post.json](lexicons/com/ohmmmm/post.json). You do not generate or edit either. Your own fields go in an optional schema under your domain. Generate it once and keep it with your site's source.
 
 ```sh
 mkdir -p lexicons/com/example
@@ -397,7 +398,7 @@ Use the [human repository guide](docs/repository-map.md) to understand where a c
 | [plans/](plans/) | What is being built and why: [the build plan](plans/build-plan.md), and the design behind it |
 | [site/](site/) | The posts page and its stylesheet |
 | [scripts/](scripts/) and [bin/](bin/) | The commands |
-| [lexicons/](lexicons/) | The shared post schema, [com/ohmmmm/post.json](lexicons/com/ohmmmm/post.json), and under [com/haeinjung/](lexicons/com/haeinjung/) the templates for a site's own schemas: the profile and the optional ones |
+| [lexicons/](lexicons/) | The post's content inside a standard.site document, [com/ohmmmm/post.json](lexicons/com/ohmmmm/post.json), and under [com/haeinjung/](lexicons/com/haeinjung/) the templates for a site's own schemas: the profile and the optional ones |
 | [mirror/](mirror/) | Copies posts from your website and other platforms, X included, into your repository. [Mirror](docs/mirror.md) |
 | [skills/](skills/) and [AGENTS.md](AGENTS.md) | What a coding agent reads: the purpose, the rules, and the bundled skills |
 | [docs/](docs/) | The guides linked above |

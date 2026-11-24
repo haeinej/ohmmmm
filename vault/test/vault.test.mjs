@@ -5,6 +5,7 @@ import { POST } from '../feed/pds.mjs';
 import { assembleRecord, blobCid, recordProblems, recordVersion } from '../vault/core.mjs';
 import { FRIENDS_POST, memoryKv, OWN_BLOB, ownStores, pdsStore, PRIVATE_POST } from '../vault/stores.mjs';
 import { createVault, vaultTree } from '../vault/vault.mjs';
+import { DOCUMENT, fromDocument, PUBLICATION, PUBLICATION_KEY } from './standard.mjs';
 
 const did = 'did:web:pds.example.test';
 const site = 'https://example.test';
@@ -12,8 +13,11 @@ const picture = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
 
 // A PDS small enough to hold in a test: records by key, files by address, and the two checks a real
 // one makes, that a created key is free and that a replaced record is still the one that was read.
+// Posts are kept as standard.site documents (`records`), and the member's publication on its own.
 function fakePds() {
   const records = new Map();
+  const publications = new Map();
+  const held = collection => (collection === DOCUMENT ? records : collection === PUBLICATION ? publications : new Map());
   const blobs = new Map();
   const calls = [];
   let serial = 0;
@@ -24,11 +28,11 @@ function fakePds() {
     const signedIn = options.headers?.Authorization === 'Bearer token-1';
     const query = Object.fromEntries(url.searchParams);
     if (method === 'com.atproto.repo.getRecord') {
-      const held = records.get(query.rkey);
-      return held ? Response.json({ uri: `at://${did}/${POST}/${query.rkey}`, cid: held.cid, value: held.value }) : error(400, 'RecordNotFound');
+      const found = held(query.collection).get(query.rkey);
+      return found ? Response.json({ uri: `at://${did}/${query.collection}/${query.rkey}`, cid: found.cid, value: found.value }) : error(400, 'RecordNotFound');
     }
     if (method === 'com.atproto.repo.listRecords') {
-      return Response.json({ records: [...records].map(([key, held]) => ({ uri: `at://${did}/${POST}/${key}`, cid: held.cid, value: held.value })) });
+      return Response.json({ records: [...held(query.collection)].map(([key, found]) => ({ uri: `at://${did}/${query.collection}/${key}`, cid: found.cid, value: found.value })) });
     }
     if (method === 'com.atproto.sync.getBlob') {
       return blobs.has(query.cid) ? new Response(blobs.get(query.cid)) : error(404, 'BlobNotFound');
@@ -41,28 +45,29 @@ function fakePds() {
       return Response.json({ blob: { $type: 'blob', ref: { $link: cid }, mimeType: options.headers['Content-Type'], size: bytes.length } });
     }
     const body = JSON.parse(options.body);
-    const held = records.get(body.rkey);
+    const collection = held(body.collection);
+    const found = collection.get(body.rkey);
     if (method === 'com.atproto.repo.createRecord') {
-      if (held) return error(400, 'RecordAlreadyExists');
-    } else if (body.swapRecord && body.swapRecord !== held?.cid) {
+      if (found) return error(400, 'RecordAlreadyExists');
+    } else if (body.swapRecord && body.swapRecord !== found?.cid) {
       return error(400, 'InvalidSwap');
     }
     if (method === 'com.atproto.repo.deleteRecord') {
-      records.delete(body.rkey);
+      collection.delete(body.rkey);
       return Response.json({});
     }
     const cid = `cid-${++serial}`;
-    records.set(body.rkey, { cid, value: body.record });
-    return Response.json({ uri: `at://${did}/${POST}/${body.rkey}`, cid });
+    collection.set(body.rkey, { cid, value: body.record });
+    return Response.json({ uri: `at://${did}/${body.collection}/${body.rkey}`, cid });
   };
-  return { records, blobs, calls, get };
+  return { records, publications, blobs, calls, get };
 }
 
 function vaultOf() {
   const pds = fakePds();
   const kv = memoryKv();
   const vault = createVault({
-    stores: { public: pdsStore({ did, origin: 'https://pds.example.test', collection: POST, token: 'token-1', get: pds.get }), ...ownStores(kv) },
+    stores: { public: pdsStore({ did, origin: 'https://pds.example.test', collection: POST, site, token: 'token-1', get: pds.get }), ...ownStores(kv) },
     now: () => new Date('2026-11-12T10:00:00.000Z'),
   });
   return { vault, pds, kv };
@@ -129,9 +134,14 @@ test('a key is used once across every visibility, and a save says which version 
 test('the PDS itself refuses a stale save of a public note', async () => {
   const { vault, pds } = vaultOf();
   const open = await vault.save({ key: 'open', record: note('open'), files: files(), visibility: 'public' });
-  assert.equal(pds.records.get('open').value.title, 'After the rain');
+  // Kept as a document of the member's publication, which the first public save made.
+  assert.equal(pds.records.get('open').value.$type, DOCUMENT);
+  assert.equal(fromDocument(pds.records.get('open').value, { did }).title, 'After the rain');
+  assert.deepEqual(fromDocument(pds.records.get('open').value, { did }), open.record);
+  assert.deepEqual([...pds.publications.keys()], [PUBLICATION_KEY]);
+  assert.equal(pds.publications.get(PUBLICATION_KEY).value.url, site);
   // Someone else changes the record between the vault's own check and its write.
-  const store = pdsStore({ did, origin: 'https://pds.example.test', collection: POST, token: 'token-1', get: pds.get });
+  const store = pdsStore({ did, origin: 'https://pds.example.test', collection: POST, site, token: 'token-1', get: pds.get });
   await store.put('open', { ...open.record, title: 'Changed elsewhere' }, { version: open.version });
   await assert.rejects(store.put('open', { ...open.record, title: 'Stale' }, { version: open.version }), /Saving "open" failed \(HTTP 400: InvalidSwap\)/);
   await assert.rejects(store.put('open', open.record, {}), /RecordAlreadyExists/);
@@ -211,7 +221,7 @@ test('the publish command writes through the vault, and a friends-only post prev
     const answer = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); };
     if (method === 'com.atproto.server.createSession') return answer(200, { did: JSON.parse(sent).identifier, accessJwt: 'token-1' });
     if (method === 'com.atproto.repo.getRecord') {
-      const held = records.get(url.searchParams.get('rkey'));
+      const held = records.get(`${url.searchParams.get('collection')}/${url.searchParams.get('rkey')}`);
       return held ? answer(200, { cid: 'cid-1', value: held }) : answer(400, { error: 'RecordNotFound' });
     }
     if (method === 'com.atproto.repo.uploadBlob') {
@@ -219,7 +229,7 @@ test('the publish command writes through the vault, and a friends-only post prev
     }
     if (method === 'com.atproto.repo.createRecord') {
       const body = JSON.parse(sent);
-      records.set(body.rkey, body.record);
+      records.set(`${body.collection}/${body.rkey}`, body.record);
       return answer(200, { uri: `at://${body.repo}/${body.collection}/${body.rkey}`, cid: 'cid-1' });
     }
     answer(404, { error: 'MethodNotImplemented' });
@@ -247,13 +257,18 @@ test('the publish command writes through the vault, and a friends-only post prev
     assert.deepEqual(asked, []);
 
     assert.equal(await publish('--publish'), 'https://example.test/posts/field-notes/after-the-rain');
-    const written = records.get('after-the-rain');
+    // The post is written as a document of the member's publication, which is made first.
+    assert.deepEqual([...records.keys()], [`${PUBLICATION}/${PUBLICATION_KEY}`, `${DOCUMENT}/after-the-rain`]);
+    assert.equal(records.get(`${PUBLICATION}/${PUBLICATION_KEY}`).url, site);
+    const written = fromDocument(records.get(`${DOCUMENT}/after-the-rain`), { did });
     assert.deepEqual({ ...written, media: undefined }, { ...open.record, media: undefined });
     assert.deepEqual(written.media.map(({ $type, id, file, width, height }) => [$type, id, file.mimeType, file.ref.$link.length > 20, width, height]),
       [[`${POST}#image`, 'street', 'image/png', true, 1, 1]]);
-    // It looked for the slug first, signed in once, sent the file, then the record.
+    // It looked for the slug first, signed in once, sent the file, looked for the publication and
+    // made it, then the record.
     assert.deepEqual(asked, ['com.atproto.repo.getRecord', 'com.atproto.server.createSession',
-      'com.atproto.repo.uploadBlob (signed in)', 'com.atproto.repo.createRecord (signed in)']);
+      'com.atproto.repo.uploadBlob (signed in)', 'com.atproto.repo.getRecord',
+      'com.atproto.repo.createRecord (signed in)', 'com.atproto.repo.createRecord (signed in)']);
     assert.match(await publish('--publish'), /A public note already uses "after-the-rain"/);
   } finally {
     await rm(folder, { recursive: true, force: true });
