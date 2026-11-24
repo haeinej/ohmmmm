@@ -13,7 +13,7 @@ The project's files are in `${CLAUDE_PLUGIN_ROOT}`; in a clone of the repository
 
 ## The boundary
 
-The PDS is the **PDS boundary**. It holds only public `com.ohmmmm.post` records and their blobs, written only by the person when they press Publish. Friends blocks, sealed private blocks, the sealed cortex, the inbox and the media cache stay in ohm's vault service. Do not write any record to the PDS in this skill, and do not suggest putting anything personal there.
+The PDS is the **PDS boundary**. It holds only public posts, each a `site.standard.document` with `com.ohmmmm.post` content, their publication (`site.standard.publication`) and their blobs, written only by the person when they press Publish. Friends blocks, sealed private blocks, the sealed cortex and the media cache stay in ohm's vault service. Do not write any record to the PDS in this skill, and do not suggest putting anything personal there.
 
 ## What you may not change
 
