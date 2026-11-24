@@ -1,0 +1,25 @@
+---
+import { getLiveCollection, getLiveEntry } from 'astro:content';
+export const prerender = false;
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+const viewerToken = Astro.cookies.get('ohm_viewer')?.value;
+const id = Astro.url.searchParams.get('id');
+const { entries, error } = id
+  ? await getLiveEntry('friends', { id, viewerToken }).then(({ entry, error }) => ({ entries: entry ? [entry] : [], error }))
+  : await getLiveCollection('friends', { viewerToken });
+if (error) Astro.response.status = 'status' in error && typeof error.status === 'number' ? error.status : 502;
+---
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Friends</title></head>
+  <body>
+    <h1>Friends</h1>
+    {error && <p>Friends content is unavailable.</p>}
+    {entries?.map(entry => (
+      <article>
+        <h2>{entry.data.title ?? entry.id}</h2>
+        <div set:html={entry.rendered?.html} />
+      </article>
+    ))}
+  </body>
+</html>
