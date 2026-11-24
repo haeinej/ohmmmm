@@ -5,6 +5,9 @@
 //   init <handle> [parent]   make ohmmmm.<handle> in parent (default: your home folder), with vault/
 //                            set up as a vault and cortex/ started for that handle
 //   where [folder]           the home a folder is in, and its vault and cortex
+//   serve [--port 8766] [--app <origin>]   the home's bridge on this machine, for the app and agents:
+//                            the vault's and the cortex's tools over MCP, and images by CID
+//                            (home/serve.mjs, docs/serve.md)
 //   cortex <command> …       the cortex's command (cortex/bin/cortex.mjs)
 //   anything else            the vault's command, `ohm` (vault/bin/ohm.mjs): `vault index`, `publish`…
 //
@@ -34,19 +37,21 @@ export async function initHome(parent, handle) {
 
 const VAULT_COMMAND = fileURLToPath(new URL('../vault/bin/ohm.mjs', import.meta.url));
 const CORTEX_COMMAND = fileURLToPath(new URL('../cortex/bin/cortex.mjs', import.meta.url));
+const SERVE_COMMAND = fileURLToPath(new URL('../home/serve.mjs', import.meta.url));
 
 // Which program runs a command line, and with what.
 export function route(args) {
   const [command, ...rest] = args;
   if (command === 'init' || command === 'where') return { home: command, rest };
   if (command === 'cortex') return { program: CORTEX_COMMAND, args: rest };
+  if (command === 'serve') return { program: SERVE_COMMAND, args: rest, flags: ['--no-warnings=ExperimentalWarning'] };
   return { program: VAULT_COMMAND, args };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const routed = route(process.argv.slice(2));
   if (routed.program) {
-    const ran = spawnSync(process.execPath, [routed.program, ...routed.args], { stdio: 'inherit' });
+    const ran = spawnSync(process.execPath, [...(routed.flags ?? []), routed.program, ...routed.args], { stdio: 'inherit' });
     process.exit(ran.status ?? 1);
   }
   const rest = routed.rest;
@@ -58,7 +63,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       const layout = findHome(rest[0] ?? process.cwd());
       if (!layout) { console.error('Not in a home. Make one with: init <handle>'); process.exitCode = 1; } else console.log(JSON.stringify(layout, null, 2));
     } else {
-      console.log('init <handle> [parent] | where [folder] | cortex <command> | any vault command');
+      console.log('init <handle> [parent] | where [folder] | serve | cortex <command> | any vault command');
       process.exitCode = 1;
     }
   } catch (problem) {

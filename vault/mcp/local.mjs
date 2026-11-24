@@ -445,12 +445,14 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
   };
 }
 
+// What the local tools tell an agent, over standard input and output or over HTTP (ohmmmm serve).
+export const LOCAL_INSTRUCTIONS = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals, restores and renames need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
+
 export async function serveLocalVault({ vault, agent, DatabaseSync, input, output }) {
   if (!vault) refuse('Launch from a home or select its vault with --vault.');
   if (!/^[A-Za-z0-9._-]+$/.test(agent)) refuse('Name the agent with letters, digits, dots, underscores or hyphens.');
   if (!(await info(vault))?.isDirectory()) refuse('Select an existing vault folder.');
   const tools = createLocalTools({ vault: await realpath(vault), by: `agent:${agent}`, DatabaseSync });
-  const instructions = 'These tools read the vault folder and its configured roots on this device. Run vault_index first, then vault_where to see where data lives and what you may change. Captures are proposed; writes, links, removals, restores and renames need the person\'s grant on that folder. Every change is journaled and the old version kept for vault_restore. vault_lint finds what to check.';
   input.setEncoding('utf8');
-  await serve(createServer({ tools, list: LOCAL_TOOLS, instructions }), input, output);
+  await serve(createServer({ tools, list: LOCAL_TOOLS, instructions: LOCAL_INSTRUCTIONS }), input, output);
 }

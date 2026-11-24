@@ -51,6 +51,11 @@ function indexedBackend(): MediaBackend {
 
 const defaultBackend = (): MediaBackend => typeof indexedDB === "undefined" ? memoryBackend() : indexedBackend()
 let backend = defaultBackend()
+
+/** Where an original is looked for last, by its CID: the home folder, through `ohmmmm serve` (src/data/bridge.ts). */
+export type MediaRemote = (cid: string) => Promise<{ bytes: Uint8Array; type: string } | undefined>
+let remote: MediaRemote | undefined
+export const setMediaRemote = (next?: MediaRemote) => { remote = next }
 let asked = false
 
 /** What this tab holds: bytes, their type and CRC, and the object URL showing them, by name. */
@@ -84,12 +89,20 @@ export async function keep(bytes: Uint8Array, type: string): Promise<string> {
   return cid
 }
 
-/** An original or a size, from this tab or from storage. */
+/**
+ * An original or a size, from this tab or from storage; an original this browser lacks, from the home
+ * folder. Bytes from elsewhere are kept only when they are what their CID says.
+ */
 async function load(name: string, type: string): Promise<Held | undefined> {
   const here = held.get(name)
   if (here) return here
   const bytes = await backend.read(name)
-  return bytes && hold(name, bytes, type)
+  if (bytes) return hold(name, bytes, type)
+  if (!remote || name.includes("@")) return undefined
+  const fetched = await remote(name).catch(() => undefined)
+  if (!fetched || await cidOf(fetched.bytes) !== name) return undefined
+  await backend.write(name, fetched.bytes)
+  return hold(name, fetched.bytes, fetched.type || type)
 }
 
 /** The original's bytes, if this device has them. */
