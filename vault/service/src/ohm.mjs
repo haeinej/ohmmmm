@@ -66,6 +66,25 @@ export function links(db) {
       await db.prepare('INSERT INTO links (user_id, did, linked_at) VALUES (?1, ?2, ?3)').bind(user, did, now.toISOString()).run();
       return { did };
     },
+    // The account's name and email, as its sign-in says now, so friends can find it by email. Written
+    // only when it changed. An email is kept lower-cased.
+    async remember(user) {
+      if (!user?.id) return;
+      const email = typeof user.email === 'string' && user.email.includes('@') ? user.email.trim().toLowerCase() : null;
+      await db.prepare('UPDATE links SET name = ?2, email = ?3 WHERE user_id = ?1 AND (name IS NOT ?2 OR email IS NOT ?3)').bind(user.id, user.name || null, email).run();
+    },
+    // The DID an email's ohm account works in, or null.
+    didByEmail: async email => (typeof email === 'string' && email.includes('@')
+      ? (await db.prepare('SELECT did FROM links WHERE email = ?1').bind(email.trim().toLowerCase()).first())?.did ?? null : null),
+    // Names and emails for DIDs, for the member's own list of people.
+    people: async dids => {
+      const found = new Map();
+      for (const did of [...new Set(dids)].slice(0, 500)) {
+        const row = await db.prepare('SELECT name, email FROM links WHERE did = ?1').bind(did).first();
+        if (row) found.set(did, { ...(row.name ? { name: row.name } : {}), ...(row.email ? { email: row.email } : {}) });
+      }
+      return found;
+    },
     disconnect: (user, did) => did === undefined
       ? db.prepare('DELETE FROM links WHERE user_id = ?1').bind(user).run()
       : db.prepare('DELETE FROM links WHERE user_id = ?1 AND did IS ?2').bind(user, did).run(),

@@ -12,6 +12,10 @@ export type BlockFile = HomeFile & { version: string }
 export type Account = { did: string | null; user: { name: string }; mirrored: boolean; service: string | null }
 /** A friend: their DID (their ohm account), and the channels they see, `*` for every one. */
 export type Friend = { did: string; added: string; channels?: "*" | string[]; name?: string; email?: string }
+/** Someone the member asked to be friends with, by the email they typed. */
+export type Ask = { email: string; asked: string; state: "waiting" | "friends"; did?: string }
+/** Someone who let the member into their friends layer. */
+export type Sharer = { did: string; since: string; name?: string; email?: string }
 /** Someone signed in to ohm asking to be a friend, waiting for the member. */
 export type FriendRequest = { id: string; did: string; name?: string; email?: string; message?: string; asked: string }
 export type PublishPlan = {
@@ -112,6 +116,12 @@ export interface HomeSource<Mode extends "async" | "sync" = "async"> {
   moveVisibility(ref: BlockRef, to: MoveTarget, version: string): Promise<MoveResult>
   listFriends(): Promise<Friend[]>
   removeFriend(did: string): Promise<void>
+  /** The member's own side of friendship: asking by email, what they asked, and who let them in. */
+  people: {
+    askByEmail(email: string, message?: string): Promise<void>
+    asked(): Promise<Ask[]>
+    friendOf(): Promise<Sharer[]>
+  }
   /** Friends approved like devices: who asked, and which channels each friend sees. */
   friendRequests: {
     list(): Promise<FriendRequest[]>

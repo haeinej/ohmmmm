@@ -8,7 +8,7 @@ import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
   emptyPlan, mediaName, visibilityMove,
-  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type VaultEvidence,
+  type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Ask, type Friend, type FriendRequest, type HomeFile, type Sharer, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
 import { createFixtureSearch } from "./fixture-search"
@@ -32,6 +32,9 @@ export function createFixtureSource() {
   const media = new Map<string, Uint8Array>()
   const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*" }))
   const friendAsks: FriendRequest[] = []
+  const asks: Ask[] = []
+  // People who let the owner in: the first entity that is not the owner.
+  const sharers: Sharer[] = entities.filter(person => person.did !== owner.did).slice(0, 1).map(person => ({ did: person.did, since: "2026-11-01", name: person.name }))
   const journal = seededJournal([...blocks, ...cortexDocs], fixtureIds)
   /** Kept versions of sealed blocks, newest last, as the private layer keeps them. */
   const kept = new Map<string, { rev: number; version: string; created: string; file: HomeFile }[]>()
@@ -134,6 +137,11 @@ export function createFixtureSource() {
       return { ref: { id: ref.id, layer: to, store: storeOf(doc) }, version: versionOf(fileOf(doc)), cleanupPending: false }
     },
     async listFriends() { return structuredClone(friendList) },
+    people: {
+      async askByEmail(email: string) { if (!asks.some(each => each.email === email.toLowerCase())) asks.push({ email: email.toLowerCase(), asked: "2026-11-24T00:00:00.000Z", state: "waiting" }) },
+      async asked() { return structuredClone(asks) },
+      async friendOf() { return structuredClone(sharers) },
+    },
     friendRequests: {
       async list() { return structuredClone(friendAsks) },
       async approve(id: string, channels: "*" | string[]) {
@@ -257,7 +265,7 @@ export function createFixtureSource() {
         counted: "public and friends-only",
       }
     },
-  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "friendRequests" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "friendRequests" | "agenda">
+  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agenda">
   const ask = (request: Omit<MoveRequest, "id" | "asked" | "state">) => {
     const made = { ...request, id: `r${requests.length + 1}`, asked: "2026-11-24T00:00:00.000Z", state: "waiting" as const }
     requests.push(made)

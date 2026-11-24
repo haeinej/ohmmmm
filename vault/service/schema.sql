@@ -32,8 +32,12 @@ CREATE TABLE IF NOT EXISTS links (
   did TEXT NOT NULL UNIQUE,
   linked_at TEXT NOT NULL,
   -- When what the account had already published was first brought into the vault. Empty until then.
-  mirrored_at TEXT
+  mirrored_at TEXT,
+  -- The ohm account's name and email, as its own sign-in last said, so a friend can be found by email.
+  name TEXT,
+  email TEXT
 );
+CREATE INDEX IF NOT EXISTS links_email ON links (email);
 
 -- The friends layer: blocks a member keeps readable here, so the friends they chose can read them.
 -- One row for each block that is not a post (posts stay in `posts`, whose friends-only rows are part
@@ -285,4 +289,13 @@ CREATE TABLE IF NOT EXISTS published_copies (
   did TEXT PRIMARY KEY,
   entries TEXT NOT NULL,
   read_at TEXT NOT NULL
+);
+
+-- Who a person asked to be friends with, by the email they typed. Kept whether or not that email has
+-- an ohm account, so the asker's list never says which emails do (src/friendship.mjs).
+CREATE TABLE IF NOT EXISTS friend_asks (
+  viewer TEXT NOT NULL,
+  email TEXT NOT NULL,
+  asked_at TEXT NOT NULL,
+  PRIMARY KEY (viewer, email)
 );

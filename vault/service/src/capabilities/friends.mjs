@@ -65,13 +65,32 @@ export default {
     },
     'com.ohmmmm.vault.askFriend': {
       verb: 'POST', asks: 'ohm', changes: true,
-      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend. The member sees their name and email from their ohm account, and their DID, and answers in the cockpit. Asking again, or asking someone who already let them in, changes nothing, and the answer is the same either way.',
-      takes: { owner: 'the DID of the member asked', message: 'optional: a line for the member' },
+      about: 'Someone signed in to ohm, with their AT Protocol account connected, asks a member to be their friend, by the email of the member\'s ohm account or by their DID. The member sees the asker\'s name and email from their ohm account, and their DID, and answers in the cockpit. The answer is the same whether or not the email has an ohm account, whether asked once or again, and whether or not they already let the asker in.',
+      takes: { email: 'the email of the person asked', owner: 'or: their DID', message: 'optional: a line for them' },
       gives: '`asked`',
-      run: async ({ body, friendships, did, user }) => {
+      run: async ({ body, friendships, linked, did, user }) => {
         if (!did) throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first');
-        const { owner, message } = await body();
+        const { owner, email, message } = await body();
+        if (email !== undefined) return friendships.askByEmail({ viewer: did, email, name: user?.name, ownEmail: user?.email, message, didByEmail: linked.didByEmail });
         return friendships.ask(owner, { viewer: did, name: user?.name, email: user?.email, message });
+      },
+    },
+    'com.ohmmmm.vault.listAsked': {
+      verb: 'GET', asks: 'member', changes: false,
+      about: 'Who the member asked to be friends with, by the email they typed, newest first: `waiting` until that person lets them in, then `friends`. An email with no ohm account, and a request declined, both stay waiting.',
+      takes: {},
+      gives: '`asks` (email, asked, state, and `did` once friends)',
+      run: ({ friendships, linked, did }) => friendships.asked(did, { didByEmail: linked.didByEmail }),
+    },
+    'com.ohmmmm.vault.listFriendOf': {
+      verb: 'GET', asks: 'member', changes: false,
+      about: 'The people who let the member into their friends layer, with their name and email from their ohm account: whose shared blocks the member reads with listShared and getShared.',
+      takes: {},
+      gives: '`people` (did, since, name, email)',
+      run: async ({ friendships, linked, did }) => {
+        const people = await friendships.friendOf(did);
+        const known = await linked.people(people.map(each => each.did));
+        return { people: people.map(each => ({ ...each, ...known.get(each.did) })) };
       },
     },
     'com.ohmmmm.vault.listFriendRequests': {
@@ -103,14 +122,14 @@ export default {
       run: async ({ body, friendships, did }) => friendships.setChannels(did, await body()),
     },
     'com.ohmmmm.vault.listShared': {
-      verb: 'GET', asks: 'token', changes: false,
+      verb: 'GET', asks: 'member', changes: false,
       about: 'What another member shares with the asker: their friends-only blocks and posts, when the asker is on their friend list. To anyone else it answers NotFound, whether or not anything is there.',
       takes: { owner: 'the DID whose friends layer to read' },
       gives: '`owner`, `blocks` (id, version, path, kind, title)',
       run: ({ url, blocks, did }) => blocks.shared(url.searchParams.get('owner'), did),
     },
     'com.ohmmmm.vault.getShared': {
-      verb: 'GET', asks: 'token', changes: false,
+      verb: 'GET', asks: 'member', changes: false,
       about: 'One friends-only block or post another member shares with the asker, as its file.',
       takes: { owner: 'the DID whose friends layer to read', id: 'the block\'s or post\'s ID' },
       gives: '`block` (id, path, text), `version`',

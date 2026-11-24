@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { FolderGitIcon } from "lucide-react"
+import { FolderGitIcon, UsersIcon } from "lucide-react"
 import { NotificationCenter } from "./NotificationCenter"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Icon } from "@/components/ui/icon"
@@ -45,6 +45,7 @@ export function Rack() {
       <RackButton label="New block" shortcut="⌘N" onClick={() => void report(createDraft())}><RackIcon icon={icons.write} /></RackButton>
       <div className="h-4" />
       <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
+      <RackButton label="Connections" active={side === "connections"} onClick={() => toggleSide("connections")}><RackIcon icon={UsersIcon} /></RackButton>
       <div className="flex-1" />
       <NotificationCenter />
       <RackButton label="You" active={side === "profile"} onClick={() => (side === "profile" ? toggleSide("profile") : openSettings())}>

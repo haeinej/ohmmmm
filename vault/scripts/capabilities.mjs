@@ -161,6 +161,8 @@ const NO_TOOL = {
   Export: 'The command line and the editor write the vault out. An agent reads posts one at a time',
   'com.ohmmmm.vault.addFriend': 'Only the member can widen who can read the friends layer, through their ohm session',
   'com.ohmmmm.vault.askFriend': 'A person asks, signed in to ohm, from the cockpit or a member\'s site',
+  'com.ohmmmm.vault.listAsked': 'The cockpit\'s Connections panel shows it',
+  'com.ohmmmm.vault.listFriendOf': 'The cockpit\'s Connections panel shows it. An agent reads shared blocks with vault_shared_list',
   'com.ohmmmm.vault.listFriendRequests': 'The member answers requests in the cockpit. An agent never lets anyone in',
   'com.ohmmmm.vault.approveFriend': 'Only the member can widen who can read the friends layer, through their ohm session',
   'com.ohmmmm.vault.declineFriend': 'The member answers requests in the cockpit',

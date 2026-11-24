@@ -62,6 +62,36 @@ export function friendshipStore(db) {
       return { asked: true };
     },
 
+    // Asking by email. The ask is kept for the asker whether or not the email has an ohm account, and
+    // the answer is the same either way, so no one can learn which emails are on ohm.
+    async askByEmail({ viewer, email, name, ownEmail, message, didByEmail, now = new Date() }) {
+      const typed = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed) || typed.length > 320) throw new Refused(400, 'InvalidRequest', 'Give their email address');
+      if (ownEmail && typed === ownEmail.toLowerCase()) throw new Refused(400, 'InvalidRequest', 'That is your own email');
+      await db.prepare('INSERT INTO friend_asks (viewer, email, asked_at) VALUES (?1, ?2, ?3) ON CONFLICT (viewer, email) DO NOTHING').bind(viewer, typed, now.toISOString()).run();
+      const owner = await didByEmail(typed);
+      if (owner && owner !== viewer) await this.ask(owner, { viewer, name, email: ownEmail, message, now });
+      return { asked: true };
+    },
+
+    // What the asker asked, by the email they typed: waiting, or friends once they were let in.
+    async asked(viewer, { didByEmail }) {
+      const { results } = await db.prepare('SELECT email, asked_at FROM friend_asks WHERE viewer = ?1 ORDER BY asked_at DESC').bind(viewer).all();
+      const asks = [];
+      for (const each of results) {
+        const owner = await didByEmail(each.email);
+        const friends = owner ? await friendScope(db, owner, viewer) : null;
+        asks.push({ email: each.email, asked: each.asked_at, state: friends ? 'friends' : 'waiting', ...(friends ? { did: owner } : {}) });
+      }
+      return { asks };
+    },
+
+    // The people who let `viewer` into their friends layer: whose shared blocks they read.
+    async friendOf(viewer) {
+      const { results } = await db.prepare('SELECT did, added_at FROM friends WHERE friend = ?1 ORDER BY added_at').bind(viewer).all();
+      return results.map(each => ({ did: each.did, since: each.added_at }));
+    },
+
     async requests(did) {
       const { results } = await db.prepare("SELECT * FROM friend_requests WHERE did = ?1 AND state = 'waiting' ORDER BY asked_at").bind(did).all();
       return { requests: results.map(row) };

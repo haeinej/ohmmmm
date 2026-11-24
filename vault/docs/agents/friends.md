@@ -14,4 +14,8 @@ Human guide: [friends](../friends.md). Code: [service/src/friendship.mjs](../../
   - The existing `addFriend` (`ohm`, by DID) adds every channel.
 - **Storage:** `friends.channels` (JSON, or NULL for every channel), `friends.name`, `friends.email`, and the `friend_requests` table. Migration [0008_friend_access.sql](../../service/migrations/0008_friend_access.sql).
 - **Cockpit:** `loadFriendRequests` runs when the home and the bell open. `approveFriend(id, channels)` is refused with `DataError` for an empty list. The dialog offers Every channel or top-level channels.
-- **Not built:** the asking side's screen. A site or the cockpit has to call `askFriend`; today only the request exists.
+- **By email:** `askFriend {email, message?}` lower-cases the email and keeps it in `friend_asks (viewer, email)` whether or not an account has it. It resolves the email through `links.email`, which `linked.remember(user)` writes from each session request, and only asks when a DID is found. It always answers `{asked: true}`. Asking your own email gives `InvalidRequest`.
+- `listAsked` (member) gives `asks` (email, asked, state `waiting`|`friends`, `did` once friends); unknown emails and declined requests stay `waiting`. `listFriendOf` (member) gives the people who let the member in, with name and email from `links`.
+- `listShared`/`getShared` now ask `member` (a PDS token, or the ohm session the cockpit uses). The same `friendScope` applies.
+- Migration [0009_people.sql](../../service/migrations/0009_people.sql) adds `links.name`, `links.email` and `friend_asks`.
+- **Cockpit:** the rack's **Connections** ([ConnectionsPanel.tsx](../../../app/src/workspace/ConnectionsPanel.tsx)) shows the list and graph, Make friends (`askFriend`, with the `connections.ask` tool behind a Dialog), the person card with `sharedBy`, `openShared` (view `shared`, read-only), and Stop sharing (`removeFriend`, behind a Dialog). Tests: `app/test/connections.test.ts`.

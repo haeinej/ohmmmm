@@ -75,6 +75,7 @@ export function createService({ whoIs, get = fetch } = {}) {
         user = await session();
         link = await linked.of(user.id);
         did = link?.did ?? null;
+        if (link) await linked.remember(user);
       } else if (asked.asks === 'member') {
         // A token from the member's own PDS, as the command line and an agent's tools send, or an
         // ohm session, as the page does. A session is worth exactly the one account it was connected to.
@@ -84,6 +85,7 @@ export function createService({ whoIs, get = fetch } = {}) {
           user = await session();
           link = await linked.of(user.id);
           did = link?.did ?? (() => { throw new Refused(409, 'NotConnected', 'Connect your AT Protocol account first'); })();
+          await linked.remember(user);
         }
       }
 

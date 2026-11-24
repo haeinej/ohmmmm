@@ -4,7 +4,7 @@ import { words } from "../../../vault/vault/words.mjs"
 import {
   blockOf, CORTEX_CONTEXT, mediaName, moveVisibility, readEvidence, searchInput, visibilityMove,
   type Account, type Agenda, type BlockFile, type BlockHead, type BlockRef, type ChannelHead, type ChannelMove,
-  type CortexEntry, type CortexFile, type Friend, type FriendRequest, type HistoryVersion, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
+  type CortexEntry, type CortexFile, type Ask, type Friend, type FriendRequest, type HistoryVersion, type Sharer, type HomeFile, type HomeSource, type Layer, type MoveRequest, type PublishPlan,
 } from "./source"
 import { isBlockKind } from "./block-kind"
 import type { SearchHit } from "./search"
@@ -128,10 +128,9 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
       return { path: channel.path.endsWith("/_channel.md") ? channel.path : `${head.path}/_channel.md`, text: channel.text }
     }))
   }
-  const sharedToken = (method: "listShared" | "getShared") => {
-    if (!options.sharedServiceToken) throw new HomeRefusal("TokenRequired", "Shared reads need a service token for your DID.")
-    return options.sharedServiceToken(`com.ohmmmm.vault.${method}`)
-  }
+  // A shared read rides on the ohm session, or on a token for the member's DID when one is given.
+  const sharedToken = async (method: "listShared" | "getShared") =>
+    options.sharedServiceToken ? options.sharedServiceToken(`com.ohmmmm.vault.${method}`) : undefined
   const files = privateSession?.keys.vaultPrivateFiles({ baseUrl: base.href, fetch: boundFetch })
   const unlocked = () => {
     const session = privateSession?.unlocked()
@@ -330,6 +329,11 @@ export function createServiceSource<Master, Sealed>(options: ServiceOptions<Mast
     moveVisibility: (ref, to, version) => moveVisibility(source, ref, to, version),
     async listFriends() { return (await vaultAsk<{ friends: Friend[] }>("listFriends")).friends },
     async removeFriend(id) { await vaultAsk("removeFriend", { body: { did: id } }) },
+    people: {
+      async askByEmail(email, message) { await vaultAsk("askFriend", { body: { email, ...(message ? { message } : {}) } }) },
+      asked: async () => (await vaultAsk<{ asks: Ask[] }>("listAsked")).asks,
+      friendOf: async () => (await vaultAsk<{ people: Sharer[] }>("listFriendOf")).people,
+    },
     friendRequests: {
       list: async () => (await vaultAsk<{ requests: FriendRequest[] }>("listFriendRequests")).requests,
       async approve(id, channels) { await vaultAsk("approveFriend", { body: { id, channels } }) },

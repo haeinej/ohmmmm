@@ -96,3 +96,24 @@ test('declining lets no one in; a friend added before sees every channel', async
   assert.equal((await ask('listShared', { query: { owner: ada }, as: bo })).blocks.length, 2);
   await assert.rejects(ask('setFriendChannels', { body: { friend: bo, channels: ['../x'] }, cookie: 'session=ada' }), { code: 'InvalidRequest' });
 });
+
+test('asking by email: the same answer whether or not the email is on ohm, and the asker sees who let them in', async () => {
+  const { ask } = await setUp();
+  // Ada has signed in to ohm, so her account's email is known.
+  await ask('listFriendRequests', { cookie: 'session=ada' });
+  assert.deepEqual(await ask('askFriend', { body: { email: 'ADA@example.test', message: 'Hi!' }, cookie: 'session=bo' }), { asked: true });
+  assert.deepEqual(await ask('askFriend', { body: { email: 'nobody@example.test' }, cookie: 'session=bo' }), { asked: true });
+  await assert.rejects(ask('askFriend', { body: { email: 'bo@example.test' }, cookie: 'session=bo' }), { code: 'InvalidRequest' });
+  await assert.rejects(ask('askFriend', { body: { email: 'not an email' }, cookie: 'session=bo' }), { code: 'InvalidRequest' });
+  // Bo's list cannot tell which email is on ohm: both wait.
+  const waiting = (await ask('listAsked', { as: bo })).asks;
+  assert.deepEqual(waiting.map(each => [each.email, each.state]).sort(), [['ada@example.test', 'waiting'], ['nobody@example.test', 'waiting']]);
+  // Ada sees Bo, approves; Bo then sees Ada as a friend, with her name.
+  const [request] = (await ask('listFriendRequests', { as: ada })).requests;
+  assert.deepEqual([request.did, request.email, request.message], [bo, 'bo@example.test', 'Hi!']);
+  await ask('approveFriend', { body: { id: request.id }, cookie: 'session=ada' });
+  const after = (await ask('listAsked', { as: bo })).asks.find(each => each.email === 'ada@example.test');
+  assert.deepEqual([after.state, after.did], ['friends', ada]);
+  assert.deepEqual((await ask('listFriendOf', { as: bo })).people.map(each => [each.did, each.name, each.email]), [[ada, 'Ada', 'ada@example.test']]);
+  assert.deepEqual((await ask('listFriendOf', { as: ada })).people, []);
+});
