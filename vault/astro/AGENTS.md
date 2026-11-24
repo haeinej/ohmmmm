@@ -79,6 +79,7 @@ snapshot validation and preserved store state on failures. `test/build.test.mjs`
 builds the example using real Astro with a loopback fake PDS. Install its
 dependencies to enable this integration test. The repository's recursive Node
 test discovery skips it with a setup message when Astro is unavailable.
+The example fails its build when two entry IDs would produce one route.
 `testing/fake-pds.mjs` owns the synthetic documents and HTTP server.
 
 Update both guides, the types and the example when the contract changes. For

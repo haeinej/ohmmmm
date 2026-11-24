@@ -101,6 +101,8 @@ A failed request, incomplete inventory, malformed owned post or schema error
 fails the build and preserves the previous collection in Astro's store. Correct
 the record or configuration, restore PDS availability, and build again. A
 successful empty result clears the collection, including withdrawn posts.
+The example rejects duplicate permalinks. Give colliding posts unique slugs
+before rebuilding, or adapt your own site's routing to their stable entry IDs.
 
 Public entries are included in static output. Friends content requires a
 request-time source and Astro live collections in a later step. Review the copy

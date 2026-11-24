@@ -1,10 +1,13 @@
 ---
 import { getCollection, render } from 'astro:content';
 export async function getStaticPaths() {
-  return (await getCollection('essays')).map(entry => ({
-    params: { path: decodeURIComponent(entry.data.permalink.slice('/posts/'.length)) },
-    props: { entry },
-  }));
+  const routes = new Set();
+  return (await getCollection('essays')).map(entry => {
+    const path = decodeURIComponent(entry.data.permalink.slice('/posts/'.length));
+    if (routes.has(path)) throw new Error(`Duplicate ohm permalink ${entry.data.permalink}; choose unique post slugs`);
+    routes.add(path);
+    return { params: { path }, props: { entry } };
+  });
 }
 const { entry } = Astro.props;
 const { Content } = await render(entry);
