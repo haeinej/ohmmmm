@@ -69,5 +69,5 @@ None.
 ## Checked
 
 - [x] By tests: `test/agents.test.ts` (store handlers, card wording), `vault/test/mcp.test.mjs` (waiting, approval used once, decline, pause, disconnect)
-- [ ] By hand, in light and dark, on a phone and a desktop
+- [x] By hand, against the test fixture (not a live service), in light and dark, on a phone (375 px) and a desktop: cards open and close, Approve, Pause, and the Disconnect dialog
 - [ ] By tools: `getTools()` lists `agents.answer` while the panel is open
