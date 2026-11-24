@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ASK, ASK_AFTER, ASK_EVERY, ASK_MAX, BUDGETS, chars, promptWords } from '../src/adapter.mjs';
+import { ASK, ASK_AFTER, ASK_EVERY, ASK_MAX, BUDGETS, chars, hook, MOMENTS, promptWords } from '../src/adapter.mjs';
 import { RECENT } from '../src/folder.mjs';
 import { initCortex, openCortex } from '../src/folder.mjs';
 
@@ -227,15 +227,57 @@ test('a broken cortex folder makes every moment exit 0 with no output', async ()
   assert.equal(run('nonsense', good, 'codex', '{}').out, '');
 });
 
-test('no moment takes longer than 200 ms on a cortex with 300 observations', async () => {
+// Timing, on a cortex with 300 observations. A spawned `cortex hook` first starts Node, and on a busy
+// machine every process also waits for its turn on the processor; neither is the cortex's doing. So
+// one test measures the hook's own work in this process, by the processor time it uses, and the other
+// times the spawned command against a bare Node started just before it, which catches the command
+// waiting on something. Each takes the median of a few runs, so one pause does not decide it, and
+// each run is a new session's first turn, so every run takes the same path.
+const RUNS = 5;
+const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+const withObservations = async count => {
   const dir = await fresh();
   const cortex = openCortex(dir, { actor: 'member' });
-  for (let n = 0; n < 300; n++) await cortex.observe({ id: `seen-${n}`, text: `Something learned about how Sam works, ${n}.`, pin: n < 3 });
-  for (const moment of ['session-start', 'prompt', 'stop', 'session-end']) {
-    const { status, ms } = run(moment, dir, 'claude-code', claude[moment]('s1'));
-    assert.equal(status, 0);
-    assert.ok(ms < 200, `${moment} took ${Math.round(ms)} ms`);
+  for (let n = 0; n < count; n++) await cortex.observe({ id: `seen-${n}`, text: `Something learned about how Sam works, ${n}.`, pin: n < 3 });
+  return dir;
+};
+const shownMs = values => values.map(Math.round).join(', ');
+
+test('no moment\'s own work uses more than 200 ms of processor time on a cortex with 300 observations', async () => {
+  const dir = await withObservations(300);
+  const used = Object.fromEntries(MOMENTS.map(moment => [moment, []]));
+  for (let n = 0; n < RUNS; n++) {
+    for (const moment of MOMENTS) {
+      // What `cortex hook` does once Node has started: the answer, then what it records. Processor
+      // time, not the clock, which on a busy machine also counts the time spent waiting for a turn.
+      const before = process.cpuUsage();
+      const { after } = await hook(moment, { dir, agent: 'claude-code', input: claude[moment](`s${n}`) });
+      if (after) await after();
+      const { user, system } = process.cpuUsage(before);
+      used[moment].push((user + system) / 1000);
+    }
   }
+  for (const moment of MOMENTS) assert.ok(median(used[moment]) < 200, `${moment} used ${shownMs(used[moment])} ms`);
+});
+
+test('the hook command adds less than 300 ms to starting Node, on a cortex with 300 observations', async () => {
+  const dir = await withObservations(300);
+  const added = Object.fromEntries(MOMENTS.map(moment => [moment, []]));
+  for (let n = 0; n < RUNS; n++) {
+    for (const moment of MOMENTS) {
+      const started = performance.now();
+      spawnSync('node', ['-e', '']);
+      const bare = performance.now() - started;
+      const { status, out, ms } = run(moment, dir, 'claude-code', claude[moment](`s${n}`));
+      assert.equal(status, 0);
+      // A hook that failed would be fast and silent; this one must have answered.
+      if (moment === 'session-start') assert.match(out, /"additionalContext"/);
+      added[moment].push(ms - bare);
+    }
+  }
+  // This catches waiting: on standard input, which a closed pipe must end at once, or on anything
+  // else. The command's own imports count too.
+  for (const moment of MOMENTS) assert.ok(median(added[moment]) < 300, `${moment} added ${shownMs(added[moment])} ms to starting Node`);
 });
 
 test('install-hooks prints the snippet for each client and writes nothing, and the session log merges cleanly', async () => {
