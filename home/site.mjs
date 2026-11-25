@@ -602,7 +602,10 @@ export function siteRoutes({ layout, send, said, body }) {
       // The status line: how many files are not published, and the live deploy.
       const [sync, deploys, saves] = await Promise.all([syncOf(dir), deploysOf(dir), savesOf(dir)]);
       const live = [...deploys].reverse().find(d => d.production) ?? null;
-      return send(res, 200, { changed: sync.changed, ahead: sync.ahead, behind: sync.behind, branch: sync.branch, live, lastSave: saves.at(-1) ?? null }, { 'Cache-Control': 'no-store' }), true;
+      const head = (await git(dir, 'rev-parse', 'HEAD').catch(() => '')).trim();
+      let domain = '';
+      try { domain = (await readFile(join(dir, 'CNAME'), 'utf8')).trim(); } catch { /* none */ }
+      return send(res, 200, { changed: sync.changed, ahead: sync.ahead, behind: sync.behind, branch: sync.branch, remote: sync.remote, head, live, domain, lastSave: saves.at(-1) ?? null }, { 'Cache-Control': 'no-store' }), true;
     }
     if (path === '/site/history' && req.method === 'GET') return send(res, 200, await historyOf(dir), { 'Cache-Control': 'no-store' }), true;
     if (path === '/site/kept' && req.method === 'GET') {

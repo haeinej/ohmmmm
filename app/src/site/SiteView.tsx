@@ -14,6 +14,7 @@ import { LiveCanvas, type LiveCanvasHandle, type LiveState } from "./LiveCanvas"
 import { FileEditor } from "./FileEditor"
 import { ProfileView } from "./ProfileView"
 import { DeployControl } from "./SiteDeploy"
+import { PublishControl } from "./SitePublish"
 import { SyncControls } from "./SiteSync"
 import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_FILE, OPEN_PAGE, OPEN_PROFILE, readContent, SITE_SAVED, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
 
@@ -35,6 +36,8 @@ export function SiteView() {
   const [editing, setEditing] = useState<string | null>(null)
   const [sync, setSync] = useState<SiteSync | null>(null)
   const [syncing, setSyncing] = useState(false)
+  /** Pull, Commit, Push and Deploy one by one, for people who want them: behind Advanced. */
+  const [advanced, setAdvanced] = useState(false)
 
   useEffect(() => { readContent().then(setContent, e => notify({ message: (e as Error).message, tone: "error" })) }, [])
   const refreshSync = useCallback(() => readSync().then(setSync, () => setSync(null)), [])
@@ -231,8 +234,11 @@ export function SiteView() {
         <Button size="icon-sm" variant="ghost" aria-label="Zoom out" disabled={zoom === ZOOMS[0]} onClick={() => zoomBy(-1)}><Icon icon={MinusIcon} /></Button>
         <span className="w-10 text-center text-small text-muted-foreground tabular-nums">{Math.round(zoom * 100)}%</span>
         <Button size="icon-sm" variant="ghost" aria-label="Zoom in" disabled={zoom === 1} onClick={() => zoomBy(1)}><Icon icon={PlusIcon} /></Button>
-        <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
-        <DeployControl />
+        {advanced && <>
+          <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
+          <DeployControl />
+        </>}
+        <PublishControl advanced={advanced} onAdvanced={() => setAdvanced(a => !a)} />
       </header>
 
       <LiveCanvas ref={canvas} start={START} zoom={zoom} accent={accent} onState={setLive} onOpen={openFromCanvas} />

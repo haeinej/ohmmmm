@@ -293,3 +293,24 @@ export const askToOpenFile = (path: string) => window.dispatchEvent(new CustomEv
 /** Something was saved: the status line, the files and the canvas read again. */
 export const SITE_SAVED = "ohm:site-saved"
 export const saved = () => window.dispatchEvent(new CustomEvent(SITE_SAVED))
+
+// ---- Publish (flows/site.md, Save and Publish) ----
+
+/** Where the site stands for the status line: files not published, commits not sent, the live deploy. */
+export type SiteStatus = { changed: string[]; ahead: number; behind: number; branch: string; remote: string; head: string; live: Deployed | null; domain: string; lastSave: { at: string; path: string } | null }
+
+export async function readStatus(): Promise<SiteStatus> {
+  const res = await bridgeFetch("/site/status", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SiteStatus
+}
+
+export type PublishStep = "pull" | "commit" | "push" | "deploy"
+export type Published = { done: { step: PublishStep; did: boolean }[]; failed?: { step: PublishStep; reason: string }; live?: Deployed | null }
+
+/** Pull, commit, push, deploy: each skipped when already done, stopping at the first that fails. The person's alone: no tool calls it. */
+export async function publishSite(message: string): Promise<Published> {
+  const res = await bridgeFetch("/site/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
+  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Publish did not start")
+  return (await res.json()) as Published
+}
