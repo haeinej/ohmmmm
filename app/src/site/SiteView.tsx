@@ -11,10 +11,11 @@ import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
 import { LiveCanvas, type LiveCanvasHandle, type LiveState } from "./LiveCanvas"
+import { FileEditor } from "./FileEditor"
 import { ProfileView } from "./ProfileView"
 import { DeployControl } from "./SiteDeploy"
 import { SyncControls } from "./SiteSync"
-import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_PROFILE, readContent, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
+import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_FILE, OPEN_PAGE, OPEN_PROFILE, readContent, SITE_SAVED, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
 
 /** The page the canvas opens on: the gallery, which holds every photograph, writing and project. */
 const START = "/site/archive/index.html"
@@ -30,12 +31,20 @@ export function SiteView() {
   /** The block that is open over the canvas, by its path. */
   const [block, setBlock] = useState<string | null>(null)
   const [profileOpen, setProfileOpen] = useState(false)
+  /** A file open in the text editor, by its path. */
+  const [editing, setEditing] = useState<string | null>(null)
   const [sync, setSync] = useState<SiteSync | null>(null)
   const [syncing, setSyncing] = useState(false)
 
   useEffect(() => { readContent().then(setContent, e => notify({ message: (e as Error).message, tone: "error" })) }, [])
   const refreshSync = useCallback(() => readSync().then(setSync, () => setSync(null)), [])
   useEffect(() => { void refreshSync() }, [refreshSync])
+  // Any save (a page, a file in the editor, a move, a restore): the canvas and where the site stands are read again.
+  useEffect(() => {
+    const onSaved = () => { void refreshSync(); canvas.current?.reload() }
+    window.addEventListener(SITE_SAVED, onSaved)
+    return () => window.removeEventListener(SITE_SAVED, onSaved)
+  }, [refreshSync])
 
   /** One handler for every save to a page's file: the Save buttons and the tools that change a page. */
   const save = useCallback(async (page: string, change: Change) => {
@@ -100,9 +109,13 @@ export function SiteView() {
   useEffect(() => {
     const onBlock = (e: Event) => { try { openBlock((e as CustomEvent<string>).detail) } catch { /* not a block of this site */ } }
     const onProfile = () => { setBlock(null); setProfileOpen(true) }
+    const onFile = (e: Event) => { setBlock(null); setProfileOpen(false); setEditing((e as CustomEvent<string>).detail) }
     window.addEventListener(OPEN_BLOCK, onBlock)
     window.addEventListener(OPEN_PROFILE, onProfile)
-    return () => { window.removeEventListener(OPEN_BLOCK, onBlock); window.removeEventListener(OPEN_PROFILE, onProfile) }
+    const onPage = (e: Event) => { setBlock(null); setProfileOpen(false); setEditing(null); canvas.current?.go((e as CustomEvent<string>).detail) }
+    window.addEventListener(OPEN_FILE, onFile)
+    window.addEventListener(OPEN_PAGE, onPage)
+    return () => { window.removeEventListener(OPEN_PAGE, onPage); window.removeEventListener(OPEN_BLOCK, onBlock); window.removeEventListener(OPEN_PROFILE, onProfile); window.removeEventListener(OPEN_FILE, onFile) }
   }, [openBlock])
   const opened = useMemo(() => {
     for (const c of content?.collections ?? []) {
@@ -202,6 +215,7 @@ export function SiteView() {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {profileOpen && <ProfileView onClose={closeProfile} />}
+      {editing && <FileEditor path={editing} onClose={() => setEditing(null)} />}
       {opened && (
         <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
           titleOf={path => path}

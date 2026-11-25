@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
 import { ProfileCard } from "./ProfileView"
+import { SiteFiles } from "./SiteFiles"
 import { SidePanelFrame } from "@/workspace/Surface"
 import { askToOpenBlock, channelsIn, readContent, readOwnChannels, saveOwnChannels, type OwnChannel, type OwnChannels, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
@@ -175,6 +176,7 @@ export function SiteContentPanel() {
    * Where the panel has been, and where in that it is now: all channels (null), a channel by name,
    * or a channel inside it as `Photographs/Berlin`. Back and forward walk it, as in a browser.
    */
+  const [showing, setShowing] = useState<"content" | "files">("content")
   const [trail, setTrail] = useState<{ been: (string | null)[]; at: number }>({ been: [null], at: 0 })
   const expanded = trail.been[trail.at]
   const setExpanded = (to: string | null) => setTrail(t => t.been[t.at] === to ? t : { been: [...t.been.slice(0, t.at + 1), to], at: t.at + 1 })
@@ -222,7 +224,15 @@ export function SiteContentPanel() {
   return (
     // The profile is the panel's heading, so it stays in place while the channels scroll under it.
     <SidePanelFrame label="Your home" heading={<ProfileCard />}>
-      <div className="flex flex-col gap-3 pt-1">
+      {/* Content (the site's blocks, by channel) or Files (every file git tracks in it). */}
+      <div role="tablist" aria-label="Show" className="flex gap-1 px-1 pt-1">
+        {(["content", "files"] as const).map(v => (
+          <Button key={v} role="tab" aria-selected={showing === v} size="xs" variant={showing === v ? "secondary" : "ghost"} onClick={() => setShowing(v)}>
+            {v === "content" ? "Content" : "Files"}
+          </Button>
+        ))}
+      </div>
+      {showing === "files" ? <div className="pt-1"><SiteFiles content={content} /></div> : <div className="flex flex-col gap-3 pt-1">
         {within ? (
           // A channel inside a channel, open: where it is, then its blocks.
           <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2"
@@ -266,7 +276,7 @@ export function SiteContentPanel() {
         {!expanded && (naming === ""
           ? <NewChannel label="New channel" onMake={name => make(name)} onCancel={() => setNaming(null)} />
           : <Button size="sm" variant="ghost" className={quiet} onClick={() => setNaming("")}><Icon icon={PlusIcon} size="xs" />New channel</Button>)}
-      </div>
+      </div>}
     </SidePanelFrame>
   )
 }

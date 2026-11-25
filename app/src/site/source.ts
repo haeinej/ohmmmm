@@ -248,4 +248,48 @@ export async function saveChange(page: string, change: Change): Promise<void> {
   const wrote = await bridgeFetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "" }, body: next })
   if (wrote.status === 412) throw new EditProblem("This page changed on disk since it was read. Reload it and try again")
   if (!wrote.ok) throw new EditProblem("The page couldn't be saved")
+  saved()
 }
+
+// ---- Files: every tracked file of the site (flows/site.md, Files) ----
+
+/** One tracked file: changed since the last publish, used by the site, and whether it reads as text. */
+export type SiteFile = { path: string; changed: boolean; used: boolean; text: boolean }
+
+export async function readTree(): Promise<SiteFile[]> {
+  const res = await bridgeFetch("/site/tree", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return ((await res.json()) as { files: SiteFile[] }).files
+}
+
+const fileAddress = (path: string) => `/site/file/${path.split("/").map(encodeURIComponent).join("/")}`
+
+/** A file's text and the version it was read at. */
+export async function readFileText(path: string): Promise<{ text: string; version: string }> {
+  const res = await bridgeFetch(fileAddress(path), { cache: "no-store" })
+  if (!res.ok) throw new EditProblem("That file isn't in the site")
+  return { text: await res.text(), version: res.headers.get("ETag") ?? "" }
+}
+
+/** Save a file's whole text, over the version read: an ordinary save, logged, never published by itself. */
+export async function saveFileText(path: string, text: string, version: string): Promise<string> {
+  const res = await bridgeFetch(`${fileAddress(path)}?via=editor`, { method: "PUT", headers: { "If-Match": version }, body: text })
+  if (res.status === 412) throw new EditProblem("This file changed on disk since it was read. Open it again to see the change")
+  if (!res.ok) throw new EditProblem(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "The file couldn't be saved")
+  saved()
+  return res.headers.get("ETag") ?? ((await res.json()) as { etag: string }).etag
+}
+
+/** Move or rename a file, as a save. */
+export async function moveSiteFile(from: string, to: string): Promise<void> {
+  const res = await bridgeFetch("/site/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }) })
+  if (!res.ok) throw new EditProblem(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "The file couldn't be moved")
+  saved()
+}
+
+/** Ask the Site view to open a file in the text editor. */
+export const OPEN_FILE = "ohm:site-open-file"
+export const askToOpenFile = (path: string) => window.dispatchEvent(new CustomEvent(OPEN_FILE, { detail: path }))
+/** Something was saved: the status line, the files and the canvas read again. */
+export const SITE_SAVED = "ohm:site-saved"
+export const saved = () => window.dispatchEvent(new CustomEvent(SITE_SAVED))
