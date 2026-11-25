@@ -51,10 +51,10 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
 }
 
 /**
- * A channel inside a channel, as a cover of one fixed size: the block at its front fills it, as its
- * own tile shows it, and in the middle a white block carries the channel's name and count. It
- * wears its channel's mark: an edge in that colour and its name written in it; with no mark, a
- * plain line and ink.
+ * A channel inside a channel, as a cover of one fixed size: a white block, with the block at the
+ * channel's front laid on it as a small picture, and the channel's name and count centred under
+ * it. It wears its channel's mark: an edge in that colour and its name written in it; with no
+ * mark, a plain line and ink.
  */
 function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; items: SiteItem[]; mark?: string; masonry?: boolean; onOpen(): void }) {
   const front = items.find(i => i.kind === "image") ?? items[0]
@@ -62,17 +62,15 @@ function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; ite
   const colour = worn ? markColor(worn.key) : undefined
   return (
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
-      className={cn(tile, "hover:brightness-95", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
-      <span aria-hidden className="absolute inset-0 overflow-hidden">
+      className={cn(tile, "flex flex-col items-center justify-center gap-2 bg-background p-2 hover:bg-accent", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
+      <span aria-hidden className="relative size-14 shrink-0 overflow-hidden rounded-md bg-muted">
         {front && (front.kind === "image" || front.kind === "video"
           ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
           : <Face item={front} fill={false} />)}
       </span>
-      <span className="absolute inset-0 flex items-center justify-center p-2">
-        <span className="flex max-w-full flex-col items-center gap-0.5 rounded-md bg-background px-2 py-1.5 text-center" style={{ color: colour }}>
-          <span className="line-clamp-2 font-medium leading-tight break-words">{name}</span>
-          <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
-        </span>
+      <span className="flex max-w-full flex-col items-center gap-0.5 text-center" style={{ color: colour }}>
+        <span className="line-clamp-2 font-medium leading-tight break-words">{name}</span>
+        <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
       </span>
       <span aria-hidden className="absolute inset-0 rounded-md" style={{ boxShadow: `inset 0 0 0 1.5px ${colour ?? "var(--border)"}` }} />
     </button>
