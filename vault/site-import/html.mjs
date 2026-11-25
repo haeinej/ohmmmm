@@ -198,5 +198,8 @@ export function templatesOf(htmls) {
 /** A template filled with one item's fields. */
 export const fill = (parts, fields) => parts.map(part => (typeof part === 'string' ? part : fields[part.field] ?? '')).join('');
 
-/** Markup as it is compared: no comments, and every run of white space between or inside tags the same. */
-export const normalised = html => String(html).replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
+/**
+ * Markup as it is compared: no comments, every run of white space between or inside tags the same,
+ * and an empty attribute written either way (`data-year=""` or `data-year`), which HTML reads alike.
+ */
+export const normalised = html => String(html).replace(/<!--[\s\S]*?-->/g, '').replace(/(<[a-zA-Z][^>]*?\s[^\s=>"']+)=(?:""|'')(?=[\s/>])/g, '$1').replace(/(<[a-zA-Z][^>]*?\s[^\s=>"']+)=(?:""|'')(?=[\s/>])/g, '$1').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();

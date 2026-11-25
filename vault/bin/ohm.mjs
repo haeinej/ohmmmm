@@ -11,7 +11,7 @@ const commands = {
   posts: ['posts.mjs', 'List every public post with its form, label, and opening lines.'],
   profile: ['profile.mjs', 'Preview or save your profile: --name, --description, --pronouns, --avatar, --link.'],
   publish: ['publish.mjs', 'Preview or publish a post: --file, --slug, --title, --label, --media. Add --publish to save.'],
-  site: ['site.mjs', 'Bring an existing website in: site scan --folder DIR, then site import --plan FILE [--apply], then site check.'],
+  site: ['site.mjs', 'Bring an existing website in: site scan --folder DIR, site import --plan FILE [--apply], site compose --out DIR, site check.'],
   render: ['render.mjs', 'Rebuild one of your site\'s own pages from a post: render adopt, then render build.'],
   sync: ['sync.mjs', 'Say what syncing your folder with your vault would do: --folder PATH. Add --apply to sync. Never publishes.'],
   snapshot: ['snapshot.mjs', 'Print the feed snapshot the site Worker would store.'],

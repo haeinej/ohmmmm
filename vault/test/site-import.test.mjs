@@ -9,6 +9,7 @@ import { createLocalTools } from '../mcp/local.mjs';
 import { atomsOf, fill, parseTree, templatesOf } from '../site-import/html.mjs';
 import { importSite, planProblems } from '../site-import/apply.mjs';
 import { checkSite } from '../site-import/check.mjs';
+import { composeSite, shapeMarkup } from '../site-import/compose.mjs';
 import { scanSite } from '../site-import/scan.mjs';
 
 // A small, made-up site: a gallery of photographs with cards among them, a folder of articles with
@@ -209,4 +210,30 @@ test('the curator brings a site in through its tools: read, ask, then write only
     assert.deepEqual(checked.regions.map(r => [r.held, r.items, r.same]), [[6, 7, false]]);
     assert.ok(done.unresolved.some(u => u.includes('/work/#tea')));
   } finally { await rm(folder, { recursive: true, force: true }); await rm(vault, { recursive: true, force: true }); }
+});
+
+test('compose writes each run as an Astro component, its region drawn from the vault, its page the site\'s own around it', async () => {
+  assert.equal(shapeMarkup(['<figure data-year="', { field: 'figure@data-year' }, '"><figcaption>', { field: 'figcaption#text' }, '</figcaption></figure>']),
+    '<figure data-year={decode(f["figure@data-year"])}><figcaption><Fragment set:html={f["figcaption#text"] ?? \'\'} /></figcaption></figure>');
+  assert.match(shapeMarkup(['<p style="a{b}">', { field: 'p#text' }, '</p>']), /^<Fragment set:html=\{/, 'a brace in the markup is set as written');
+  const folder = await makeSite();
+  const vault = await mkdtemp(join(tmpdir(), 'ohm-vault-'));
+  const out = await mkdtemp(join(tmpdir(), 'ohm-astro-'));
+  try {
+    const { plan } = await scanSite(folder);
+    const ready = named(plan);
+    await importSite(ready, { vault, apply: true });
+    const made = await composeSite(ready, { vault, out });
+    assert.deepEqual(made.components.sort(), ['ACard', 'FigureItem']);
+    assert.deepEqual(made.pages, ['gallery/index.html']);
+    const page = await readFile(join(out, 'src/pages/gallery/index.astro'), 'utf8');
+    assert.match(page, /import GalleryGrid from '\.\.\/\.\.\/components\/ohm\/regions\/GalleryGrid\.astro';/);
+    const shells = [await readFile(join(out, 'src/ohm/shell/gallery/index.0.html'), 'utf8'), await readFile(join(out, 'src/ohm/shell/gallery/index.1.html'), 'utf8')];
+    assert.ok(shells[0].endsWith('<main class="grid" id="grid">'), 'the page up to the region');
+    assert.ok(shells[1].startsWith('</main>'), 'the page after it');
+    assert.match(await readFile(join(out, 'src/lib/ohm-vault.mjs'), 'utf8'), /process\.env\.OHM_VAULT \?\?/);
+    // The reader finds every item of the region in the vault, in the page's order.
+    const { regionEntries } = await import(`${join(out, 'src/lib/ohm-vault.mjs')}?${Date.now()}`);
+    assert.deepEqual(regionEntries('gallery/index.html', 'grid').map(e => [e.at, e.signature]), [[0, 'a.card'], [1, 'figure.item'], [2, 'figure.item'], [3, 'a.card'], [4, 'figure.item'], [5, 'figure.item'], [6, 'a.card']]);
+  } finally { for (const dir of [folder, vault, out]) await rm(dir, { recursive: true, force: true }); }
 });

@@ -40,7 +40,7 @@ const words = text => text.replace(/[“”"‘’'`*_]/g, '').replace(/\s+/g, '
 /**
  *   returns { regions: [{ page, region, items, same, difference? }], texts: [{ page, same, difference? }], ok }
  */
-export async function checkSite(plan, { vault }) {
+export async function checkSite(plan, { vault, built }) {
   const { site, described } = await scanSite(plan.site.folder, { origin: plan.site.origin ?? undefined });
   const nodes = await vaultNodes(vault);
   const entries = [];
@@ -92,5 +92,15 @@ export async function checkSite(plan, { vault }) {
     const a = words(plainText(inLanguage(original, s.languages?.[0]))), b = words(plainText(md.render(node.body ?? '')));
     texts.push({ page: label, same: a === b, ...(a === b ? {} : { difference: firstDifference(a, b) }) });
   }
-  return { regions, texts, ok: regions.every(r => r.same) && texts.every(t => t.same) };
+  // ---- pages built from the vault (`ohm site compose`, then the site's own build), against the site's
+  const pages = [];
+  if (built) {
+    for (const page of [...new Set(regions.map(r => r.page))]) {
+      const made = await readFile(join(built, page), 'utf8').catch(() => null);
+      if (made === null) { pages.push({ page, same: false, difference: { at: 0, site: '', vault: `(${page} was not built)` } }); continue; }
+      const a = normalised(await site.read(page)), b = normalised(made);
+      pages.push({ page, same: a === b, ...(a === b ? {} : { difference: firstDifference(a, b) }) });
+    }
+  }
+  return { regions, texts, pages, ok: regions.every(r => r.same) && texts.every(t => t.same) && pages.every(p => p.same) };
 }

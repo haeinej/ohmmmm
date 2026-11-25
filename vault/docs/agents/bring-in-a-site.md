@@ -7,7 +7,8 @@ For people: [docs/bring-in-a-site.md](../bring-in-a-site.md). Code: [site-import
 ```sh
 ohm site scan  --folder DIR [--origin URL] [--plan FILE] [--json]   # read-only; writes the plan (refuses to overwrite one unless --plan is given)
 ohm site import --plan FILE [--vault DIR] [--apply] [--update]      # preview by default
-ohm site check  --plan FILE [--vault DIR]                            # read-only; exit 1 when anything differs
+ohm site compose --plan FILE [--vault DIR] --out DIR                 # writes only into --out
+ohm site check  --plan FILE [--vault DIR] [--built DIR]              # read-only; exit 1 when anything differs
 ```
 
 `--vault` falls back to `OHM_VAULT_FOLDER`, then the home's vault (`home/home.mjs` `defaultVault`).
@@ -56,18 +57,32 @@ Editable: `channels[].name`, `skip`, `sub`, `title`, `date`, `media`; `views[].s
 - `site` on every block: `{ page, region?, signature?, at?, shape?, fields?, anchor?, subtitle?, published?, languages?, views? }`. `at` is the item's place among every run in the same region. A view's items are kept on what they point at: `site.views` on a block, `views` on a channel (a series). A card that points nowhere is kept with the channel whose index page shows it, and listed.
 - Journal events: `op: added|changed`, `via: add`, `root: vault`, `origin` the item's address.
 
+## What compose writes
+
+Into `--out`, an Astro project folder (default `build.format: 'directory'`, so `src/pages/archive/index.astro` builds to `archive/index.html`):
+
+- `src/components/ohm/<Name>.astro` for each `list` run the plan brings in or keeps as a view. Props `{ shape, fields }`; one branch per shape. `shapeMarkup` turns the template into Astro markup: an attribute field becomes `name={decode(f[key])}`, a text field `<Fragment set:html={f[key]} />`; a shape whose literal markup holds a brace, a script or a style is written whole as `set:html`.
+- `src/components/ohm/regions/<Page><Region>.astro` for each region: `regionEntries(page, region)` from the vault, each drawn by its run's component.
+- `src/lib/ohm-vault.mjs`: reads the vault at build time (`OHM_VAULT`, else the path given to compose): every block's `site` entry with `signature` and `fields`, its `site.views`, and channels' `views`, sorted by `at`.
+- `src/ohm/shell/<page>.<n>.html` and `src/pages/<page>.astro`: the page cut at each region's inside, imported `?raw`, with each region's component between.
+
+Astro writes an empty attribute bare (`data-year`); `normalised` treats `x=""` and `x` alike, as HTML does.
+
 ## What a check compares
 
 - **Regions**: every region with list runs. The vault's entries for it (`site` with `signature` and `fields`, and every `views` entry), sorted by `at`, are filled into the current site's templates and compared with the page's items, after `normalised` (comments removed, white space collapsed). A shape missing from the site is reported as such.
+- **Built pages** (`--built DIR`): each page that holds a region, read from the build, against the site's page, both `normalised`.
 - **Texts**: every article and rich block's Markdown, rendered and reduced to words, against the page's first-language text. Quotes and emphasis marks are ignored.
 
 ## Verified
 
-`npm test` in `vault/` (the four tests in `site-import.test.mjs` use a made-up site). On 25 November 2026 against haeinjung.com at `2f778dd`: 17 channels, 483 blocks, 500 files; a second import wrote nothing; `site check` reported every region and text the same; `ohm vault lint` reported no problems.
+`npm test` in `vault/` (the six tests in `site-import.test.mjs` use a made-up site).
+Compose on haeinjung.com: 4 components, 3 pages; Astro 7.4.13 built them, and `site check --built` reported all three pages the same; one caption changed in the vault appeared on the rebuilt page. On 25 November 2026 against haeinjung.com at `2f778dd`: 17 channels, 483 blocks, 500 files; a second import wrote nothing; `site check` reported every region and text the same; `ohm vault lint` reported no problems.
 
 ## Known gaps
 
 - Second languages are not brought in.
 - Field roles are guessed from names; a site with unusual class names needs its plan edited.
 - Rich items are checked by words, not markup; list items by markup.
-- Nothing builds the site from the vault yet outside `check`; that is [move-to-astro](../../skills/move-to-astro/SKILL.md).
+- Compose covers list runs and the pages that hold them. Articles and rich items are not composed; the rest of the site is [move-to-astro](../../skills/move-to-astro/SKILL.md).
+- The composed pages read a vault folder at build time, not the PDS; private blocks must not be built into a public site.

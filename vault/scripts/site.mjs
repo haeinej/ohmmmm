@@ -5,7 +5,10 @@
 //   site import --plan FILE [--vault DIR] [--apply] [--update]
 //                                    say what would be written; --apply writes what is new, --update also
 //                                    rewrites what changed (the earlier version is kept in the vault's history)
-//   site check --plan FILE [--vault DIR]   build the site's repeated parts again from the vault and compare
+//   site compose --plan FILE [--vault DIR] --out DIR   write each run as an Astro component fed by the vault,
+//                                    and each page that holds runs as an Astro page around them
+//   site check --plan FILE [--vault DIR] [--built DIR]   build the site's repeated parts again from the vault and
+//                                    compare; with --built, also compare the pages an Astro build made
 //
 // Only what git tracks in the site folder is read. Every block starts private: nothing is published.
 import { readFile, writeFile } from 'node:fs/promises';
@@ -15,6 +18,7 @@ import { parseArgs } from 'node:util';
 import { defaultVault } from '../../home/home.mjs';
 import { importSite } from '../site-import/apply.mjs';
 import { checkSite } from '../site-import/check.mjs';
+import { composeSite } from '../site-import/compose.mjs';
 import { scanSite } from '../site-import/scan.mjs';
 
 const expand = path => (path === '~' ? homedir() : path.startsWith('~/') ? `${homedir()}${path.slice(1)}` : path);
@@ -22,7 +26,7 @@ const [action] = process.argv.splice(2, 1);
 const { values } = parseArgs({
   options: {
     folder: { type: 'string' }, origin: { type: 'string' }, plan: { type: 'string' }, vault: { type: 'string' },
-    apply: { type: 'boolean' }, update: { type: 'boolean' }, json: { type: 'boolean' },
+    apply: { type: 'boolean' }, update: { type: 'boolean' }, json: { type: 'boolean' }, out: { type: 'string' }, built: { type: 'string' },
   },
 });
 const planPath = resolve(expand(values.plan ?? 'site-plan.json'));
@@ -69,15 +73,23 @@ try {
     for (const card of result.unresolved) console.log(`A card that points at nothing brought in: ${card}`);
     if (values.apply) console.log(`\nWrote ${n(result.written.length, 'file')}${count('change') && !values.update ? `; ${count('change')} changed files left as they are (add --update to rewrite them)` : ''}. Every block is private until you publish it. Next: ohm site check --plan ${values.plan ?? 'site-plan.json'}`);
     else console.log('\nNothing written. Add --apply to write the new files.');
+  } else if (action === 'compose') {
+    if (!values.out) throw new Error('Say where the Astro project is: --out <folder>');
+    const plan = await readPlan();
+    const out = resolve(expand(values.out));
+    const result = await composeSite(plan, { vault: vaultPath(), out });
+    console.log(`Into ${out}: ${n(result.components.length, 'component')} (${result.components.join(', ')}) and ${n(result.pages.length, 'page')} (${result.pages.join(', ')}).`);
+    console.log(`Build it with Astro, then: ohm site check --plan ${values.plan ?? 'site-plan.json'} --built ${values.out}/dist`);
   } else if (action === 'check') {
     const plan = await readPlan();
-    const result = await checkSite(plan, { vault: vaultPath() });
+    const result = await checkSite(plan, { vault: vaultPath(), built: values.built ? resolve(expand(values.built)) : undefined });
     for (const r of result.regions) console.log(`${r.same ? 'same' : 'differs'}  ${r.page} (${r.region}): ${r.held} of ${r.items} items from the vault${r.same ? '' : `\n        site:  …${r.difference.site}…\n        vault: …${r.difference.vault}…`}`);
+    for (const p of result.pages) console.log(`${p.same ? 'same' : 'differs'}  ${p.page}: the page built from the vault${p.same ? '' : `\n        site:  …${p.difference.site}…\n        built: …${p.difference.vault}…`}`);
     for (const t of result.texts) console.log(`${t.same ? 'same' : 'differs'}  ${t.page}: its words${t.same ? '' : `\n        site:  …${t.difference.site}…\n        vault: …${t.difference.vault}…`}`);
     console.log(result.ok ? '\nThe vault gives the site back.' : '\nSome parts differ; each is shown above.');
     process.exitCode = result.ok ? 0 : 1;
   } else {
-    console.log('ohm site scan --folder DIR [--origin URL] [--plan FILE]\nohm site import --plan FILE [--vault DIR] [--apply] [--update]\nohm site check --plan FILE [--vault DIR]');
+    console.log('ohm site scan --folder DIR [--origin URL] [--plan FILE]\nohm site import --plan FILE [--vault DIR] [--apply] [--update]\nohm site compose --plan FILE [--vault DIR] --out DIR\nohm site check --plan FILE [--vault DIR] [--built DIR]');
     process.exitCode = action ? 1 : 0;
   }
 } catch (problem) {
