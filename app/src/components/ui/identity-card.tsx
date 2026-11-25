@@ -158,8 +158,8 @@ export function IdentityCard({ did, wallet, name, address, avatarSrc, bannerSrc,
         {onOpen && <button type="button" aria-label={`Open ${name}'s profile`} onClick={onOpen}
           className="absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-ring/40" />}
 
-        {/* Identity */}
-        <div className={cn("relative flex size-full flex-col justify-between p-3 @min-[16rem]:p-4 @min-[23rem]:p-6", onOpen && "pointer-events-none [&_a]:pointer-events-auto [&_button]:pointer-events-auto")}>
+        {/* Identity. The leading edge sits a pill's inset further in, so the pill's own edge lands on the card's padding. */}
+        <div className={cn("relative flex size-full flex-col justify-between p-3 ps-6 @min-[16rem]:p-4 @min-[16rem]:ps-7 @min-[23rem]:p-6 @min-[23rem]:ps-9", onOpen && "pointer-events-none [&_a]:pointer-events-auto [&_button]:pointer-events-auto")}>
           <Avatar className="size-8 @min-[16rem]:size-16 @min-[23rem]:size-24 after:hidden" style={{
             transform: 'translate(calc(var(--tx) * 4px), calc(var(--ty) * 3px))',
           }}>
