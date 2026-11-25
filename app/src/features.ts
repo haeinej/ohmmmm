@@ -7,11 +7,7 @@
 // `vault_connections`, `vault_friends_ask` and `vault_mail_ask` tools (vault/docs/agents/connections.md).
 // Turning it on is this one line.
 //
-// site: the main panel's default (flows/site.md), an editor view of the person's own website, with
-// its content as tiles in the side panel. Development
-// only for now: it is on when the dev server was started with VITE_OHM_SITE naming the site's folder,
-// which is also what makes the dev server serve that folder (site-dev.ts). No build has it.
+// The Site view is not a switch: it shows whenever the paired ohm has a site/ (src/site/connect.ts).
 export const features = {
   connections: false,
-  site: Boolean((import.meta as { env?: { DEV?: boolean; VITE_OHM_SITE?: string } }).env?.DEV && (import.meta as { env?: { VITE_OHM_SITE?: string } }).env?.VITE_OHM_SITE),
 } as const

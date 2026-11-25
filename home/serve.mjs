@@ -67,6 +67,7 @@ import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
 import { findHome } from './home.mjs';
+import { isSiteRoute, siteRoutes } from './site.mjs';
 
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
@@ -843,6 +844,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
   });
 
   const cortexRoute = cortexRoutes({ dir: layout.cortex, send, said, body });
+  // The person's website, `site/` in their ohm (home/site.mjs). An app key's alone, like every route outside AGENT_ROUTES.
+  const siteRoute = layout.site ? siteRoutes({ layout, send, said, body }) : null;
   const json = async (req, limit) => {
     try { return JSON.parse((await body(req, limit)).toString('utf8')); } catch { return undefined; }
   };
@@ -911,6 +914,10 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
       if (who.kind === 'app' && Date.now() - (seenAt.get(mine) ?? 0) > 3_600_000) {
         seenAt.set(mine, Date.now());
         await browserSeen(layout.home, mine).catch(() => {});
+      }
+      if (siteRoute && isSiteRoute(url.pathname)) {
+        if (await siteRoute(req, res, url)) return;
+        return said(res, 404, 'Not a step of the site');
       }
       if (url.pathname === '/vault/keys' && req.method === 'GET') {
         const shared = await readText(join(layout.home, AGENT_KEY));

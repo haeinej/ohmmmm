@@ -5,6 +5,7 @@ import { installWebMcpShim } from "./webmcp-shim"
 import { App } from "./App"
 import { applyDensity, connectHome, open, report, setSource, sourceChanged } from "./workspace/store"
 import { bridgeMedia, currentBridge, pairFromLocation } from "./data/bridge"
+import { startSite } from "./site/connect"
 import { nameThisBrowser } from "./data/browsers"
 import { createLocalSource, UNPAIRED } from "./data/local-source"
 import { getSource } from "./data/workspace-data"
@@ -23,6 +24,8 @@ const opened = () => { if (opening) { try { open(opening) } catch { /* not in th
 // opened in a tab already on the app changes only the fragment, which loads nothing: pair from it,
 // and open again on the home it names.
 pairFromLocation()
+// The person's site, when their ohm has one: the Site view and its files through the bridge (src/site/connect.ts).
+void startSite()
 addEventListener("hashchange", () => { if (pairFromLocation()) location.reload() })
 
 // Images this browser lacks are read from where the home keeps them: the home folder when paired,

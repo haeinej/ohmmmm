@@ -1,3 +1,5 @@
+import { bridgeFetch } from "@/data/bridge"
+
 // A page's file, and one edit to it (flows/site.md). The Site view shows a page as the browser
 // rendered it, but what is saved is the page's own file, changed in one place and nowhere else:
 // the text of one element, found in the file by what it says.
@@ -130,24 +132,24 @@ export function channelsIn(items: SiteItem[]): { name: string; items: SiteItem[]
   return [...found].map(([name, list]) => ({ name, items: list }))
 }
 
-/** The channels the person made themselves, and the dot each channel wears (site-dev.ts `ownChannels`). */
+/** The channels the person made themselves, and the dot each channel wears (home/site.mjs). */
 export type OwnChannel = { name: string; parent?: string; color?: string; items: string[] }
 export type OwnChannels = { channels: OwnChannel[]; colors: Record<string, string> }
 
 export async function readOwnChannels(): Promise<OwnChannels> {
-  const res = await fetch("/site/channels", { cache: "no-store" })
+  const res = await bridgeFetch("/site/channels", { cache: "no-store" })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as OwnChannels
 }
 
 export async function saveOwnChannels(own: OwnChannels): Promise<OwnChannels> {
-  const res = await fetch("/site/channels", { method: "PUT", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify(own) })
+  const res = await bridgeFetch("/site/channels", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(own) })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as OwnChannels
 }
 
 export async function readContent(): Promise<SiteContent> {
-  const res = await fetch("/site/content")
+  const res = await bridgeFetch("/site/content")
   if (!res.ok) throw new Error("The site's folder couldn't be read")
   return (await res.json()) as SiteContent
 }
@@ -156,17 +158,17 @@ export async function readContent(): Promise<SiteContent> {
 export const OPEN_PAGE = "ohm:site-open-page"
 export const askToOpen = (path: string) => window.dispatchEvent(new CustomEvent(OPEN_PAGE, { detail: path }))
 
-/** The person's profile (site-dev.ts `profileOf`): identity as fields, and what they say about themselves as Markdown. */
+/** The person's profile (home/site.mjs `profileOf`): identity as fields, and what they say about themselves as Markdown. */
 export type SiteProfile = { name: string; image: string; handle: string; did: string; wallet: string; color: string; body: string; saved: boolean }
 
 export async function readProfile(): Promise<SiteProfile> {
-  const res = await fetch("/site/profile", { cache: "no-store" })
+  const res = await bridgeFetch("/site/profile", { cache: "no-store" })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as SiteProfile
 }
 
 export async function saveProfile(profile: SiteProfile): Promise<SiteProfile> {
-  const res = await fetch("/site/profile", { method: "PUT", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify(profile) })
+  const res = await bridgeFetch("/site/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) })
   if (!res.ok) throw new Error(await res.text())
   const saved = (await res.json()) as SiteProfile
   window.dispatchEvent(new CustomEvent(PROFILE_SAVED, { detail: saved }))
@@ -183,7 +185,7 @@ export const pictureUrl = (image: string) => /^https?:\/\//.test(image) ? image 
 export type SiteArticle = { title: string; details: string; markdown: string }
 
 export async function readArticle(path: string): Promise<SiteArticle> {
-  const res = await fetch(`/site/article?path=${encodeURIComponent(path)}`, { cache: "no-store" })
+  const res = await bridgeFetch(`/site/article?path=${encodeURIComponent(path)}`, { cache: "no-store" })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as SiteArticle
 }
@@ -195,55 +197,55 @@ export const askToOpenBlock = (path: string) => window.dispatchEvent(new CustomE
 export const siteUrl = (path: string) => `/site/${path.split("/").map(encodeURIComponent).join("/")}`
 
 export async function listPages(): Promise<SitePage[]> {
-  const res = await fetch("/site/pages")
+  const res = await bridgeFetch("/site/pages")
   if (!res.ok) throw new Error("The site's folder couldn't be read")
   return ((await res.json()) as { pages: SitePage[] }).pages
 }
 
-/** Where the site's folder stands against its remote (site-dev.ts `syncOf`). */
+/** Where the site's folder stands against its remote (home/site.mjs `syncOf`). */
 export type SiteSync = { branch: string; upstream: string; remote: string; ahead: number; behind: number; changed: string[]; last: string }
 
 export async function readSync(): Promise<SiteSync> {
-  const res = await fetch("/site/git", { cache: "no-store" })
+  const res = await bridgeFetch("/site/git", { cache: "no-store" })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as SiteSync
 }
 
 /** One git step on the site's folder: bring the remote's commits in, commit what changed, or send commits out. */
 export async function syncStep(step: "pull" | "commit" | "push", message?: string): Promise<SiteSync> {
-  const res = await fetch(`/site/git/${step}`, { method: "POST", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
+  const res = await bridgeFetch(`/site/git/${step}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as SiteSync
 }
 
-/** One deploy to Cloudflare, as the folder remembers it (site-deploy.ts). */
+/** One deploy to Cloudflare, as the folder remembers it (home/site.mjs). */
 export type Deployed = { at: string; commit: string; subject: string; branch: string; project: string; url: string; production: boolean }
-/** Where a deploy would go and what it would carry (site-deploy.ts `deployStatus`). */
+/** Where a deploy would go and what it would carry (home/site.mjs `deployStatus`). */
 export type DeployStatus = {
   signedIn: boolean; account: string; problem: string; projects: string[]; project: string; exists: boolean; productionBranch: string
   branch: string; commit: string; subject: string; changed: number; production: boolean; domain: string; history: Deployed[]
 }
 
 export async function readDeploy(): Promise<DeployStatus> {
-  const res = await fetch("/site/deploy", { cache: "no-store" })
+  const res = await bridgeFetch("/site/deploy", { cache: "no-store" })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as DeployStatus
 }
 
 /** Deploy this branch's head to a Cloudflare Pages project, or put an earlier commit back. The person's own step. */
 export async function deploySite(project: string, commit?: string): Promise<Deployed> {
-  const res = await fetch("/site/deploy", { method: "POST", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify({ project, commit }) })
+  const res = await bridgeFetch("/site/deploy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, commit }) })
   if (!res.ok) throw new Error(await res.text())
   return (await res.json()) as Deployed
 }
 
 /** Save one change to a page's file. It refuses to write over a file that changed on disk. */
 export async function saveChange(page: string, change: Change): Promise<void> {
-  const url = `/site/${page.split("/").map(encodeURIComponent).join("/")}`
-  const read = await fetch(url, { cache: "no-store" })
+  const url = `/site/file/${page.split("/").map(encodeURIComponent).join("/")}?via=canvas`
+  const read = await bridgeFetch(url, { cache: "no-store" })
   if (!read.ok) throw new EditProblem("That page isn't in the site")
   const next = applyChange(await read.text(), change)
-  const wrote = await fetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "", "X-Ohm-Site": "1" }, body: next })
+  const wrote = await bridgeFetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "" }, body: next })
   if (wrote.status === 412) throw new EditProblem("This page changed on disk since it was read. Reload it and try again")
   if (!wrote.ok) throw new EditProblem("The page couldn't be saved")
 }
