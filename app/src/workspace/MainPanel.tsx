@@ -5,6 +5,8 @@ import { isBlock, byId, homeStatus, sees, titleOf } from "@/data/workspace-data"
 import { PageEditor } from "@/editor/PageEditor"
 import { cn } from "@/lib/cn"
 import { SettingsView } from "./Settings"
+import { SiteView } from "@/site/SiteView"
+import { features } from "@/features"
 import { surface } from "./Surface"
 import { openDropped, opensOnDrop } from "./drop"
 import { closeSettings, createDraft, readShared, report, setAudience, setSearchOpen, useWorkspace } from "./store"
@@ -42,7 +44,11 @@ export function MainPanel() {
       )}
       {agent && <AgentStatus state={agent.state} label={agent.label} className="absolute top-16 right-4 z-10 animate-in fade-in-0 slide-in-from-top-1" />}
 
-      {status === "signed-out" ? (
+      {features.site && view.kind === "empty" ? (
+        // With nothing else open, the main panel is the person's site as an editor view. It is their
+        // own folder on this computer, so it opens without the home.
+        <SiteView />
+      ) : status === "signed-out" ? (
         <SignIn />
       ) : status === "loading" ? (
         // A page loading is blank (AGENTS.md rule 14).

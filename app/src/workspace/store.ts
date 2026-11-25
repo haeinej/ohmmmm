@@ -597,6 +597,9 @@ export function openSettings(tab: SettingsTab = "profile") {
   set({ side: narrow() && state.side === "profile" ? null : "profile", view: { kind: "settings", tab }, searchOpen: false, returnTo })
 }
 /** Leaving settings: back to the block and panel you came from. */
+/** Close what is open, so the main panel is back to what it shows by default. */
+export const showMain = () => set({ view: { kind: "empty" }, searchOpen: false })
+
 export function closeSettings() {
   const back = state.returnTo
   const view = back?.view.kind === "doc" && !byId(back.view.id) ? { kind: "empty" as const } : back?.view ?? { kind: "empty" as const }

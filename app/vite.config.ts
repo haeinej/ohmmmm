@@ -2,9 +2,10 @@ import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath } from "node:url"
+import { siteDev } from "./site-dev"
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), siteDev()],
   resolve: {
     // Resolve the vault renderer's bare imports from the app, including in an app-only install.
     dedupe: ["yjs", "react", "react-dom", "markdown-it", "markdown-it-footnote"],

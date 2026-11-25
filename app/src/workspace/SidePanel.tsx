@@ -1,3 +1,4 @@
+import { SiteContentPanel } from "@/site/SiteContentPanel"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -491,7 +492,9 @@ function ProfilePanel() {
 }
 
 export function SidePanel() {
-  const { side } = useWorkspace()
+  const { side, view } = useWorkspace()
+  // Beside the site, the home's panel is its content as tiles, and it stays: closing it is not offered.
+  if (features.site && view.kind === "empty" && (side === "repo" || side === null)) return <SiteContentPanel />
   if (side && homeStatus() !== "ready") return null
   if (side === "repo") return <RepoPanel />
   if (side === "connections" && features.connections) return <ConnectionsPanel />
