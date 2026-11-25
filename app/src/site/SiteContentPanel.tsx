@@ -52,7 +52,7 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
 
 /**
  * A channel inside a channel, as a cover: the block at its front, exactly as its own tile shows it,
- * blurred under the channel's name and count, with nothing frosted between them. It wears its
+ * blurred and frosted under the channel's name and count, so the name reads on any picture. It wears its
  * channel's mark: an edge in that colour, and its name written in it; with no mark, a plain line and ink. Under the pointer the
  * blur and the name ease away, so the block itself is seen, and ease back when the pointer leaves.
  */
@@ -68,7 +68,7 @@ function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; ite
           ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
           : <Face item={front} fill={false} />)}
       </span>
-      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2 text-center transition-opacity duration-300 ease-out group-hover/cover:opacity-0 group-focus-visible/cover:opacity-0" style={{ color: colour }}>
+      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background/75 p-2 text-center transition-opacity duration-300 ease-out group-hover/cover:opacity-0 group-focus-visible/cover:opacity-0" style={{ color: colour }}>
         <span className="line-clamp-3 font-medium break-words">{name}</span>
         <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
       </span>
