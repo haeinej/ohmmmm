@@ -119,7 +119,7 @@ export function IdentityCard({ did, wallet, name, address, avatarSrc, bannerSrc,
     <span className="truncate">{address}</span>
     <ArrowUpRight aria-hidden className="size-icon-sm shrink-0 opacity-70" />
   </>;
-  const pill = cn('relative -ml-3 inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-body text-foreground transition-colors', !matt && 'backdrop-blur-md');
+  const pill = cn('relative inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-body text-foreground transition-colors', !matt && 'backdrop-blur-md');
   const pillTone = onPaper ? 'var(--ohm-wash)' : 'var(--ohm-identity-pill)';
 
   return <div className={cn("w-(--ohm-identity-width) max-w-full flex-none [perspective:var(--ohm-identity-perspective)]", className)} style={onPaper ? { '--tx': '0', '--ty': '0' } as CSSProperties : material}>
