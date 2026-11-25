@@ -4,17 +4,16 @@
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/cn"
 import { panelTitle, SidePanelFrame } from "@/workspace/Surface"
-import { shortTitle } from "./BlockView"
 import { askToOpenBlock, readContent, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
 const tile = "relative block h-full shrink-0 overflow-hidden rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 
 /**
- * One block, as tall as its channel's row. An image or a video keeps its own shape, wide or tall. A page is a 3:4 sheet holding the start of its own writing in miniature.
+ * One block, as tall as its channel's row. An image or a video keeps its own shape, wide or tall. An article or a project is a 3:4 sheet holding the start of its own writing in miniature.
  */
 function Tile({ item }: { item: SiteItem }) {
-  const page = item.kind === "page"
+  const page = item.kind === "article" || item.kind === "project"
   return (
     <button type="button" draggable title={item.title} aria-label={page ? `Open ${item.title}` : item.title}
       onClick={() => askToOpenBlock(item.path)}
@@ -31,7 +30,7 @@ function Tile({ item }: { item: SiteItem }) {
       ) : (
         // The sheet is laid out at twice the tile's width and shown at half size: a small copy of the page, not a label.
         <span aria-hidden className="absolute top-0 left-0 flex h-[200%] w-[200%] origin-top-left scale-50 flex-col gap-2 p-5">
-          <span className="font-medium leading-tight">{shortTitle(item.title)}</span>
+          <span className="font-medium leading-tight">{item.title}</span>
           <span className="min-h-0 flex-1 overflow-hidden whitespace-pre-line text-small text-muted-foreground mask-b-from-70%">{item.excerpt}</span>
         </span>
       )}

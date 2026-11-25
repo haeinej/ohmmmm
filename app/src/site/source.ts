@@ -41,7 +41,7 @@ export function replaceText(source: string, before: string, after: string, nth =
 }
 
 /** Where a block sits on the site, as its pages write it: from the site's root. */
-export const addressOf = (path: string) => `/${path.replace(/(^|\/)index\.html$/, "$1")}`
+export const addressOf = (path: string) => `/${path.replace(/(^|\/)index\.html(?=#|$)/, "$1")}`
 
 /**
  * Put markup after one element in a page's file: the element that says `anchor`, found as
@@ -82,7 +82,7 @@ export function applyChange(source: string, change: Change): string {
   return replaceSrc(source, change.from, change.to)
 }
 
-/** A block as markup a page can hold: an image, a video, or a link to a page. */
+/** A block as markup a page can hold: an image, a video, or a link to an article or a project. */
 export function markupFor(item: Pick<SiteItem, "kind" | "path" | "title">): string {
   const at = escapeHtml(addressOf(item.path)).replace(/"/g, "&quot;")
   if (item.kind === "image") return `<img src="${at}" alt="" loading="lazy">`
@@ -90,7 +90,7 @@ export function markupFor(item: Pick<SiteItem, "kind" | "path" | "title">): stri
   return `<p><a href="${at}">${escapeHtml(plain(item.title))}</a></p>`
 }
 
-export type SiteItem = { kind: "page" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[] }
+export type SiteItem = { kind: "article" | "project" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[] }
 export type SiteContent = { site: string; collections: { name: string; items: SiteItem[] }[] }
 
 export async function readContent(): Promise<SiteContent> {
@@ -102,6 +102,15 @@ export async function readContent(): Promise<SiteContent> {
 /** Ask the Site view to bring a page's frame into view. The side panel's tiles use it. */
 export const OPEN_PAGE = "ohm:site-open-page"
 export const askToOpen = (path: string) => window.dispatchEvent(new CustomEvent(OPEN_PAGE, { detail: path }))
+
+/** An article or a project as writing: its title, the line under it, and its body as Markdown. */
+export type SiteArticle = { title: string; details: string; markdown: string }
+
+export async function readArticle(path: string): Promise<SiteArticle> {
+  const res = await fetch(`/site/article?path=${encodeURIComponent(path)}`, { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SiteArticle
+}
 
 /** Ask the Site view to open one block, by its path, over the canvas. */
 export const OPEN_BLOCK = "ohm:site-open-block"

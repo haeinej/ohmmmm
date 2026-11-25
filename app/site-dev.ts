@@ -11,6 +11,7 @@ import { readFile, stat, writeFile } from "node:fs/promises"
 import { extname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { Plugin } from "vite"
+import { decode, htmlToMarkdown } from "../vault/mirror/html-to-markdown.mjs"
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -61,63 +62,111 @@ async function syncOf(dir: string) {
 const titleOf = (html: string) => /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1].trim() ?? ""
 
 const IMAGE = /\.(?:jpe?g|png|webp|gif|svg)$/i, VIDEO = /\.(?:mp4|mov|webm)$/i
-/** Folders that hold smaller copies of what is beside them: a variant of an item, not an item. */
-const VARIANTS = /(?:^|\/)(?:thumbs?|vidsm)\//
 
 type Item = {
-  kind: "page" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string
+  kind: "article" | "project" | "image" | "video"
+  /** A file's path; a project's is its page and its place on it, `work/index.html#ohm`. */
+  path: string
+  title: string
+  thumb?: string
+  /** The start of an article or a project, as plain text: what its tile shows in miniature. */
+  excerpt?: string
   /** When the file last changed on disk. */
   modified: string
   /** The pages that show this image or video: its connections, as the site itself makes them. */
   usedIn: string[]
 }
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", copy: "©", rsquo: "’", lsquo: "‘", ldquo: "“", rdquo: "”", mdash: "—", ndash: "–", hellip: "…" }
+const text = (html: string) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim()
 
-/** The start of what a page says, as plain text: what its tile shows in miniature. */
-function excerptOf(html: string) {
-  const body = /<article[\s\S]*<\/article>/i.exec(html)?.[0] ?? /<main[\s\S]*<\/main>/i.exec(html)?.[0] ?? /<body[\s\S]*<\/body>/i.exec(html)?.[0] ?? ""
-  return body.replace(/<(script|style|nav|header|footer|aside|svg|h1|button)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<\/(p|h[2-6]|li|div|section)>/gi, "\n").replace(/<[^>]+>/g, " ")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&(\w+);/g, (all, name) => ENTITIES[name] ?? all)
-    .split("\n").map(line => line.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n").slice(0, 700)
+/** The one language a block is read in: where a page holds two side by side, the first (English). */
+const firstLanguage = (html: string) => html.replace(/<(\w+)([^>]*)\slang="(?!en")[^"]*"[^>]*>[\s\S]*?<\/\1>/g, "")
+
+/**
+ * An article as the page holds it: the first `<article>` (the page's first language), with its
+ * heading taken out as the title and the line under it as the details.
+ */
+function articleIn(html: string) {
+  const article = /<article[^>]*>[\s\S]*?<\/article>/i.exec(html)?.[0]
+  if (!article) return undefined
+  const header = /<header[^>]*>[\s\S]*?<\/header>/i.exec(article)?.[0] ?? ""
+  const title = text(/<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(article)?.[1] ?? "")
+  const details = text(/<(?:p|div) class="(?:article-subtitle|episode-details)"[^>]*>([\s\S]*?)<\/(?:p|div)>/i.exec(article)?.[1]?.replace(/<\/span>/g, " · </span>") ?? "").replace(/ ·$/, "")
+  const body = article.replace(header, "").replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, "")
+    .replace(/<(?:p|div) class="(?:article-subtitle|episode-details)"[^>]*>[\s\S]*?<\/(?:p|div)>/i, "")
+    .replace(/<div class="source-note">[\s\S]*?<\/div>/i, "")
+  return { title, details, body }
+}
+
+/** The projects a page lists: each `<details class="entry" id>` is one, its summary the title. */
+function projectsIn(html: string) {
+  return [...html.matchAll(/<details class="entry[^"]*" id="([^"]+)">([\s\S]*?)<\/details>/g)].map(([, id, inner]) => {
+    const one = firstLanguage(inner)
+    return { id, title: text(/<summary>([\s\S]*?)<\/summary>/.exec(one)?.[1] ?? id), body: one.replace(/<summary>[\s\S]*?<\/summary>/, "") }
+  })
+}
+
+/** Markdown for an article's or a project's body, with each image at its own address on the site. */
+function markdownOf(body: string, page: string) {
+  const { markdown, images } = htmlToMarkdown(body, `https://site.invalid/${page}`) as { markdown: string; images: { id: string; url: string }[] }
+  return images.reduce((md, image) => md.replaceAll(`media:${image.id}`, new URL(image.url).pathname), markdown)
 }
 
 /**
- * The site's content as collections of items, the way the side panel shows it: a collection is a
- * top folder (the site's own pages are the first), and an item is a page, an image or a video.
+ * The site's content as channels of blocks, the way the side panel shows it. The channels are the
+ * site's own three kinds of thing, read from where this site keeps each: Writings are the article
+ * pages under `writing/`, Projects are the entries of `work/index.html`, and Photographs are the
+ * images and videos of `archive/`. Index pages, shared parts, script sources and the pictures
+ * inside an article are not blocks.
  */
 async function contentOf(dir: string, files: Set<string>) {
-  const collections = new Map<string, Item[]>()
+  const read = (path: string) => readFile(join(dir, path), "utf8")
+  const modified = async (path: string) => (await stat(join(dir, path))).mtime.toISOString()
   const sources = new Map<string, string>()
-  for (const path of files) if (path.endsWith(".html")) sources.set(path, await readFile(join(dir, path), "utf8"))
-  for (const path of [...files].sort()) {
-    if (VARIANTS.test(path)) continue
-    const kind = path.endsWith(".html") ? "page" : IMAGE.test(path) ? "image" : VIDEO.test(path) ? "video" : undefined
-    if (!kind) continue
-    const name = path.includes("/") ? path.split("/")[0] : ""
-    const base = path.split("/").at(-1)!
-    const html = sources.get(path) ?? ""
-    const item: Item = {
-      kind, path, title: kind === "page" ? titleOf(html) || path : base,
-      modified: (await stat(join(dir, path))).mtime.toISOString(),
-      // A page names the file it shows, whatever folder it reaches it from.
-      usedIn: kind === "page" ? [] : [...sources].filter(([, text]) => text.includes(base)).map(([page]) => page),
-    }
-    if (kind === "page") item.excerpt = excerptOf(html)
-    if (kind === "video") {
-      const small = path.replace(/[^/]+\/([^/]+)$/, "vidsm/$1")
-      if (files.has(small)) item.thumb = small
-    }
-    if (kind === "image") {
-      const small = path.replace(/[^/]+\/([^/]+)$/, "thumb/$1")
-      item.thumb = files.has(small) ? small : path
-    }
-    collections.set(name, [...(collections.get(name) ?? []), item])
+  for (const path of files) if (path.endsWith(".html")) sources.set(path, await read(path))
+
+  const writings: Item[] = []
+  for (const [path, html] of [...sources].sort()) {
+    if (!path.startsWith("writing/") || path.endsWith("index.html") || path.startsWith("writing/substack/")) continue
+    const article = articleIn(html)
+    if (article) writings.push({ kind: "article", path, title: article.title || path, excerpt: text(article.body).slice(0, 700), modified: await modified(path), usedIn: [] })
   }
+
+  const projects: Item[] = []
+  const work = sources.get("work/index.html")
+  if (work) for (const project of projectsIn(work)) {
+    projects.push({ kind: "project", path: `work/index.html#${project.id}`, title: project.title, excerpt: text(project.body).slice(0, 700), modified: await modified("work/index.html"), usedIn: [] })
+  }
+
+  const photographs: Item[] = []
+  for (const path of [...files].sort()) {
+    const kind = /^archive\/img\//.test(path) && IMAGE.test(path) ? "image" : /^archive\/vid\//.test(path) && VIDEO.test(path) ? "video" : undefined
+    if (!kind) continue
+    const base = path.split("/").at(-1)!
+    const small = `archive/${kind === "image" ? "thumb" : "vidsm"}/${base}`
+    photographs.push({
+      kind, path, title: base, thumb: files.has(small) ? small : kind === "image" ? path : undefined, modified: await modified(path),
+      // A page names the file it shows, whatever folder it reaches it from.
+      usedIn: [...sources].filter(([, html]) => html.includes(base)).map(([page]) => page),
+    })
+  }
+
   let site = ""
-  try { site = (await readFile(join(dir, "CNAME"), "utf8")).trim() } catch { /* a site without its own domain */ }
-  return { site, collections: [...collections].map(([name, items]) => ({ name, items })) }
+  try { site = (await read("CNAME")).trim() } catch { /* a site without its own domain */ }
+  return { site, collections: [{ name: "Writings", items: writings }, { name: "Photographs", items: photographs }, { name: "Projects", items: projects }].filter(c => c.items.length) }
+}
+
+/** One article or project, to open in the article view: its title, the line under it, and its body as Markdown. */
+async function articleOf(dir: string, files: Set<string>, path: string) {
+  const [page, id] = path.split("#")
+  if (!files.has(page) || !page.endsWith(".html")) return undefined
+  const html = await readFile(join(dir, page), "utf8")
+  if (id) {
+    const project = projectsIn(html).find(p => p.id === id)
+    return project && { title: project.title, details: "", markdown: markdownOf(project.body, page) }
+  }
+  const article = articleIn(html)
+  return article && { title: article.title, details: article.details, markdown: markdownOf(article.body, page) }
 }
 
 export function siteDev(): Plugin {
@@ -179,6 +228,14 @@ export function siteDev(): Plugin {
             res.setHeader("Content-Type", "application/json")
             res.setHeader("Cache-Control", "no-store")
             return res.end(JSON.stringify({ pages }))
+          }
+
+          if (url.pathname === "/site/article" && req.method === "GET") {
+            const article = await articleOf(dir, files, url.searchParams.get("path") ?? "")
+            if (!article) return said(404, "Not an article of this site")
+            res.setHeader("Content-Type", "application/json")
+            res.setHeader("Cache-Control", "no-store")
+            return res.end(JSON.stringify(article))
           }
 
           if (url.pathname === "/site/content" && req.method === "GET") {

@@ -1,12 +1,14 @@
 // One block, opened over the canvas (flows/site.md): what it is on the left, as large as it fits,
-// and what is known about it on the right, with its connections. A page opens as the page itself.
+// and what is known about it on the right, with its connections. An article or a project opens as
+// writing, in the editor, and not as its web page.
 import { useEffect } from "react"
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
-import { siteUrl, type SiteItem } from "./source"
+import { ArticleView } from "./ArticleView"
+import { siteUrl, type Change, type SiteItem } from "./source"
 
-const KIND = { page: "Page", image: "Image", video: "Video" } as const
+const KIND = { article: "Article", project: "Project", image: "Image", video: "Video" } as const
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
 /** A page's title without the site's name after it. */
 export const shortTitle = (title: string) => title.replace(/\s+[—|-]\s+[^—|-]+$/, "")
@@ -20,7 +22,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage }: {
+export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage, onSave }: {
   item: SiteItem
   /** The channel it was opened from, and where it stands in it. */
   channel: { name: string; at: number; of: number }
@@ -30,10 +32,13 @@ export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage 
   onClose(): void
   /** Bring a page's frame into view on the canvas. */
   onShowPage(path: string): void
+  /** Save one change to a page's file. */
+  onSave(page: string, change: Change): Promise<unknown>
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // Arrows and Escape belong to the text while it is being written in.
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("[contenteditable], input, textarea")) return
       if (e.key === "Escape") { e.preventDefault(); onClose() }
       if (e.key === "ArrowLeft") { e.preventDefault(); onStep(-1) }
       if (e.key === "ArrowRight") { e.preventDefault(); onStep(1) }
@@ -42,18 +47,17 @@ export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage 
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose, onStep])
 
-  const title = item.kind === "page" ? shortTitle(item.title) : item.title
+  const title = item.title
+  const writing = item.kind === "article" || item.kind === "project"
   return (
     <div role="dialog" aria-label={title} className="absolute inset-0 z-10 flex min-h-0 bg-card">
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted p-6">
-        {item.kind === "image" ? (
+      <div className={writing ? "flex min-h-0 min-w-0 flex-1" : "flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted p-6"}>
+        {writing ? (
+          <ArticleView path={item.path} onSave={onSave} />
+        ) : item.kind === "image" ? (
           <img src={siteUrl(item.path)} alt={title} className="max-h-full max-w-full object-contain" />
-        ) : item.kind === "video" ? (
-          <video src={siteUrl(item.path)} controls playsInline className="max-h-full max-w-full" />
         ) : (
-          // The page as it is published: its own splash, if it has one, is stepped past as on the canvas.
-          <iframe key={item.path} title={title} src={siteUrl(item.path)} className="size-full rounded-lg bg-background"
-            onLoad={e => e.currentTarget.contentDocument?.getElementById("splash-name")?.click()} />
+          <video src={siteUrl(item.path)} controls playsInline className="max-h-full max-w-full" />
         )}
       </div>
 
@@ -76,12 +80,12 @@ export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage 
           <Row label="Modified">{day(item.modified)}</Row>
         </div>
 
-        {item.kind === "page" && <Button variant="secondary" className="self-start" onClick={() => onShowPage(item.path)}>Show on canvas</Button>}
+        {writing && <Button variant="secondary" className="self-start" onClick={() => onShowPage(item.path.split("#")[0])}>Show on canvas</Button>}
 
         <section aria-label="Connections" className="flex flex-col gap-1">
           <h3 className="flex items-baseline gap-2 text-small font-medium">Connections <span className="font-normal text-muted-foreground">{item.usedIn.length}</span></h3>
-          {item.kind === "page" ? (
-            <p className="text-small text-muted-foreground">A page's connections aren't read yet.</p>
+          {writing ? (
+            <p className="text-small text-muted-foreground">Its connections aren't read yet.</p>
           ) : item.usedIn.length === 0 ? (
             <p className="text-small text-muted-foreground">No page shows this yet.</p>
           ) : item.usedIn.map(page => (

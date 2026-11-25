@@ -144,7 +144,7 @@ function instrument(doc: Document, accent: string, on: {
     holder.innerHTML = html
     const placed = holder.content.firstElementChild!
     to.after(placed)
-    on.edited({ label: `${item.kind === "page" ? "Link" : item.kind === "image" ? "Image" : "Video"} added`, change: { type: "insert", anchor, html, nth: same.indexOf(to), count: same.length }, undo: () => placed.remove() })
+    on.edited({ label: `${item.kind === "image" ? "Image" : item.kind === "video" ? "Video" : "Link"} added`, change: { type: "insert", anchor, html, nth: same.indexOf(to), count: same.length }, undo: () => placed.remove() })
   }, true)
 }
 
@@ -334,7 +334,7 @@ export function SiteView() {
     }, ac.signal).catch(console.error)
     registerStepTool<{ block: string }, { block: string }>({
       name: "site.open-block", title: "Open block",
-      description: "Opens one block of the site over the canvas: a page, an image or a video, by its path. Returns the block's path.",
+      description: "Opens one block of the site over the canvas: an article, a project, an image or a video, by its path. Returns the block's path.",
       annotations: { readOnlyHint: true },
       inputSchema: { type: "object", properties: { block: page }, required: ["block"], additionalProperties: false },
       run: withAgent("Opening a block of your site", async (input: { block: string }) => openBlock(input.block)),
@@ -400,7 +400,7 @@ export function SiteView() {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {opened && (
-        <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock}
+        <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
           titleOf={path => pages.find(p => p.path === path)?.title || path}
           onShowPage={path => { setBlock(null); try { openPage(path) } catch { /* a page that is no longer there */ } }} />
       )}
