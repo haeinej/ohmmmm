@@ -5,10 +5,11 @@
 //
 // Only files git tracks in that folder are served or written: what is not committed is not on the
 // site, and may be private.
-import { execFileSync } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { readFile, stat, writeFile } from "node:fs/promises"
 import { extname, join, resolve } from "node:path"
+import { promisify } from "node:util"
 import type { Plugin } from "vite"
 
 const TYPES: Record<string, string> = {
@@ -37,6 +38,24 @@ function fileFor(files: Set<string>, pathname: string): string | undefined {
     if (files.has(candidate)) return candidate
   }
   return undefined
+}
+
+const run = promisify(execFile)
+
+/**
+ * Where the site's folder stands against its remote, as git says it: the branch, how many commits
+ * it is ahead and behind, and the tracked files changed since the last commit. Untracked files are
+ * left out everywhere here: what was never committed is not the site's.
+ */
+async function syncOf(dir: string) {
+  const git = async (...args: string[]) => (await run("git", ["-C", dir, ...args], { maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60 * 1000 })).stdout
+  const lines = (await git("status", "--porcelain=v2", "--branch")).split("\n")
+  const head = (name: string) => lines.find(l => l.startsWith(`# branch.${name} `))?.slice(`# branch.${name} `.length)
+  const [ahead, behind] = (head("ab") ?? "+0 -0").split(" ").map(n => Math.abs(Number(n)))
+  const changed = lines.filter(l => /^[12u] /.test(l)).map(l => l.startsWith("2 ") ? l.split("\t")[0].split(" ").slice(9).join(" ") : l.split(" ").slice(l.startsWith("u ") ? 10 : 8).join(" "))
+  let remote = ""
+  try { remote = (await git("remote", "get-url", "origin")).trim().replace(/^https?:\/\/[^@/]*@/, "https://") } catch { /* a folder with no remote */ }
+  return { branch: head("head") ?? "", upstream: head("upstream") ?? "", remote, ahead, behind, changed, last: (await git("log", "-1", "--format=%s")).trim() }
 }
 
 const titleOf = (html: string) => /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1].trim() ?? ""
@@ -113,6 +132,46 @@ export function siteDev(): Plugin {
         try {
           const url = new URL(req.url ?? "/", "http://localhost")
           const said = (status: number, message: string) => { res.statusCode = status; res.setHeader("Content-Type", "text/plain; charset=utf-8"); res.end(message) }
+
+          // Anything that changes the folder comes from the app's own page: another site open in the
+          // same browser can't send this header without asking first, and is refused when it asks.
+          if (req.method !== "GET" && req.method !== "HEAD" && url.pathname.startsWith("/site/")) {
+            const origin = req.headers.origin
+            if (req.headers["x-ohm-site"] !== "1" || (origin && new URL(origin).host !== req.headers.host)) return said(403, "Only the app changes the site")
+          }
+
+          if (url.pathname.startsWith("/site/git")) {
+            const git = (...args: string[]) => run("git", ["-C", dir, ...args], { maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60 * 1000 })
+            const answer = async () => { res.setHeader("Content-Type", "application/json"); res.setHeader("Cache-Control", "no-store"); res.end(JSON.stringify(await syncOf(dir))) }
+            const body = async () => { const chunks: Buffer[] = []; for await (const c of req) chunks.push(c as Buffer); return JSON.parse(Buffer.concat(chunks).toString() || "{}") as { message?: string } }
+            try {
+              if (url.pathname === "/site/git" && req.method === "GET") return await answer()
+              if (req.method !== "POST") return said(405, "Read, or ask for one step")
+              if (url.pathname === "/site/git/pull") {
+                // Fast-forward only: it never rewrites or merges, and git refuses if a changed file is in the way.
+                await git("fetch", "origin")
+                if ((await syncOf(dir)).behind) await git("merge", "--ff-only", "@{u}")
+                files = tracked(dir)
+                return await answer()
+              }
+              if (url.pathname === "/site/git/commit") {
+                const message = (await body()).message?.trim()
+                if (!message) return said(400, "Say what changed")
+                // Tracked files only, so nothing private in the folder is ever added.
+                await git("add", "-u")
+                await git("commit", "-m", message)
+                return await answer()
+              }
+              if (url.pathname === "/site/git/push") {
+                await git("push", "origin", "HEAD")
+                return await answer()
+              }
+              return said(404, "Not a step")
+            } catch (problem) {
+              const told = (problem as { stderr?: string }).stderr?.trim().split("\n").at(-1) || (problem as Error).message
+              return said(409, told)
+            }
+          }
 
           if (url.pathname === "/site/pages" && req.method === "GET") {
             files = tracked(dir)

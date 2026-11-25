@@ -115,13 +115,29 @@ export async function listPages(): Promise<SitePage[]> {
   return ((await res.json()) as { pages: SitePage[] }).pages
 }
 
+/** Where the site's folder stands against its remote (site-dev.ts `syncOf`). */
+export type SiteSync = { branch: string; upstream: string; remote: string; ahead: number; behind: number; changed: string[]; last: string }
+
+export async function readSync(): Promise<SiteSync> {
+  const res = await fetch("/site/git", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SiteSync
+}
+
+/** One git step on the site's folder: bring the remote's commits in, commit what changed, or send commits out. */
+export async function syncStep(step: "pull" | "commit" | "push", message?: string): Promise<SiteSync> {
+  const res = await fetch(`/site/git/${step}`, { method: "POST", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SiteSync
+}
+
 /** Save one change to a page's file. It refuses to write over a file that changed on disk. */
 export async function saveChange(page: string, change: Change): Promise<void> {
   const url = `/site/${page.split("/").map(encodeURIComponent).join("/")}`
   const read = await fetch(url, { cache: "no-store" })
   if (!read.ok) throw new EditProblem("That page isn't in the site")
   const next = applyChange(await read.text(), change)
-  const wrote = await fetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "" }, body: next })
+  const wrote = await fetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "", "X-Ohm-Site": "1" }, body: next })
   if (wrote.status === 412) throw new EditProblem("This page changed on disk since it was read. Reload it and try again")
   if (!wrote.ok) throw new EditProblem("The page couldn't be saved")
 }

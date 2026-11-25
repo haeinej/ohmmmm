@@ -12,7 +12,8 @@ import { registerStepTool } from "@/webmcp"
 import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
-import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, addressOf, markupFor, plain, readContent, saveChange, type Change, type SiteContent, type SiteItem, type SitePage } from "./source"
+import { SyncControls } from "./SiteSync"
+import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, addressOf, markupFor, plain, readContent, readSync, saveChange, syncStep, type Change, type SiteSync, type SiteContent, type SiteItem, type SitePage } from "./source"
 
 type Device = "desktop" | "phone"
 const DEVICES: Record<Device, { w: number; h: number }> = { desktop: { w: 1280, h: 800 }, phone: { w: 390, h: 844 } }
@@ -169,6 +170,33 @@ export function SiteView() {
 
   useEffect(() => { listPages().then(setPages, e => setFailed((e as Error).message)) }, [])
   useEffect(() => { readContent().then(setContent, () => {}) }, [])
+  const [sync, setSync] = useState<SiteSync | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  /** Every frame reads its page again after the folder changed under it. */
+  const [turn, setTurn] = useState(0)
+  const refreshSync = useCallback(() => readSync().then(setSync, () => setSync(null)), [])
+  useEffect(() => { void refreshSync() }, [refreshSync])
+
+  /** One handler for Pull and Commit and their tools, and for Publish, which has no tool. */
+  const step = useCallback(async (which: "pull" | "commit" | "push", message?: string) => {
+    setSyncing(true)
+    try {
+      const before = await readSync()
+      const now = await syncStep(which, message)
+      setSync(now)
+      if (which === "pull") {
+        const pages = await listPages()
+        setPages(pages); setContent(await readContent()); setTurn(t => t + 1)
+        notify({ message: before.behind || now.last !== before.last ? `Pulled. Your folder now matches ${now.upstream || "the remote"}.` : "Already up to date.", tone: "info" })
+      }
+      if (which === "commit") notify({ message: `Committed: ${now.last}`, tone: "info" })
+      if (which === "push") notify({ message: "Published. Your live site follows in a minute or two.", tone: "info" })
+      return { branch: now.branch, ahead: now.ahead, behind: now.behind, changed: now.changed }
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+  const stepByHand = (which: "pull" | "commit" | "push", message?: string) => { step(which, message).catch(e => notify({ message: (e as Error).message, tone: "error" })) }
   const { frames, labels } = useMemo(() => place(pages ?? [], device), [pages, device])
   const { w: fw, h: fh } = DEVICES[device]
 
@@ -265,9 +293,10 @@ export function SiteView() {
   /** One handler for the Save button and the tools that change a page (`site.edit-text`, `site.place-block`). */
   const save = useCallback(async (page: string, change: Change) => {
     await saveChange(page, change)
+    void refreshSync()
     notify({ message: `Saved to ${page}. It is on your computer only until you publish your site.` })
     return { page, saved: true }
-  }, [])
+  }, [refreshSync])
   /** A tool's change isn't in the frame yet, so the frame reads its page again. */
   const saveAndShow = useCallback(async (page: string, change: Change) => {
     try {
@@ -339,8 +368,28 @@ export function SiteView() {
           : { type: "insert", anchor: input.after!, html: markupFor(item), nth: input.nth })
       }),
     }, ac.signal).catch(console.error)
+    const stood = { type: "object", properties: {}, additionalProperties: false } as const
+    const failing = (e: unknown) => { throw new DOMException((e as Error).message, "OperationError") }
+    registerStepTool({
+      name: "site.sync-status", title: "Sync status",
+      description: "Says where the site's folder stands against its git remote: the branch, how many commits it is ahead and behind, and the tracked files changed since the last commit.",
+      annotations: { readOnlyHint: true }, inputSchema: stood,
+      run: withAgent("Reading your site's sync status", async () => { const s = await readSync(); setSync(s); return { branch: s.branch, ahead: s.ahead, behind: s.behind, changed: s.changed } }),
+    }, ac.signal).catch(console.error)
+    registerStepTool({
+      name: "site.pull", title: "Pull",
+      description: "Fetches the site's git remote and fast-forwards the folder on the person's computer to it. It never merges or rewrites: if the folder can't simply move forward, nothing changes and the reason is returned. Returns the sync status.",
+      inputSchema: stood,
+      run: withAgent("Pulling your site", async () => step("pull").catch(failing)),
+    }, ac.signal).catch(console.error)
+    registerStepTool<{ message: string }, unknown>({
+      name: "site.commit", title: "Commit",
+      description: "Commits the tracked files changed in the site's folder, on the person's computer, with `message`. Nothing is published: sending commits to the remote is the person's own step. Returns the sync status.",
+      inputSchema: { type: "object", properties: { message: { type: "string", minLength: 1, maxLength: 200 } }, required: ["message"], additionalProperties: false },
+      run: withAgent("Committing your site's changes", async (input: { message: string }) => step("commit", input.message).catch(failing)),
+    }, ac.signal).catch(console.error)
     return () => ac.abort()
-  }, [agentsAllowed, pages, content, openPage, openBlock, saveAndShow])
+  }, [agentsAllowed, pages, content, openPage, openBlock, saveAndShow, step])
 
   if (failed) return <Empty className="flex-1"><EmptyHeader><EmptyTitle>Your site couldn't be opened</EmptyTitle><EmptyDescription>{failed}</EmptyDescription></EmptyHeader></Empty>
   if (!pages) return <div className="flex-1" aria-busy />
@@ -361,6 +410,7 @@ export function SiteView() {
           {selection ? <>{selection.page} · {selection.tag}{selection.text && <> · “{selection.text}”</>}{selection.editable && " · double-click to change the text"}</>
             : active ? <>{active} · click an element to choose it</> : <>{pages.length} pages · click a page to work in it</>}
         </span>
+        <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
         <Button size="icon-sm" variant="ghost" aria-label="Desktop width" aria-pressed={device === "desktop"} className="aria-pressed:bg-muted" onClick={() => setDevice("desktop")}><Icon icon={MonitorIcon} /></Button>
         <Button size="icon-sm" variant="ghost" aria-label="Phone width" aria-pressed={device === "phone"} className="aria-pressed:bg-muted" onClick={() => setDevice("phone")}><Icon icon={SmartphoneIcon} /></Button>
         <Button size="icon-sm" variant="ghost" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.25, size.w / 2, size.h / 2)}><Icon icon={MinusIcon} /></Button>
@@ -394,7 +444,7 @@ export function SiteView() {
               </button>
               <div className={cn("relative overflow-hidden rounded-lg bg-background", active === f.path && "ring-4 ring-primary")} style={{ height: fh }}>
                 {shown.has(f.path) && (
-                  <iframe key={`${device}:${reloads[f.path] ?? 0}`} title={f.title || f.path} src={`/site/${f.path}`} className="block size-full"
+                  <iframe key={`${device}:${turn}:${reloads[f.path] ?? 0}`} title={f.title || f.path} src={`/site/${f.path}`} className="block size-full"
                     onLoad={e => {
                       const doc = e.currentTarget.contentDocument
                       if (!doc) return
