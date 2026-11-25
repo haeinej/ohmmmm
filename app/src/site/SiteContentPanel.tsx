@@ -2,7 +2,7 @@
 // channel one row of block tiles. It stays for as long as the Site view is open. A tile opens its block over the canvas;
 // every tile can be picked up and dragged.
 import { useEffect, useState } from "react"
-import { Maximize2Icon, Minimize2Icon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
@@ -42,13 +42,27 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
   )
 }
 
-/** A channel inside a channel, as Are.na shows one among blocks: its name and how many blocks it holds. */
-function ChannelTile({ name, count, masonry, onOpen }: { name: string; count: number; masonry?: boolean; onOpen(): void }) {
+/**
+ * A channel inside a channel, as a cover: what is at its front, blurred and dimmed, with its name
+ * and how many blocks it holds written over it.
+ */
+function ChannelTile({ name, items, masonry, onOpen }: { name: string; items: SiteItem[]; masonry?: boolean; onOpen(): void }) {
+  const front = items.find(i => i.thumb) ?? items[0]
   return (
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
-      className={cn(tile, "aspect-[3/4] flex-col items-center justify-center gap-1 p-2 text-center ring-1 ring-border ring-inset hover:bg-accent", masonry ? "mb-1.5 flex w-full break-inside-avoid" : "flex h-full shrink-0")}>
-      <span className="line-clamp-3 font-medium break-words">{name}</span>
-      <span className="text-small text-muted-foreground">{count === 1 ? "1 block" : `${count} blocks`}</span>
+      className={cn(tile, "group/cover aspect-[3/4]", masonry ? "mb-1.5 w-full break-inside-avoid" : "h-full shrink-0")}>
+      {front?.thumb && front.kind === "image" ? (
+        <img src={url(front.thumb)} alt="" loading="lazy" draggable={false} className="absolute inset-0 size-full scale-125 object-cover blur-sm" />
+      ) : (
+        <span aria-hidden className="absolute inset-0 flex scale-110 flex-col gap-1 p-2 text-left text-small leading-tight blur-[2px]">
+          <span className="font-medium">{front?.title}</span>
+          <span className="text-muted-foreground">{front?.excerpt}</span>
+        </span>
+      )}
+      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/45 p-2 text-center text-white transition-colors group-hover/cover:bg-black/60">
+        <span className="line-clamp-3 font-medium break-words">{name}</span>
+        <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
+      </span>
     </button>
   )
 }
@@ -64,7 +78,7 @@ function Channel({ name, items, inner, expanded, onExpand, onOpenInner }: {
 }) {
   const loose = items.filter(i => !i.channel)
   const tiles = (masonry?: boolean) => <>
-    {inner.map(c => <ChannelTile key={c.name} name={c.name} count={c.items.length} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
+    {inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
     {loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
   </>
   return (
@@ -90,8 +104,14 @@ function Channel({ name, items, inner, expanded, onExpand, onOpenInner }: {
 
 export function SiteContentPanel() {
   const [content, setContent] = useState<SiteContent | null>(null)
-  /** What is expanded: a channel by name, or a channel inside it as `Photographs/Berlin`. */
-  const [expanded, setExpanded] = useState<string | null>(null)
+  /**
+   * Where the panel has been, and where in that it is now: all channels (null), a channel by name,
+   * or a channel inside it as `Photographs/Berlin`. Back and forward walk it, as in a browser.
+   */
+  const [trail, setTrail] = useState<{ been: (string | null)[]; at: number }>({ been: [null], at: 0 })
+  const expanded = trail.been[trail.at]
+  const setExpanded = (to: string | null) => setTrail(t => t.been[t.at] === to ? t : { been: [...t.been.slice(0, t.at + 1), to], at: t.at + 1 })
+  const step = (by: -1 | 1) => setTrail(t => ({ ...t, at: Math.max(0, Math.min(t.been.length - 1, t.at + by)) }))
   useEffect(() => { readContent().then(setContent, () => setContent({ site: "", collections: [] })) }, [])
   const [outer, innerName] = expanded?.split("/") ?? []
   const within = innerName ? channelsIn(content?.collections.find(c => c.name === outer)?.items ?? []).find(c => c.name === innerName) : undefined
@@ -99,6 +119,13 @@ export function SiteContentPanel() {
     // The profile is the panel's heading, so it stays in place while the channels scroll under it.
     <SidePanelFrame label="Your home" heading={<ProfileCard />}>
       <div className="flex flex-col gap-3 pt-1">
+        {trail.been.length > 1 && (
+          <nav aria-label="Channel history" className="flex items-center gap-0.5">
+            <Button size="icon-xs" variant="ghost" aria-label="Back" disabled={trail.at === 0} onClick={() => step(-1)}><Icon icon={ChevronLeftIcon} size="xs" /></Button>
+            <Button size="icon-xs" variant="ghost" aria-label="Forward" disabled={trail.at === trail.been.length - 1} onClick={() => step(1)}><Icon icon={ChevronRightIcon} size="xs" /></Button>
+            <span className="truncate ps-1 text-small text-muted-foreground">{expanded ? expanded.replace("/", " / ") : "All channels"}</span>
+          </nav>
+        )}
         {within ? (
           // A channel inside a channel, open: where it is, then its blocks.
           <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
