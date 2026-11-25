@@ -1,9 +1,13 @@
-// The side panel beside the Site view (flows/site.md): the site's content as the vault holds it, each
+// The side panel beside the Site view (flows/site.md): the person's profile fixed on top, then the site's content as the vault holds it, each
 // channel one row of block tiles. It stays for as long as the Site view is open. A tile opens its block over the canvas;
 // every tile can be picked up and dragged.
 import { useEffect, useState } from "react"
+import { Maximize2Icon, Minimize2Icon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
-import { panelTitle, SidePanelFrame } from "@/workspace/Surface"
+import { ProfileCard } from "./ProfileView"
+import { SidePanelFrame } from "@/workspace/Surface"
 import { askToOpenBlock, readContent, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
@@ -38,16 +42,30 @@ function Tile({ item }: { item: SiteItem }) {
   )
 }
 
-/** One channel is one row: its name and how many blocks it holds, then its blocks side by side. */
+/**
+ * One channel: its name and how many blocks it holds, then its blocks side by side in one row.
+ * Expanded, the row becomes two, the blocks dealt between them, so more of the channel is in view.
+ */
 function Channel({ name, items }: { name: string; items: SiteItem[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const rows = expanded ? [items.filter((_, i) => i % 2 === 0), items.filter((_, i) => i % 2 === 1)] : [items]
   return (
     <section aria-label={name} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
-      <header className="flex items-baseline justify-between gap-2 px-1 pt-1">
+      <header className="flex items-center justify-between gap-2 ps-1">
         <h3 className="truncate font-medium">{name}</h3>
-        <span className="shrink-0 text-small text-muted-foreground">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
+        <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground">
+          {items.length === 1 ? "1 block" : `${items.length} blocks`}
+          <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Show ${name} in one row` : `Expand ${name}`} aria-pressed={expanded} onClick={() => setExpanded(!expanded)}>
+            <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} />
+          </Button>
+        </span>
       </header>
-      <div className="flex h-36 gap-1.5 overflow-x-auto overscroll-x-contain pb-1">
-        {items.map(item => <Tile key={item.path} item={item} />)}
+      <div className="overflow-x-auto overscroll-x-contain pb-1">
+        <div className="flex w-max flex-col gap-1.5">
+          {rows.map((row, i) => (
+            <div key={i} className="flex h-36 gap-1.5">{row.map(item => <Tile key={item.path} item={item} />)}</div>
+          ))}
+        </div>
       </div>
     </section>
   )
@@ -57,7 +75,8 @@ export function SiteContentPanel() {
   const [content, setContent] = useState<SiteContent | null>(null)
   useEffect(() => { readContent().then(setContent, () => setContent({ site: "", collections: [] })) }, [])
   return (
-    <SidePanelFrame label="Site content" heading={<h2 className={cn(panelTitle, "truncate px-1")}>{content?.site || "Your site"}</h2>}>
+    // The profile is the panel's heading, so it stays in place while the channels scroll under it.
+    <SidePanelFrame label="Your home" heading={<ProfileCard />}>
       <div className="flex flex-col gap-3 pt-1">
         {content?.collections.map(c => <Channel key={c.name} name={c.name || "Pages"} items={c.items} />)}
       </div>

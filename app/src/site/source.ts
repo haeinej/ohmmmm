@@ -103,6 +103,29 @@ export async function readContent(): Promise<SiteContent> {
 export const OPEN_PAGE = "ohm:site-open-page"
 export const askToOpen = (path: string) => window.dispatchEvent(new CustomEvent(OPEN_PAGE, { detail: path }))
 
+/** The person's profile (site-dev.ts `profileOf`): identity as fields, and what they say about themselves as Markdown. */
+export type SiteProfile = { name: string; image: string; handle: string; did: string; wallet: string; body: string; saved: boolean }
+
+export async function readProfile(): Promise<SiteProfile> {
+  const res = await fetch("/site/profile", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SiteProfile
+}
+
+export async function saveProfile(profile: SiteProfile): Promise<SiteProfile> {
+  const res = await fetch("/site/profile", { method: "PUT", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify(profile) })
+  if (!res.ok) throw new Error(await res.text())
+  const saved = (await res.json()) as SiteProfile
+  window.dispatchEvent(new CustomEvent(PROFILE_SAVED, { detail: saved }))
+  return saved
+}
+export const PROFILE_SAVED = "ohm:site-profile-saved"
+/** Ask the Site view to open the profile over the canvas. */
+export const OPEN_PROFILE = "ohm:site-open-profile"
+export const askToOpenProfile = () => window.dispatchEvent(new CustomEvent(OPEN_PROFILE))
+/** A picture named in the profile: a web address as it is, or a file of the site. */
+export const pictureUrl = (image: string) => /^https?:\/\//.test(image) ? image : image ? siteUrl(image.replace(/^\//, "")) : ""
+
 /** An article or a project as writing: its title, the line under it, and its body as Markdown. */
 export type SiteArticle = { title: string; details: string; markdown: string }
 

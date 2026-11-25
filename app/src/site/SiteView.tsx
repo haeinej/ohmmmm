@@ -13,7 +13,8 @@ import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
 import { SyncControls } from "./SiteSync"
-import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, addressOf, markupFor, plain, readContent, readSync, saveChange, syncStep, type Change, type SiteSync, type SiteContent, type SiteItem, type SitePage } from "./source"
+import { ProfileView } from "./ProfileView"
+import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, OPEN_PROFILE, addressOf, markupFor, plain, readContent, readSync, saveChange, syncStep, type Change, type SiteSync, type SiteContent, type SiteItem, type SitePage } from "./source"
 
 type Device = "desktop" | "phone"
 const DEVICES: Record<Device, { w: number; h: number }> = { desktop: { w: 1280, h: 800 }, phone: { w: 390, h: 844 } }
@@ -265,6 +266,7 @@ export function SiteView() {
   const openBlock = useCallback((path: string) => {
     const found = content?.collections.some(c => c.items.some(i => i.path === path))
     if (!found) throw new DOMException("That block isn't in the site", "DataError")
+    setProfileOpen(false)
     setBlock(path)
     return { block: path }
   }, [content])
@@ -282,6 +284,13 @@ export function SiteView() {
   }, [content, block])
   const stepBlock = useCallback((by: -1 | 1) => { const next = opened?.items[opened.channel.at + by]; if (next) setBlock(next.path) }, [opened])
   const closeBlock = useCallback(() => setBlock(null), [])
+  const [profileOpen, setProfileOpen] = useState(false)
+  const closeProfile = useCallback(() => setProfileOpen(false), [])
+  useEffect(() => {
+    const onAsk = () => { setBlock(null); setProfileOpen(true) }
+    window.addEventListener(OPEN_PROFILE, onAsk)
+    return () => window.removeEventListener(OPEN_PROFILE, onAsk)
+  }, [])
 
   // A page tile in the side panel opens its frame here.
   useEffect(() => {
@@ -399,6 +408,7 @@ export function SiteView() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      {profileOpen && <ProfileView onClose={closeProfile} />}
       {opened && (
         <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
           titleOf={path => pages.find(p => p.path === path)?.title || path}

@@ -169,6 +169,36 @@ async function articleOf(dir: string, files: Set<string>, path: string) {
   return article && { title: article.title, details: article.details, markdown: markdownOf(article.body, page) }
 }
 
+const PROFILE = "profile.md"
+const FIELDS = ["name", "image", "handle", "did", "wallet"] as const
+type Profile = Record<(typeof FIELDS)[number], string> & { body: string; saved: boolean }
+
+/**
+ * The person's profile: `profile.md` in the site's folder, its identity as properties on top and
+ * what they say about themselves as Markdown under them. Until it is first saved, it is what the
+ * folder already says: the site's domain as the handle, and the name the pages give.
+ */
+async function profileOf(dir: string, files: Set<string>): Promise<Profile> {
+  const profile: Profile = { name: "", image: "", handle: "", did: "", wallet: "", body: "", saved: false }
+  try {
+    const written = await readFile(join(dir, PROFILE), "utf8")
+    const parts = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(written)
+    for (const line of (parts?.[1] ?? "").split("\n")) {
+      const [, key, value] = /^(\w+):\s*(.*)$/.exec(line) ?? []
+      if ((FIELDS as readonly string[]).includes(key)) { try { profile[key as (typeof FIELDS)[number]] = String(JSON.parse(value)) } catch { profile[key as (typeof FIELDS)[number]] = value } }
+    }
+    profile.body = (parts ? parts[2] : written).trim()
+    profile.saved = true
+  } catch {
+    try { profile.handle = (await readFile(join(dir, "CNAME"), "utf8")).trim() } catch { /* a site without its own domain */ }
+    if (files.has("index.html")) profile.name = text(/<a class="mid"[^>]*>([\s\S]*?)<\/a>/.exec(await readFile(join(dir, "index.html"), "utf8"))?.[1] ?? "")
+    profile.image = ["portrait-home.jpg", "portrait.jpg"].find(f => files.has(f)) ?? ""
+  }
+  return profile
+}
+
+const profileFile = (p: Profile) => `---\n${FIELDS.map(key => `${key}: ${JSON.stringify(String(p[key] ?? "").trim())}`).join("\n")}\n---\n\n${String(p.body ?? "").trim()}\n`
+
 export function siteDev(): Plugin {
   const dir = process.env.VITE_OHM_SITE ? resolve(process.env.VITE_OHM_SITE) : undefined
   return {
@@ -228,6 +258,17 @@ export function siteDev(): Plugin {
             res.setHeader("Content-Type", "application/json")
             res.setHeader("Cache-Control", "no-store")
             return res.end(JSON.stringify({ pages }))
+          }
+
+          if (url.pathname === "/site/profile") {
+            if (req.method === "PUT") {
+              const chunks: Buffer[] = []
+              for await (const chunk of req) chunks.push(chunk as Buffer)
+              await writeFile(join(dir, PROFILE), profileFile(JSON.parse(Buffer.concat(chunks).toString()) as Profile))
+            } else if (req.method !== "GET") return said(405, "Read or save only")
+            res.setHeader("Content-Type", "application/json")
+            res.setHeader("Cache-Control", "no-store")
+            return res.end(JSON.stringify(await profileOf(dir, files)))
           }
 
           if (url.pathname === "/site/article" && req.method === "GET") {
