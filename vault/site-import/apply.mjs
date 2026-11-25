@@ -221,6 +221,9 @@ export async function importSite(plan, { vault, apply = false, update = false, n
     });
   }
 
+  // An agent's blocks say so, as every block an agent makes does.
+  if (by !== 'me') for (const block of blocks) block.by = by;
+
   // The files, and how each stands against what the vault holds now.
   const files = [];
   for (const node of [...channels.values(), ...blocks]) {

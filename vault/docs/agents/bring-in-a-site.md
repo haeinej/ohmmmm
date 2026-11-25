@@ -12,6 +12,8 @@ ohm site check  --plan FILE [--vault DIR]                            # read-only
 
 `--vault` falls back to `OHM_VAULT_FOLDER`, then the home's vault (`home/home.mjs` `defaultVault`).
 
+The same three steps are local MCP tools ([mcp/local.mjs](../../mcp/local.mjs)), for the [curator](../../agents/curator.md) and its [design-home](../../skills/design-home/SKILL.md) skill: `vault_site_scan({ folder, origin? })` and `vault_site_check({ plan })` read only; `vault_site_import({ plan, apply? })` previews, and with `apply` writes the new files through the same path as `vault_write` (journal, history, `by: agent:<name>`, private), after checking the agent's write grant on every folder first and writing nothing if any is missing. Files that differ in the vault are listed and never overwritten by an agent. Skipping a channel leaves the cards that point at it with nothing to be kept with; they are listed as unresolved and the check reports the gap.
+
 ## Rules it keeps
 
 - **Reads tracked files only** (`git ls-files`). A folder that is not a repository is read whole, skipping names that start with `.` or `_`.

@@ -3,7 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { createLocalTools } from '../mcp/local.mjs';
 import { atomsOf, fill, parseTree, templatesOf } from '../site-import/html.mjs';
 import { importSite, planProblems } from '../site-import/apply.mjs';
 import { checkSite } from '../site-import/check.mjs';
@@ -172,5 +174,39 @@ test('a check builds the site\'s repeated parts again from the vault, and says w
     const changed = await checkSite(ready, { vault });
     assert.equal(changed.ok, false);
     assert.match(changed.regions[0].difference.vault, /999/);
+  } finally { await rm(folder, { recursive: true, force: true }); await rm(vault, { recursive: true, force: true }); }
+});
+
+test('the curator brings a site in through its tools: read, ask, then write only where it was granted', async () => {
+  const folder = await makeSite();
+  const vault = await mkdtemp(join(tmpdir(), 'ohm-vault-'));
+  try {
+    await mkdir(join(vault, '.vault'), { recursive: true });
+    await writeFile(join(vault, '.vault/grants.json'), JSON.stringify({ agents: { curator: { write: ['Writings', 'Photographs'] } } }));
+    const tools = createLocalTools({ vault, by: 'agent:curator', DatabaseSync });
+    const { plan } = await tools.call('vault_site_scan', { folder });
+    assert.ok(plan.channels.every(c => c.name === null));
+    await tools.call('vault_index');
+    await assert.rejects(tools.call('vault_site_import', { plan }), /Name the channel/);
+    const ready = named(plan);
+    const preview = await tools.call('vault_site_import', { plan: ready });
+    assert.equal(preview.written.length, 0);
+    assert.deepEqual(await files(vault), [], 'a preview writes nothing');
+    // Entries were not granted: nothing is written at all.
+    await assert.rejects(tools.call('vault_site_import', { plan: ready, apply: true }), /no write grant on Entries/);
+    assert.deepEqual(await files(vault), []);
+    const granted = { ...ready, channels: ready.channels.map(c => (c.name === 'Entries' ? { ...c, skip: true } : c)) };
+    const done = await tools.call('vault_site_import', { plan: granted, apply: true });
+    assert.equal(done.written.length, done.add);
+    const photo = await readFile(join(vault, 'Photographs/Lisboa/a.md'), 'utf8');
+    assert.match(photo, /^by: "agent:curator"$/m);
+    assert.doesNotMatch(photo, /^visibility:/m);
+    const again = await tools.call('vault_site_import', { plan: granted });
+    assert.equal(again.add, 0);
+    assert.equal(again.change, 0, 'what the curator wrote reads back the same');
+    // Entries were skipped, so the gallery's card for one of them has nothing to be kept with, and the check says so.
+    const checked = await tools.call('vault_site_check', { plan: granted });
+    assert.deepEqual(checked.regions.map(r => [r.held, r.items, r.same]), [[6, 7, false]]);
+    assert.ok(done.unresolved.some(u => u.includes('/work/#tea')));
   } finally { await rm(folder, { recursive: true, force: true }); await rm(vault, { recursive: true, force: true }); }
 });

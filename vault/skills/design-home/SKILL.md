@@ -23,7 +23,7 @@ For each source, read only, and note how you read it so the owner can check.
 
 | Source | How to read it | What to count |
 | --- | --- | --- |
-| A site folder | `find <dir> -type f` grouped by top folder and extension; `git -C <dir> ls-files` for what is tracked; the home page's and section pages' `href`s for the nav | pages, images, video, audio, data, code; what the nav links, what is only reachable by address, what is not in git |
+| A site folder | `vault_site_scan({ folder })` (or `ohm site scan --folder <dir>`): pages and their kinds, what the site holds many of with each item's fields, the cards that show them, media, smaller copies and media no page shows, from what git tracks. Add `find <dir> -type f` for what is not in git, counted only | pages, images, video, audio, data, code; what the nav links, what is only reachable by address, what is not in git |
 | A feed (Substack, any RSS or Atom) | `WebFetch` or `curl` the feed address (`<name>.substack.com/feed`) | items, their slugs, which are also on the site |
 | A PDS | Resolve the handle (`_atproto.<handle>` TXT, or `/.well-known/atproto-did`), read the DID document's PDS, then `com.atproto.repo.describeRepo` and `listRecords` per collection | collections, records per collection, whether they are `com.ohmmmm.post` and carry a label |
 | A local folder of notes or media | `find`, grouped by subfolder and extension | files by kind, subfolders, sizes |
@@ -71,6 +71,7 @@ Only rows in the decisions log, and only within the grant `vault_where` shows. E
 | A channel for a block in the canonical vault | `vault_collect({ block, channel })` per block, channel names in their words |
 | Media records | Recorded by the root's scan; fill alt text and dimensions only from what the site says. Missing alt text stays missing |
 | A label or sublabel for a post | Write it in the decisions log in their words, with [suggest-labels](../suggest-labels/SKILL.md) step 5. You do not publish: the owner uses it with the publish command's `--label` and `--sublabel` when they publish. There is no command yet to relabel a post already published; list those for them |
+| A site's content becomes channels and blocks | Put their names in the scan's plan (`channels[].name`, or `"skip": true`), exactly as in the decisions log. `vault_site_import({ plan })` shows what would be written: show them. Then `vault_site_import({ plan, apply: true })`, which writes only where your grant reaches and refuses the whole of it otherwise; every block is yours and private. Then `vault_site_check({ plan })`, and report each part it says differs. [The contract](../../docs/agents/bring-in-a-site.md) |
 | A site moves onto records | [migrate-site](../migrate-site/SKILL.md), from its first step |
 | PDS records under an old type | Report only. Moving them to `com.ohmmmm.post` is migrate-site's, with the owner's approval and a preview |
 
