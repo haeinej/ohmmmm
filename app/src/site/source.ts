@@ -100,6 +100,22 @@ export function channelsIn(items: SiteItem[]): { name: string; items: SiteItem[]
   return [...found].map(([name, list]) => ({ name, items: list }))
 }
 
+/** The channels the person made themselves, and the dot each channel wears (site-dev.ts `ownChannels`). */
+export type OwnChannel = { name: string; parent?: string; color?: string; items: string[] }
+export type OwnChannels = { channels: OwnChannel[]; colors: Record<string, string> }
+
+export async function readOwnChannels(): Promise<OwnChannels> {
+  const res = await fetch("/site/channels", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as OwnChannels
+}
+
+export async function saveOwnChannels(own: OwnChannels): Promise<OwnChannels> {
+  const res = await fetch("/site/channels", { method: "PUT", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify(own) })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as OwnChannels
+}
+
 export async function readContent(): Promise<SiteContent> {
   const res = await fetch("/site/content")
   if (!res.ok) throw new Error("The site's folder couldn't be read")

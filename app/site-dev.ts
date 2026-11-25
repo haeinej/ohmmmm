@@ -7,7 +7,7 @@
 // site, and may be private.
 import { execFile, execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { readFile, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { extname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { Plugin } from "vite"
@@ -178,6 +178,16 @@ async function articleOf(dir: string, files: Set<string>, path: string) {
   return article && { title: article.title, details: article.details, markdown: markdownOf(article.body, page) }
 }
 
+/** The channels the person made themselves, and the dot each channel wears: kept beside the site, never part of it. */
+const CHANNELS = ".ohm/channels.json"
+type OwnChannels = { channels: { name: string; parent?: string; color?: string; items: string[] }[]; colors: Record<string, string> }
+async function ownChannels(dir: string): Promise<OwnChannels> {
+  try {
+    const kept = JSON.parse(await readFile(join(dir, CHANNELS), "utf8")) as Partial<OwnChannels>
+    return { channels: Array.isArray(kept.channels) ? kept.channels : [], colors: kept.colors ?? {} }
+  } catch { return { channels: [], colors: {} } }
+}
+
 const PROFILE = "profile.md"
 const FIELDS = ["name", "image", "handle", "did", "wallet", "color"] as const
 type Profile = Record<(typeof FIELDS)[number], string> & { body: string; saved: boolean }
@@ -269,6 +279,24 @@ export function siteDev(): Plugin {
             res.setHeader("Content-Type", "application/json")
             res.setHeader("Cache-Control", "no-store")
             return res.end(JSON.stringify({ pages }))
+          }
+
+          if (url.pathname === "/site/channels") {
+            if (req.method === "PUT") {
+              const chunks: Buffer[] = []
+              for await (const chunk of req) chunks.push(chunk as Buffer)
+              const sent = JSON.parse(Buffer.concat(chunks).toString()) as OwnChannels
+              const clean: OwnChannels = {
+                channels: (sent.channels ?? []).filter(c => typeof c.name === "string" && c.name.trim() && !c.name.includes("/")).slice(0, 200)
+                  .map(c => ({ name: c.name.trim().slice(0, 80), parent: c.parent || undefined, color: c.color || undefined, items: [...new Set((c.items ?? []).filter(i => typeof i === "string"))] })),
+                colors: Object.fromEntries(Object.entries(sent.colors ?? {}).filter(([, v]) => typeof v === "string" && v)),
+              }
+              await mkdir(join(dir, ".ohm"), { recursive: true })
+              await writeFile(join(dir, CHANNELS), `${JSON.stringify(clean, null, 2)}\n`)
+            } else if (req.method !== "GET") return said(405, "Read or save only")
+            res.setHeader("Content-Type", "application/json")
+            res.setHeader("Cache-Control", "no-store")
+            return res.end(JSON.stringify(await ownChannels(dir)))
           }
 
           if (url.pathname === "/site/profile") {

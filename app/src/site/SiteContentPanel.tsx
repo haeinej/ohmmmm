@@ -2,15 +2,17 @@
 // channel one row of block tiles. It stays for as long as the Site view is open. A tile opens its block over the canvas;
 // every tile can be picked up and dragged.
 import { useEffect, useState } from "react"
-import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
+import { notify } from "@/components/ui/notice"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
 import { ProfileCard } from "./ProfileView"
 import { SidePanelFrame } from "@/workspace/Surface"
-import { askToOpenBlock, channelsIn, readContent, siteUrl as url, type SiteContent, type SiteItem } from "./source"
+import { askToOpenBlock, channelsIn, PROFILE_SAVED, readContent, readOwnChannels, readProfile, saveOwnChannels, type OwnChannel, type OwnChannels, type SiteProfile, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
+const ITEM = "application/x-ohm-site-item"
 const tile = "relative block overflow-hidden rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 
 /** What a block looks like as a tile: the picture itself, or a small copy of the writing. */
@@ -36,7 +38,7 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
     <button type="button" draggable title={item.title} aria-label={page ? `Open ${item.title}` : item.title}
       onClick={() => askToOpenBlock(item.path)}
       onDragStart={e => {
-        e.dataTransfer.setData("application/x-ohm-site-item", JSON.stringify(item))
+        e.dataTransfer.setData(ITEM, JSON.stringify(item))
         e.dataTransfer.setData("text/plain", item.path)
         e.dataTransfer.effectAllowed = "copy"
       }}
@@ -69,43 +71,89 @@ function ChannelTile({ name, items, masonry, onOpen }: { name: string; items: Si
   )
 }
 
-/**
- * One channel: its name and how many blocks it holds, then what is in it side by side in one row:
- * the channels inside it first, then the blocks filed in none of them. Expanded, it is the only
- * channel shown and fills the panel under the profile, as a masonry that scrolls down.
- */
-function Channel({ name, items, inner, expanded, onExpand, onOpenInner, history }: {
-  name: string; items: SiteItem[]; inner: { name: string; items: SiteItem[] }[]; history?: React.ReactNode
-  expanded: boolean; onExpand(on: boolean): void; onOpenInner(name: string): void
-}) {
-  const loose = items.filter(i => !i.channel)
-  const tiles = (masonry?: boolean) => <>
-    {inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
-    {loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
-  </>
+/** The colours a channel's dot can wear, in the order a click walks them; the last is no fill. */
+const DOTS = ["mine", "forest", "green", "red", "ink", ""] as const
+const dotColor = (key: string, mine: string) => ({ mine: mine || "var(--primary)", forest: "var(--primary)", green: "var(--ohm-green-light)", red: "var(--ohm-red)", ink: "var(--foreground)" } as Record<string, string>)[key]
+
+/** A channel's dot: filled with its colour, or an empty ring. A click gives it the next colour. */
+function Dot({ color, mine, name, onPick }: { color: string; mine: string; name: string; onPick(color: string): void }) {
+  const fill = dotColor(color, mine)
   return (
-    <section aria-label={name} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
-      <header className="flex items-center justify-between gap-2 ps-1">
-        <h3 className="flex min-w-0 items-center gap-1.5 font-medium">{history}<span className="truncate">{name}</span></h3>
+    <button type="button" aria-label={`Change the dot of ${name}`} title="Change colour"
+      onClick={() => onPick(DOTS[(DOTS.indexOf(color as (typeof DOTS)[number]) + 1) % DOTS.length])}
+      className="flex size-5 shrink-0 items-center justify-center rounded-full outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40">
+      <span aria-hidden className="size-2.5 rounded-full ring-[1.5px] ring-inset" style={fill ? { background: fill, "--tw-ring-color": fill } as React.CSSProperties : { "--tw-ring-color": "var(--muted-foreground)" } as React.CSSProperties} />
+    </button>
+  )
+}
+
+/** A name being typed for a new channel. Enter makes it; Escape or leaving it empty gives up. */
+function NewChannel({ label, onMake, onCancel }: { label: string; onMake(name: string): void; onCancel(): void }) {
+  const [name, setName] = useState("")
+  return (
+    <form onSubmit={e => { e.preventDefault(); if (name.trim()) onMake(name.trim()); else onCancel() }}>
+      <input autoFocus aria-label={label} placeholder={label} value={name} maxLength={80} onChange={e => setName(e.target.value.replace("/", ""))}
+        onBlur={() => (name.trim() ? onMake(name.trim()) : onCancel())} onKeyDown={e => { if (e.key === "Escape") { setName(""); onCancel() } }}
+        className="w-full rounded-lg bg-muted/60 px-3 py-2 font-medium outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40" />
+    </form>
+  )
+}
+
+/** A channel as the panel shows it: its blocks, the channels inside it, and whether the person made it. */
+type Shown = { name: string; items: SiteItem[]; inner: { name: string; items: SiteItem[]; own: boolean }[]; loose: SiteItem[]; own: boolean }
+
+/**
+ * One channel: its dot, its name and how many blocks it holds, then what is in it side by side in
+ * one row: the channels inside it first, then the blocks filed in none of them. Expanded, it is
+ * the only channel shown and fills the panel under the profile, as a masonry that scrolls down.
+ * A tile dropped on a channel the person made is filed in it.
+ */
+function Channel({ shown, dot, expanded, onExpand, onOpenInner, history, onFile, children }: {
+  shown: Shown; dot: React.ReactNode; history?: React.ReactNode
+  expanded: boolean; onExpand(on: boolean): void; onOpenInner(name: string): void
+  /** File a block here, by its path. Only a channel the person made takes one. */
+  onFile?: (path: string) => void
+  children?: React.ReactNode
+}) {
+  const [over, setOver] = useState(false)
+  const tiles = (masonry?: boolean) => <>
+    {shown.inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
+    {shown.loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
+  </>
+  const empty = !shown.inner.length && !shown.loose.length
+  return (
+    <section aria-label={shown.name} className={cn("flex flex-col gap-2 rounded-lg bg-muted/60 p-2", over && "ring-2 ring-primary/40")}
+      onDragOver={e => { if (onFile && e.dataTransfer.types.includes(ITEM)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setOver(true) } }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false) }}
+      onDrop={e => { setOver(false); const raw = e.dataTransfer.getData(ITEM); if (onFile && raw) { e.preventDefault(); onFile((JSON.parse(raw) as SiteItem).path) } }}>
+      <header className="flex items-center justify-between gap-2">
+        <h3 className="flex min-w-0 items-center gap-1 font-medium">{history}{dot}<span className="truncate">{shown.name}</span></h3>
         <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground">
-          {items.length === 1 ? "1 block" : `${items.length} blocks`}
-          <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Back to all channels` : `Expand ${name}`} aria-pressed={expanded} onClick={() => onExpand(!expanded)}>
+          {shown.items.length === 1 ? "1 block" : `${shown.items.length} blocks`}
+          <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Back to all channels` : `Expand ${shown.name}`} aria-pressed={expanded} onClick={() => onExpand(!expanded)}>
             <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} size="xs" />
           </Button>
         </span>
       </header>
-      {expanded ? (
+      {empty ? (
+        <p className="px-1 pb-1 text-small text-muted-foreground">{onFile ? "Nothing here yet. Drag a block onto this channel to file it here." : "Nothing here yet."}</p>
+      ) : expanded ? (
         // Two columns in a narrow panel, more as it widens.
         <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{tiles(true)}</div>
       ) : (
         <div className="flex h-36 gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{tiles()}</div>
       )}
+      {children}
     </section>
   )
 }
 
 export function SiteContentPanel() {
   const [content, setContent] = useState<SiteContent | null>(null)
+  const [own, setOwn] = useState<OwnChannels>({ channels: [], colors: {} })
+  const [mine, setMine] = useState("")
+  /** Where a new channel's name is being typed: at the top (""), or inside the channel named. */
+  const [naming, setNaming] = useState<string | null>(null)
   /**
    * Where the panel has been, and where in that it is now: all channels (null), a channel by name,
    * or a channel inside it as `Photographs/Berlin`. Back and forward walk it, as in a browser.
@@ -114,26 +162,63 @@ export function SiteContentPanel() {
   const expanded = trail.been[trail.at]
   const setExpanded = (to: string | null) => setTrail(t => t.been[t.at] === to ? t : { been: [...t.been.slice(0, t.at + 1), to], at: t.at + 1 })
   const step = (by: -1 | 1) => setTrail(t => ({ ...t, at: Math.max(0, Math.min(t.been.length - 1, t.at + by)) }))
-  useEffect(() => { readContent().then(setContent, () => setContent({ site: "", collections: [] })) }, [])
-  // Back and forward, small, at the head of the line that says where the panel is.
-  const history = trail.been.length > 1 && (
+  useEffect(() => {
+    readContent().then(setContent, () => setContent({ site: "", collections: [] }))
+    readOwnChannels().then(setOwn, () => {})
+    readProfile().then(p => setMine(p.color), () => {})
+    const onSaved = (e: Event) => setMine((e as CustomEvent<SiteProfile>).detail.color)
+    window.addEventListener(PROFILE_SAVED, onSaved)
+    return () => window.removeEventListener(PROFILE_SAVED, onSaved)
+  }, [])
+
+  /** Change the person's own channels: shown at once, then kept in their folder. */
+  const keep = (next: OwnChannels) => { setOwn(next); saveOwnChannels(next).then(setOwn, e => notify({ message: (e as Error).message, tone: "error" })) }
+  const make = (name: string, parent?: string) => {
+    setNaming(null)
+    const taken = [...(content?.collections.map(c => c.name) ?? []), ...own.channels.filter(c => (c.parent ?? "") === (parent ?? "")).map(c => c.name)]
+    if (taken.some(t => t.toLowerCase() === name.toLowerCase())) return notify({ message: `There is a channel called “${name}” here already.`, tone: "error" })
+    keep({ ...own, channels: [...own.channels, { name, parent, items: [] }] })
+  }
+  const file = (channel: OwnChannel, path: string) => keep({ ...own, channels: own.channels.map(c => c === channel ? { ...c, items: [...new Set([...c.items, path])] } : c) })
+  const remove = (channel: OwnChannel) => { keep({ ...own, channels: own.channels.filter(c => c !== channel && c.parent !== channel.name) }); setExpanded(channel.parent ?? null) }
+  const paint = (name: string, channel: OwnChannel | undefined, color: string) =>
+    keep(channel ? { ...own, channels: own.channels.map(c => c === channel ? { ...c, color } : c) } : { ...own, colors: { ...own.colors, [name]: color } })
+
+  // Every channel the panel shows: the site's own three, then the ones the person made.
+  const all = new Map((content?.collections ?? []).flatMap(c => c.items).map(i => [i.path, i]))
+  const blocks = (c: OwnChannel) => c.items.map(p => all.get(p)).filter((i): i is SiteItem => !!i)
+  const made = (parent: string) => own.channels.filter(c => (c.parent ?? "") === parent).map(c => ({ name: c.name, items: blocks(c), own: true }))
+  const shown: Shown[] = [
+    ...(content?.collections ?? []).map(c => ({ name: c.name, items: c.items, inner: [...channelsIn(c.items).map(i => ({ ...i, own: false })), ...made(c.name)], loose: c.items.filter(i => !i.channel), own: false })),
+    ...own.channels.filter(c => !c.parent).map(c => ({ name: c.name, items: blocks(c), inner: made(c.name), loose: blocks(c), own: true })),
+  ]
+  const ownOf = (name: string, parent?: string) => own.channels.find(c => c.name === name && (c.parent ?? "") === (parent ?? ""))
+
+  const [outer, innerName] = expanded?.split("/") ?? []
+  const within = innerName ? shown.find(c => c.name === outer)?.inner.find(c => c.name === innerName) : undefined
+  // Back and forward, small, at the head of the line that says where the panel is. Only inside a channel.
+  const history = expanded && (
     <span className="-ms-1 flex shrink-0 items-center text-muted-foreground">
       <button type="button" aria-label="Back" disabled={trail.at === 0} onClick={() => step(-1)} className="rounded-md p-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-30"><Icon icon={ChevronLeftIcon} size="xs" /></button>
       <button type="button" aria-label="Forward" disabled={trail.at === trail.been.length - 1} onClick={() => step(1)} className="rounded-md p-0.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-30"><Icon icon={ChevronRightIcon} size="xs" /></button>
     </span>
   )
-  const [outer, innerName] = expanded?.split("/") ?? []
-  const within = innerName ? channelsIn(content?.collections.find(c => c.name === outer)?.items ?? []).find(c => c.name === innerName) : undefined
+  const quiet = "self-start text-small text-muted-foreground"
+  const withinOwn = within?.own ? ownOf(within.name, outer) : undefined
+
   return (
     // The profile is the panel's heading, so it stays in place while the channels scroll under it.
     <SidePanelFrame label="Your home" heading={<ProfileCard />}>
       <div className="flex flex-col gap-3 pt-1">
         {within ? (
           // A channel inside a channel, open: where it is, then its blocks.
-          <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
-            <header className="flex items-center justify-between gap-2 ps-1">
-              <h3 className="flex min-w-0 items-center gap-1.5 font-medium">
+          <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2"
+            onDragOver={e => { if (withinOwn && e.dataTransfer.types.includes(ITEM)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy" } }}
+            onDrop={e => { const raw = e.dataTransfer.getData(ITEM); if (withinOwn && raw) { e.preventDefault(); file(withinOwn, (JSON.parse(raw) as SiteItem).path) } }}>
+            <header className="flex items-center justify-between gap-2">
+              <h3 className="flex min-w-0 items-center gap-1 font-medium">
                 {history}
+                <Dot name={within.name} mine={mine} color={withinOwn ? withinOwn.color ?? "" : own.colors[`${outer}/${within.name}`] ?? ""} onPick={color => paint(`${outer}/${within.name}`, withinOwn, color)} />
                 <button type="button" className="shrink-0 text-muted-foreground outline-none hover:text-foreground" onClick={() => setExpanded(outer)}>{outer}</button>
                 <span aria-hidden className="text-muted-foreground">/</span>
                 <span className="truncate">{within.name}</span>
@@ -143,12 +228,30 @@ export function SiteContentPanel() {
                 <Button size="icon-xs" variant="ghost" aria-label="Back to all channels" onClick={() => setExpanded(null)}><Icon icon={Minimize2Icon} size="xs" /></Button>
               </span>
             </header>
-            <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{within.items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
+            {within.items.length
+              ? <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{within.items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
+              : <p className="px-1 pb-1 text-small text-muted-foreground">Nothing here yet. Go back, and drag a block onto this channel to file it here.</p>}
+            {withinOwn && <Button size="xs" variant="ghost" className={quiet} onClick={() => remove(withinOwn)}>Remove this channel</Button>}
           </section>
-        ) : content?.collections.filter(c => !expanded || c.name === expanded).map((c, i) => (
-          <Channel key={c.name} history={i === 0 ? history : null} name={c.name} items={c.items} inner={channelsIn(c.items)} expanded={c.name === expanded}
-            onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)} />
-        ))}
+        ) : shown.filter(c => !expanded || c.name === expanded).map((c, i) => {
+          const mineHere = c.own ? ownOf(c.name) : undefined
+          return (
+            <Channel key={c.name} shown={c} history={i === 0 ? history : null} expanded={c.name === expanded}
+              dot={<Dot name={c.name} mine={mine} color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""} onPick={color => paint(c.name, mineHere, color)} />}
+              onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)}
+              onFile={mineHere ? path => file(mineHere, path) : undefined}>
+              {c.name === expanded && (naming === c.name
+                ? <NewChannel label={`New channel in ${c.name}`} onMake={name => make(name, c.name)} onCancel={() => setNaming(null)} />
+                : <span className="flex gap-1">
+                    <Button size="xs" variant="ghost" className={quiet} onClick={() => setNaming(c.name)}><Icon icon={PlusIcon} size="xs" />New channel here</Button>
+                    {mineHere && <Button size="xs" variant="ghost" className={quiet} onClick={() => remove(mineHere)}>Remove this channel</Button>}
+                  </span>)}
+            </Channel>
+          )
+        })}
+        {!expanded && (naming === ""
+          ? <NewChannel label="New channel" onMake={name => make(name)} onCancel={() => setNaming(null)} />
+          : <Button size="sm" variant="ghost" className={quiet} onClick={() => setNaming("")}><Icon icon={PlusIcon} size="xs" />New channel</Button>)}
       </div>
     </SidePanelFrame>
   )
