@@ -12,6 +12,7 @@ import { extname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import type { Plugin } from "vite"
 import { decode, htmlToMarkdown } from "../vault/mirror/html-to-markdown.mjs"
+import { deploy, deployStatus } from "./site-deploy"
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -280,6 +281,17 @@ export function siteDev(): Plugin {
             res.setHeader("Content-Type", "application/json")
             res.setHeader("Cache-Control", "no-store")
             return res.end(JSON.stringify({ pages }))
+          }
+
+          if (url.pathname === "/site/deploy") {
+            res.setHeader("Content-Type", "application/json")
+            res.setHeader("Cache-Control", "no-store")
+            if (req.method === "GET") return res.end(JSON.stringify(await deployStatus(dir)))
+            if (req.method !== "POST") return said(405, "Read, or deploy")
+            const chunks: Buffer[] = []
+            for await (const chunk of req) chunks.push(chunk as Buffer)
+            try { return res.end(JSON.stringify(await deploy(dir, JSON.parse(Buffer.concat(chunks).toString() || "{}") as { project: string; commit?: string }))) }
+            catch (problem) { return said(409, (problem as Error).message) }
           }
 
           if (url.pathname === "/site/channels") {

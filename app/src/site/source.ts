@@ -216,6 +216,27 @@ export async function syncStep(step: "pull" | "commit" | "push", message?: strin
   return (await res.json()) as SiteSync
 }
 
+/** One deploy to Cloudflare, as the folder remembers it (site-deploy.ts). */
+export type Deployed = { at: string; commit: string; subject: string; branch: string; project: string; url: string; production: boolean }
+/** Where a deploy would go and what it would carry (site-deploy.ts `deployStatus`). */
+export type DeployStatus = {
+  signedIn: boolean; account: string; problem: string; projects: string[]; project: string; exists: boolean; productionBranch: string
+  branch: string; commit: string; subject: string; changed: number; production: boolean; domain: string; history: Deployed[]
+}
+
+export async function readDeploy(): Promise<DeployStatus> {
+  const res = await fetch("/site/deploy", { cache: "no-store" })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as DeployStatus
+}
+
+/** Deploy this branch's head to a Cloudflare Pages project, or put an earlier commit back. The person's own step. */
+export async function deploySite(project: string, commit?: string): Promise<Deployed> {
+  const res = await fetch("/site/deploy", { method: "POST", headers: { "X-Ohm-Site": "1", "Content-Type": "application/json" }, body: JSON.stringify({ project, commit }) })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as Deployed
+}
+
 /** Save one change to a page's file. It refuses to write over a file that changed on disk. */
 export async function saveChange(page: string, change: Change): Promise<void> {
   const url = `/site/${page.split("/").map(encodeURIComponent).join("/")}`

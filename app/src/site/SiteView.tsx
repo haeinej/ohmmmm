@@ -12,6 +12,7 @@ import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
 import { LiveCanvas, type LiveCanvasHandle, type LiveState } from "./LiveCanvas"
 import { ProfileView } from "./ProfileView"
+import { DeployControl } from "./SiteDeploy"
 import { SyncControls } from "./SiteSync"
 import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_PROFILE, readContent, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
 
@@ -73,7 +74,7 @@ export function SiteView() {
         notify({ message: before.behind || now.last !== before.last ? `Pulled. Your folder now matches ${now.upstream || "the remote"}.` : "Already up to date.", tone: "info" })
       }
       if (which === "commit") notify({ message: `Committed: ${now.last}`, tone: "info" })
-      if (which === "push") notify({ message: "Published. Your live site follows in a minute or two.", tone: "info" })
+      if (which === "push") notify({ message: "Pushed to your remote.", tone: "info" })
       return { branch: now.branch, ahead: now.ahead, behind: now.behind, changed: now.changed }
     } finally {
       setSyncing(false)
@@ -217,6 +218,7 @@ export function SiteView() {
         <span className="w-10 text-center text-small text-muted-foreground tabular-nums">{Math.round(zoom * 100)}%</span>
         <Button size="icon-sm" variant="ghost" aria-label="Zoom in" disabled={zoom === 1} onClick={() => zoomBy(1)}><Icon icon={PlusIcon} /></Button>
         <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
+        <DeployControl />
       </header>
 
       <LiveCanvas ref={canvas} start={START} zoom={zoom} accent={accent} onState={setLive} onOpen={openFromCanvas} />
