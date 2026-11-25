@@ -11,6 +11,7 @@
 @import "./tokens.css";
 @import "./shadcn.css";
 @import "./atmosphere.css";
+@import "./light.css";
 @import "./motion.css";
 @import "tailwindcss/utilities.css";
 

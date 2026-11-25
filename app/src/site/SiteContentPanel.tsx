@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
 import { notify } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { PALETTE, readDot } from "./palette"
+import { Mark, MARKS, readMark } from "@/components/ui/mark"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
@@ -76,24 +76,21 @@ function ChannelTile({ name, items, masonry, onOpen }: { name: string; items: Si
 const swatch = "size-6 rounded-full flex items-center justify-center outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40"
 
 /**
- * A channel's dot: filled with its colour, an edge of it only, or a faint ring when it has none.
- * A click opens the set to choose from: every colour filled, every colour as an edge, or none.
+ * A channel's dot: ohm-ui's Mark, filled with one of the eight marks, an edge of it only, or a
+ * faint ring when it has none. A click opens the set to choose from.
  */
 function Dot({ color, name, onPick }: { color: string; name: string; onPick(color: string): void }) {
   const [open, setOpen] = useState(false)
-  const dot = readDot(color)
-  const mark = (hex: string | null, edge: boolean) => (
-    <span aria-hidden className="size-2.5 rounded-full" style={hex ? (edge ? { boxShadow: `inset 0 0 0 1.5px ${hex}` } : { background: hex }) : { boxShadow: "inset 0 0 0 1.5px var(--border)" }} />
-  )
+  const mark = readMark(color)
   const pick = (value: string) => { onPick(value); setOpen(false) }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<button type="button" aria-label={`Colour of ${name}: ${dot ? `${dot.name}${dot.edge ? ", edge" : ""}` : "none"}`} className={cn(swatch, "size-5 shrink-0")} />}>
-        {mark(dot?.hex ?? null, dot?.edge ?? false)}
+      <PopoverTrigger render={<button type="button" aria-label={`Mark of ${name}: ${mark ? `${mark.name}${mark.edge ? ", edge" : ""}` : "none"}`} className={cn(swatch, "size-5 shrink-0")} />}>
+        <Mark color={mark?.key} edge={mark?.edge} />
       </PopoverTrigger>
       <PopoverContent align="start" className="flex w-auto flex-col gap-1 p-2">
-        <div className="flex gap-0.5">{PALETTE.map(c => <button key={c.key} type="button" aria-label={c.name} title={c.name} className={swatch} onClick={() => pick(c.key)}>{mark(c.hex, false)}</button>)}</div>
-        <div className="flex gap-0.5">{PALETTE.map(c => <button key={c.key} type="button" aria-label={`${c.name}, edge`} title={`${c.name}, edge`} className={swatch} onClick={() => pick(`${c.key}:edge`)}>{mark(c.hex, true)}</button>)}</div>
+        <div className="flex gap-0.5">{MARKS.map(m => <button key={m.key} type="button" aria-label={m.name} title={m.name} className={swatch} onClick={() => pick(m.key)}><Mark color={m.key} /></button>)}</div>
+        <div className="flex gap-0.5">{MARKS.map(m => <button key={m.key} type="button" aria-label={`${m.name}, edge`} title={`${m.name}, edge`} className={swatch} onClick={() => pick(`${m.key}:edge`)}><Mark color={m.key} edge /></button>)}</div>
         <Button size="xs" variant="ghost" className="self-start text-small text-muted-foreground" onClick={() => pick("")}>None</Button>
       </PopoverContent>
     </Popover>

@@ -107,6 +107,46 @@
   --ohm-space-12: 48px;
   --ohm-space-16: 64px;
 
+  /* ---- marks: the colours a person marks their own things with (a channel's dot, their card).
+     Never interface colour: deep and a little muted, so eight sit together on paper, and each
+     carries paper-light text at AA. The same in both schemes. ---- */
+  --ohm-mark-navy: #0409a6;
+  --ohm-mark-petrol: #0f5a66;
+  --ohm-mark-forest: #1e4d3b;
+  --ohm-mark-ochre: #8f6418;
+  --ohm-mark-clay: #a4502f;
+  --ohm-mark-burgundy: #6e1b2d;
+  --ohm-mark-plum: #4b2a4f;
+  --ohm-mark-ink: #17171c;
+
+  /* ---- identity object: fixed footprint and approved forest glass ---- */
+  --ohm-identity-width: 23.5rem;
+  --ohm-identity-ratio: 4 / 3;
+  --ohm-identity-perspective: 1100px;
+  --ohm-identity-base: color-mix(in oklab, var(--ohm-forest) 45%, black);
+  --ohm-identity-deep: color-mix(in oklab, var(--ohm-forest) 70%, black);
+  --ohm-identity-glow: color-mix(in oklab, var(--ohm-forest) 70%, var(--ohm-green-light));
+  --ohm-identity-glow-soft: color-mix(in oklab, var(--ohm-forest) 84%, var(--ohm-green-light));
+  --ohm-identity-muted: color-mix(in oklab, var(--ohm-paper-light) 60%, transparent);
+  --ohm-identity-glass: color-mix(in oklab, var(--ohm-paper-light) 4%, transparent);
+  --ohm-identity-pill: color-mix(in oklab, var(--ohm-paper-light) 12%, transparent);
+  --ohm-identity-pill-hover: color-mix(in oklab, var(--ohm-paper-light) 20%, transparent);
+  --ohm-identity-initial: color-mix(in oklab, var(--ohm-paper-light) 92%, transparent);
+  --ohm-identity-initial-fill: color-mix(in oklab, var(--ohm-paper-light) 14%, transparent);
+  --ohm-identity-blur: 64px;
+  --ohm-identity-tilt-x: -7deg;
+  --ohm-identity-tilt-y: 9deg;
+  --ohm-identity-shadow-x: -16px;
+  --ohm-identity-shadow-y: 22px;
+  --ohm-identity-shadow-drift: -10px;
+  --ohm-identity-shadow-blur: 48px;
+  --ohm-identity-shadow-spread: -14px;
+  --ohm-identity-shadow-color: color-mix(in oklab, black 55%, transparent);
+  --ohm-identity-shadow-contact: 0 2px 8px color-mix(in oklab, black 25%, transparent);
+  /* the matt finish: flat colour, and only a faint light where the pointer is */
+  --ohm-identity-matt-light: color-mix(in oklab, white 9%, transparent);
+  --ohm-identity-matt-shadow-color: color-mix(in oklab, black 40%, transparent);
+
   /* ---- size ---- */
   --ohm-height-xs: 24px;
   --ohm-height-sm: 32px;
@@ -176,6 +216,20 @@
   --ohm-press-scale: .97;
   --ohm-atmosphere-drift: 18s;
   --ohm-atmosphere-grain-opacity: .08;
+
+  /* ---- light: a photograph through frosted glass, for covers and share cards only (light.css,
+     DESIGN.md "Light"). Near-white, overexposed; the shade carries the green. ---- */
+  --ohm-light-milk: #f5f7f4;
+  --ohm-light-mist: #dbe5de;
+  --ohm-light-glow: #fbfcfa;
+  --ohm-light-shade: #5f8a6c;
+  --ohm-light-ink: #013220;
+  --ohm-light-dusk-milk: #43544d;
+  --ohm-light-dusk-mist: #1f2c27;
+  --ohm-light-dusk-glow: #eef4f0;
+  --ohm-light-dusk-shade: #121c18;
+  --ohm-light-dusk-ink: #f4f7f4;
+  --ohm-light-grain: .22;
 }
 
 /* Appearance: light by default. Set data-theme on <html> or on any element to scope it. */

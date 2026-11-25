@@ -1,0 +1,194 @@
+/* The ohm light: an overexposed photograph taken through frosted glass. Soft, out-of-focus forms of
+   light and green shade drift over a near-white field, now and then a person seen through it, all
+   under film grain. No lines, no bands, no edges. Covers, thumbnails, share cards and posters only:
+   never interface. Everything scales with the cover's width (cqw), so one cover draws at any size
+   and ratio. Cover (cover.tsx) places the forms from a seed, so every post gets its own light.
+   DESIGN.md, "Light". */
+.ohm-cover {
+  --cover-base: var(--ohm-light-milk);
+  --cover-mist: var(--ohm-light-mist);
+  --cover-glow: var(--ohm-light-glow);
+  --cover-shade: var(--ohm-light-shade);
+  --cover-ink: var(--ohm-light-ink);
+
+  position: relative;
+  container-type: inline-size;
+  overflow: hidden;
+  isolation: isolate;
+  aspect-ratio: 1200 / 630;
+  background: var(--cover-base);
+  color: var(--cover-ink);
+}
+.ohm-cover[data-ratio="square"] { aspect-ratio: 1; }
+.ohm-cover[data-ratio="portrait"] { aspect-ratio: 4 / 5; }
+.ohm-cover[data-ratio="story"] { aspect-ratio: 9 / 16; }
+
+.ohm-cover[data-tone="dusk"] {
+  --cover-base: var(--ohm-light-dusk-milk);
+  --cover-mist: var(--ohm-light-dusk-mist);
+  --cover-glow: var(--ohm-light-dusk-glow);
+  --cover-shade: var(--ohm-light-dusk-shade);
+  --cover-ink: var(--ohm-light-dusk-ink);
+}
+
+.ohm-cover-field { position: absolute; inset: 0; pointer-events: none; }
+
+/* The field: light falls in from one side (--cover-angle, from the seed). */
+.ohm-cover-field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(var(--cover-angle, 170deg), var(--cover-glow) 0%, var(--cover-base) 55%, var(--cover-mist) 100%);
+}
+
+/* One soft form: an ellipse of light or shade, far out of focus. Cover sets its place, size,
+   stretch, turn, blur and strength as custom properties. */
+.ohm-cover-form {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--w);
+  aspect-ratio: var(--r, 1);
+  translate: -50% -50%;
+  rotate: var(--turn, 0deg);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--form-color) 0%, color-mix(in oklab, var(--form-color) 55%, transparent) 50%, transparent 100%);
+  filter: blur(var(--blur, 4cqw));
+  opacity: var(--strength, .6);
+}
+.ohm-cover-form[data-kind="light"] { --form-color: var(--cover-glow); }
+.ohm-cover-form[data-kind="shade"] { --form-color: var(--cover-shade); mix-blend-mode: multiply; }
+.ohm-cover[data-tone="dusk"] .ohm-cover-form[data-kind="shade"] { mix-blend-mode: normal; }
+
+/* A person behind the glass: a silhouette, blurred until only its presence is left. */
+.ohm-cover-figure {
+  position: absolute;
+  left: var(--x);
+  bottom: 0;
+  height: var(--h);
+  /* room around the person for its blur, so nothing clips to a hard edge */
+  padding: 8cqw 8cqw 0;
+  translate: -50% var(--drop, 8%);
+  rotate: var(--turn, 0deg);
+  scale: var(--flip, 1) 1;
+  color: var(--cover-shade);
+  opacity: var(--strength, .55);
+  mix-blend-mode: multiply;
+  /* part of the person dissolves into the light, from a side the seed picks */
+  mask-image: linear-gradient(var(--fade, 0deg), #000 30%, transparent 95%);
+}
+.ohm-cover[data-tone="dusk"] .ohm-cover-figure { color: var(--cover-glow); mix-blend-mode: screen; }
+.ohm-cover-figure svg { display: block; height: 100%; width: auto; overflow: visible; filter: blur(var(--blur, 1.4cqw)); }
+
+/* A photograph in place of the drawn light (Cover's image). It is washed toward the drawn light so
+   it fades rather than shows: lower contrast, a veil of the field's milk (--fade, 0–1), and the
+   seed's soft light forms drifting over it. */
+.ohm-cover-image {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  filter: saturate(.85) contrast(calc(1 - var(--fade, .4) * .45)) brightness(calc(1 + var(--fade, .4) * .12));
+}
+.ohm-cover-field[data-image]::before { display: none; }
+.ohm-cover-veil {
+  position: absolute; inset: 0;
+  background: linear-gradient(var(--cover-angle, 170deg), var(--cover-glow) 0%, var(--cover-base) 60%, var(--cover-mist) 100%);
+  opacity: var(--fade, .4);
+}
+.ohm-cover-field[data-image] .ohm-cover-form[data-kind="light"] { opacity: calc(var(--strength, .6) * var(--fade, .4) * 1.4); }
+.ohm-cover-field[data-image] .ohm-cover-grain { z-index: 1; }
+
+/* Film grain over everything, so the light reads as a photograph, not a gradient. */
+.ohm-cover-grain {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22220%22%20height%3D%22220%22%3E%3Cfilter%20id%3D%22g%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%22.9%22%20numOctaves%3D%223%22%20stitchTiles%3D%22stitch%22%2F%3E%3CfeColorMatrix%20type%3D%22saturate%22%20values%3D%220%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23g%29%22%2F%3E%3C%2Fsvg%3E");
+  background-size: 220px 220px;
+  opacity: var(--ohm-light-grain);
+  mix-blend-mode: overlay;
+}
+
+/* ---- type: five things and no more. The mark (ohm) and the number (001) in the top corners; the
+   title in Coconat; the subtitle and the date in small Helvetica Neue. Layouts only place them. ---- */
+.ohm-cover-text {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
+  padding: 4.2cqw 4.6cqw;
+  column-gap: 4cqw;
+  font-family: var(--ohm-font-sans);
+  font-size: 1.4cqw;
+  line-height: 1.25;
+  letter-spacing: -.01em;
+  font-weight: 500;
+}
+.ohm-cover-text p, .ohm-cover-text h2 { margin: 0; }
+.ohm-cover-mark { grid-column: 1; grid-row: 1; }
+.ohm-cover-number { grid-column: 2; grid-row: 1; text-align: right; font-variant-numeric: tabular-nums; }
+.ohm-cover-title {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  max-width: 16ch;
+  font-family: var(--ohm-font-serif) !important;
+  font-weight: 400 !important;
+  font-size: 6.2cqw !important;
+  line-height: 1.02 !important;
+  letter-spacing: -.035em !important;
+  text-wrap: balance;
+  color: inherit;
+}
+.ohm-cover-subtitle { grid-column: 1; grid-row: 4; max-width: 44ch; margin-top: 1.8cqw !important; font-weight: 400; opacity: .8; }
+.ohm-cover-date { grid-column: 2; grid-row: 4; align-self: end; text-align: right; font-variant-numeric: tabular-nums; }
+
+.ohm-cover:not([data-ratio="wide"]) .ohm-cover-text { font-size: 2.4cqw; padding: 6cqw; }
+.ohm-cover:not([data-ratio="wide"]) .ohm-cover-title { font-size: 9.4cqw !important; max-width: 12ch; }
+.ohm-cover[data-ratio="story"] .ohm-cover-text { font-size: 3.2cqw; padding: 8cqw 7cqw 10cqw; }
+.ohm-cover[data-ratio="story"] .ohm-cover-title { font-size: 12cqw !important; max-width: 10ch; }
+.ohm-cover:not([data-ratio="wide"]) .ohm-cover-subtitle { grid-column: 1 / -1; }
+.ohm-cover:not([data-ratio="wide"]) .ohm-cover-date { grid-column: 1; grid-row: 5; text-align: left; margin-top: 3cqw; }
+
+/* In dusk the light is held back, so the pale type stays readable over it. */
+.ohm-cover[data-tone="dusk"] .ohm-cover-form[data-kind="light"] { opacity: calc(var(--strength, .6) * .55); }
+
+/* ---- layout: poster. Everything on one line at the foot, as on a printed poster: a compact title,
+   the subtitle in the next column, the date at the far right, all on one baseline. ---- */
+.ohm-cover[data-layout="poster"] .ohm-cover-text { grid-template-columns: 30cqw 1fr auto; grid-template-rows: auto 1fr auto; column-gap: 0; font-size: 1.3cqw; }
+.ohm-cover[data-layout="poster"] .ohm-cover-number { grid-column: 3; }
+.ohm-cover[data-layout="poster"] .ohm-cover-title {
+  grid-column: 1; grid-row: 3; align-self: end; margin: 0 !important; max-width: 13ch;
+  font-size: 2.9cqw !important; line-height: 1.08 !important; letter-spacing: -.02em !important;
+}
+.ohm-cover[data-layout="poster"] .ohm-cover-subtitle { grid-column: 2; grid-row: 3; align-self: end; margin: 0 !important; max-width: 30ch; }
+.ohm-cover[data-layout="poster"] .ohm-cover-date { grid-column: 3; grid-row: 3; margin: 0; }
+
+.ohm-cover:not([data-ratio="wide"])[data-layout="poster"] .ohm-cover-text { grid-template-columns: 1fr auto; grid-template-rows: auto 1fr auto auto auto; font-size: 2.4cqw; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="poster"] .ohm-cover-number { grid-column: 2; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="poster"] .ohm-cover-title { grid-column: 1 / -1; font-size: 6.4cqw !important; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="poster"] .ohm-cover-subtitle { grid-column: 1; grid-row: 4; margin-top: 2.4cqw !important; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="poster"] .ohm-cover-date { grid-column: 2; grid-row: 4; }
+.ohm-cover[data-ratio="story"][data-layout="poster"] .ohm-cover-text { font-size: 3cqw; }
+.ohm-cover[data-ratio="story"][data-layout="poster"] .ohm-cover-title { font-size: 8.6cqw !important; }
+
+/* ---- layout: split. The picture above, paper below: the title on the paper, the subtitle crossing
+   the seam beside it, the date under the title. ---- */
+.ohm-cover[data-layout="split"] { background: var(--ohm-light-milk); }
+.ohm-cover[data-layout="split"] .ohm-cover-field { bottom: 46%; }
+.ohm-cover[data-layout="split"] .ohm-cover-text { grid-template-columns: 12cqw 1fr 1fr; grid-template-rows: auto 1fr auto auto; column-gap: 2cqw; font-size: 1.3cqw; }
+.ohm-cover[data-layout="split"] .ohm-cover-number { grid-column: 3; }
+.ohm-cover[data-layout="split"] .ohm-cover-title {
+  grid-column: 2; grid-row: 3; margin: 0 !important; max-width: 14ch;
+  font-size: 3.6cqw !important; line-height: 1.06 !important; letter-spacing: -.02em !important;
+}
+.ohm-cover[data-layout="split"] .ohm-cover-subtitle { grid-column: 3; grid-row: 2 / 4; align-self: center; margin: 0 !important; max-width: 30ch; }
+.ohm-cover[data-layout="split"] .ohm-cover-date { grid-column: 2; grid-row: 4; text-align: left; margin-top: 2cqw; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="split"] .ohm-cover-text { grid-template-columns: 8cqw 1fr auto; font-size: 2.4cqw; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="split"] .ohm-cover-title { grid-column: 2 / -1; font-size: 7cqw !important; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="split"] .ohm-cover-subtitle { grid-column: 2 / -1; grid-row: 2; align-self: end; margin-bottom: 4cqw !important; }
+.ohm-cover:not([data-ratio="wide"])[data-layout="split"] .ohm-cover-date { grid-column: 2; grid-row: 4; }
+
+/* banner (5:2): article headers, such as X Articles, which crop and zoom the picture. The type keeps
+   to a safe zone well inside the edges, so a crop never cuts it. */
+.ohm-cover[data-ratio="banner"] { aspect-ratio: 5 / 2; }
+.ohm-cover[data-ratio="banner"] .ohm-cover-text { padding: 6cqw 11cqw; font-size: 1.15cqw; }
+.ohm-cover[data-ratio="banner"] .ohm-cover-title { font-size: 4.4cqw !important; }
