@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
 import { notify } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Mark, MARKS, readMark } from "@/components/ui/mark"
+import { Mark, markColor, MARKS, readMark } from "@/components/ui/mark"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
@@ -15,7 +15,7 @@ import { askToOpenBlock, channelsIn, readContent, readOwnChannels, saveOwnChanne
 
 
 const ITEM = "application/x-ohm-site-item"
-const tile = "relative block overflow-hidden rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+const tile = "relative block overflow-hidden [contain:paint] rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
 
 /** What a block looks like as a tile: the picture itself, or a small copy of the writing. */
 function Face({ item, fill }: { item: SiteItem; fill: boolean }) {
@@ -52,23 +52,28 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
 
 /**
  * A channel inside a channel, as a cover: the block at its front, exactly as its own tile shows it,
- * blurred and dimmed under the channel's name and count. Under the pointer the blur and the name
- * ease away, so the block itself is seen, and ease back when the pointer leaves.
+ * blurred under the channel's name and count, with nothing frosted between them. It wears its
+ * channel's mark: an edge in that colour, and its name written in it; with no mark, a plain line and ink. Under the pointer the
+ * blur and the name ease away, so the block itself is seen, and ease back when the pointer leaves.
  */
-function ChannelTile({ name, items, masonry, onOpen }: { name: string; items: SiteItem[]; masonry?: boolean; onOpen(): void }) {
+function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; items: SiteItem[]; mark?: string; masonry?: boolean; onOpen(): void }) {
   const front = items.find(i => i.kind === "image") ?? items[0]
+  const worn = readMark(mark)
+  const colour = worn ? markColor(worn.key) : undefined
   return (
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
       className={cn(tile, "group/cover aspect-[3/4]", masonry ? "mb-1.5 w-full break-inside-avoid" : "h-full shrink-0")}>
-      <span aria-hidden className="absolute inset-0 blur-[3px] transition-[filter] duration-300 ease-out group-hover/cover:blur-none group-focus-visible/cover:blur-none">
+      <span aria-hidden className="absolute inset-0 overflow-hidden blur-[3px] transition-[filter] duration-300 ease-out group-hover/cover:blur-none group-focus-visible/cover:blur-none">
         {front && (front.kind === "image" || front.kind === "video"
           ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
           : <Face item={front} fill={false} />)}
       </span>
-      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/45 p-2 text-center text-white transition-opacity duration-300 ease-out group-hover/cover:opacity-0 group-focus-visible/cover:opacity-0">
+      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2 text-center transition-opacity duration-300 ease-out group-hover/cover:opacity-0 group-focus-visible/cover:opacity-0" style={{ color: colour }}>
         <span className="line-clamp-3 font-medium break-words">{name}</span>
         <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
       </span>
+      {/* The edge stays when the name eases away. */}
+      <span aria-hidden className="absolute inset-0 rounded-md" style={{ boxShadow: `inset 0 0 0 1.5px ${colour ?? "var(--border)"}` }} />
     </button>
   )
 }
@@ -118,8 +123,10 @@ type Shown = { name: string; items: SiteItem[]; inner: { name: string; items: Si
  * the only channel shown and fills the panel under the profile, as a masonry that scrolls down.
  * A tile dropped on a channel the person made is filed in it.
  */
-function Channel({ shown, dot, expanded, onExpand, onOpenInner, history, onFile, children }: {
+function Channel({ shown, dot, markOf, expanded, onExpand, onOpenInner, history, onFile, children }: {
   shown: Shown; dot: React.ReactNode; history?: React.ReactNode
+  /** The mark a channel inside this one wears: its own, or else this channel's. */
+  markOf(inner: string): string
   expanded: boolean; onExpand(on: boolean): void; onOpenInner(name: string): void
   /** File a block here, by its path. Only a channel the person made takes one. */
   onFile?: (path: string) => void
@@ -127,7 +134,7 @@ function Channel({ shown, dot, expanded, onExpand, onOpenInner, history, onFile,
 }) {
   const [over, setOver] = useState(false)
   const tiles = (masonry?: boolean) => <>
-    {shown.inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
+    {shown.inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} mark={markOf(c.name)} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
     {shown.loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
   </>
   const empty = !shown.inner.length && !shown.loose.length
@@ -137,9 +144,10 @@ function Channel({ shown, dot, expanded, onExpand, onOpenInner, history, onFile,
       onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false) }}
       onDrop={e => { setOver(false); const raw = e.dataTransfer.getData(ITEM); if (onFile && raw) { e.preventDefault(); onFile((JSON.parse(raw) as SiteItem).path) } }}>
       <header className="flex items-center justify-between gap-2">
-        <h3 className="flex min-w-0 items-center gap-1 font-medium">{history}{dot}<span className="truncate">{shown.name}</span></h3>
-        <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground">
-          {shown.items.length === 1 ? "1 block" : `${shown.items.length} blocks`}
+        <h3 className="flex min-w-0 flex-1 items-center gap-1 font-medium">{history}{dot}<span className="truncate">{shown.name}</span></h3>
+        <span className="flex min-w-0 items-center gap-1 text-small text-muted-foreground">
+          {/* In a narrow panel the count gives way before the name does. */}
+          <span className="truncate">{shown.items.length === 1 ? "1 block" : `${shown.items.length} blocks`}</span>
           <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Back to all channels` : `Expand ${shown.name}`} aria-pressed={expanded} onClick={() => onExpand(!expanded)}>
             <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} size="xs" />
           </Button>
@@ -243,6 +251,7 @@ export function SiteContentPanel() {
           return (
             <Channel key={c.name} shown={c} history={i === 0 ? history : null} expanded={c.name === expanded}
               dot={<Dot name={c.name} color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""} onPick={color => paint(c.name, mineHere, color)} />}
+              markOf={inner => ownOf(inner, c.name)?.color || own.colors[`${c.name}/${inner}`] || (mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? "")}
               onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)}
               onFile={mineHere ? path => file(mineHere, path) : undefined}>
               {c.name === expanded && (naming === c.name

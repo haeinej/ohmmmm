@@ -30,5 +30,6 @@ export function readMark(value: string | null | undefined): { key: MarkKey; name
 export function Mark({ color, edge, className, style }: { color?: MarkKey | null; edge?: boolean; className?: string; style?: CSSProperties }) {
   const tone = color ? markColor(color) : 'var(--ohm-line)';
   return <span aria-hidden data-slot="mark" className={cn('inline-block size-2.5 shrink-0 rounded-full', className)}
-    style={{ ...(color && !edge ? { background: tone } : { boxShadow: `inset 0 0 0 1.5px ${tone}` }), ...style }} />;
+    // An edge is a real border, not a shadow: a shadow on a dot this small draws ragged.
+    style={{ boxSizing: 'border-box', ...(color && !edge ? { background: tone } : { border: `1.5px solid ${tone}` }), ...style }} />;
 }
