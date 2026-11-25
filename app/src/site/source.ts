@@ -70,14 +70,44 @@ export function replaceSrc(source: string, from: string, to: string): string {
   return source.replace(written[0], `${written[0].slice(0, 5)}${to}${written[0].at(-1)}`)
 }
 
+/** One move in a gallery's order: the photograph `key` (its file's name) goes before `before`, or to the end. */
+export type Move = { key: string; before: string | null }
+
+const FIGURE = /<figure\b[^>]*class="item[^"]*"[\s\S]*?<\/figure>/g
+const keyOf = (figure: string) => /src="[^"?]*?([^"/?]+)(?:\?[^"]*)?"/.exec(figure)?.[1] ?? ""
+
+/**
+ * Put a gallery's photographs in a new order in the page's file. Each photograph is a
+ * `<figure class="item">`; the figures trade places among the places figures already have, so
+ * whatever lies between them (cards a script writes, comments) stays where it is.
+ */
+export function reorderFigures(source: string, moves: Move[]): string {
+  const found = [...source.matchAll(FIGURE)]
+  const order = found.map(f => keyOf(f[0]))
+  const chunk = new Map(found.map(f => [keyOf(f[0]), f[0]]))
+  for (const move of moves) {
+    const from = order.indexOf(move.key)
+    if (from < 0) throw new EditProblem(`${move.key} isn't in the page's file`)
+    order.splice(from, 1)
+    const to = move.before === null ? order.length : order.indexOf(move.before)
+    if (to < 0) throw new EditProblem(`${move.before} isn't in the page's file`)
+    order.splice(to, 0, move.key)
+  }
+  let out = "", at = 0
+  found.forEach((f, i) => { out += source.slice(at, f.index) + chunk.get(order[i])!; at = f.index! + f[0].length })
+  return out + source.slice(at)
+}
+
 /** One change to a page's file. */
 export type Change =
+  | { type: "order"; moves: Move[] }
   | { type: "text"; before: string; after: string; nth?: number; count?: number }
   | { type: "insert"; anchor: string; html: string; nth?: number; count?: number }
   | { type: "src"; from: string; to: string }
 
 export function applyChange(source: string, change: Change): string {
   if (change.type === "text") return replaceText(source, change.before, change.after, change.nth, change.count)
+  if (change.type === "order") return reorderFigures(source, change.moves)
   if (change.type === "insert") return insertAfter(source, change.anchor, change.html, change.nth, change.count)
   return replaceSrc(source, change.from, change.to)
 }

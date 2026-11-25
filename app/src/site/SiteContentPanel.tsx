@@ -4,12 +4,14 @@
 import { useEffect, useState } from "react"
 import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
 import { notify } from "@/components/ui/notice"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { PALETTE, readDot } from "./palette"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
 import { ProfileCard } from "./ProfileView"
 import { SidePanelFrame } from "@/workspace/Surface"
-import { askToOpenBlock, channelsIn, PROFILE_SAVED, readContent, readOwnChannels, readProfile, saveOwnChannels, type OwnChannel, type OwnChannels, type SiteProfile, siteUrl as url, type SiteContent, type SiteItem } from "./source"
+import { askToOpenBlock, channelsIn, readContent, readOwnChannels, saveOwnChannels, type OwnChannel, type OwnChannels, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
 const ITEM = "application/x-ohm-site-item"
@@ -71,19 +73,30 @@ function ChannelTile({ name, items, masonry, onOpen }: { name: string; items: Si
   )
 }
 
-/** The colours a channel's dot can wear, in the order a click walks them; the last is no fill. */
-const DOTS = ["mine", "forest", "green", "red", "ink", ""] as const
-const dotColor = (key: string, mine: string) => ({ mine: mine || "var(--primary)", forest: "var(--primary)", green: "var(--ohm-green-light)", red: "var(--ohm-red)", ink: "var(--foreground)" } as Record<string, string>)[key]
+const swatch = "size-6 rounded-full flex items-center justify-center outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40"
 
-/** A channel's dot: filled with its colour, or an empty ring. A click gives it the next colour. */
-function Dot({ color, mine, name, onPick }: { color: string; mine: string; name: string; onPick(color: string): void }) {
-  const fill = dotColor(color, mine)
+/**
+ * A channel's dot: filled with its colour, an edge of it only, or a faint ring when it has none.
+ * A click opens the set to choose from: every colour filled, every colour as an edge, or none.
+ */
+function Dot({ color, name, onPick }: { color: string; name: string; onPick(color: string): void }) {
+  const [open, setOpen] = useState(false)
+  const dot = readDot(color)
+  const mark = (hex: string | null, edge: boolean) => (
+    <span aria-hidden className="size-2.5 rounded-full" style={hex ? (edge ? { boxShadow: `inset 0 0 0 1.5px ${hex}` } : { background: hex }) : { boxShadow: "inset 0 0 0 1.5px var(--border)" }} />
+  )
+  const pick = (value: string) => { onPick(value); setOpen(false) }
   return (
-    <button type="button" aria-label={`Change the dot of ${name}`} title="Change colour"
-      onClick={() => onPick(DOTS[(DOTS.indexOf(color as (typeof DOTS)[number]) + 1) % DOTS.length])}
-      className="flex size-5 shrink-0 items-center justify-center rounded-full outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40">
-      <span aria-hidden className="size-2.5 rounded-full ring-[1.5px] ring-inset" style={fill ? { background: fill, "--tw-ring-color": fill } as React.CSSProperties : { "--tw-ring-color": "var(--muted-foreground)" } as React.CSSProperties} />
-    </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<button type="button" aria-label={`Colour of ${name}: ${dot ? `${dot.name}${dot.edge ? ", edge" : ""}` : "none"}`} className={cn(swatch, "size-5 shrink-0")} />}>
+        {mark(dot?.hex ?? null, dot?.edge ?? false)}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="flex w-auto flex-col gap-1 p-2">
+        <div className="flex gap-0.5">{PALETTE.map(c => <button key={c.key} type="button" aria-label={c.name} title={c.name} className={swatch} onClick={() => pick(c.key)}>{mark(c.hex, false)}</button>)}</div>
+        <div className="flex gap-0.5">{PALETTE.map(c => <button key={c.key} type="button" aria-label={`${c.name}, edge`} title={`${c.name}, edge`} className={swatch} onClick={() => pick(`${c.key}:edge`)}>{mark(c.hex, true)}</button>)}</div>
+        <Button size="xs" variant="ghost" className="self-start text-small text-muted-foreground" onClick={() => pick("")}>None</Button>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -151,7 +164,6 @@ function Channel({ shown, dot, expanded, onExpand, onOpenInner, history, onFile,
 export function SiteContentPanel() {
   const [content, setContent] = useState<SiteContent | null>(null)
   const [own, setOwn] = useState<OwnChannels>({ channels: [], colors: {} })
-  const [mine, setMine] = useState("")
   /** Where a new channel's name is being typed: at the top (""), or inside the channel named. */
   const [naming, setNaming] = useState<string | null>(null)
   /**
@@ -165,10 +177,6 @@ export function SiteContentPanel() {
   useEffect(() => {
     readContent().then(setContent, () => setContent({ site: "", collections: [] }))
     readOwnChannels().then(setOwn, () => {})
-    readProfile().then(p => setMine(p.color), () => {})
-    const onSaved = (e: Event) => setMine((e as CustomEvent<SiteProfile>).detail.color)
-    window.addEventListener(PROFILE_SAVED, onSaved)
-    return () => window.removeEventListener(PROFILE_SAVED, onSaved)
   }, [])
 
   /** Change the person's own channels: shown at once, then kept in their folder. */
@@ -218,7 +226,7 @@ export function SiteContentPanel() {
             <header className="flex items-center justify-between gap-2">
               <h3 className="flex min-w-0 items-center gap-1 font-medium">
                 {history}
-                <Dot name={within.name} mine={mine} color={withinOwn ? withinOwn.color ?? "" : own.colors[`${outer}/${within.name}`] ?? ""} onPick={color => paint(`${outer}/${within.name}`, withinOwn, color)} />
+                <Dot name={within.name} color={withinOwn ? withinOwn.color ?? "" : own.colors[`${outer}/${within.name}`] ?? ""} onPick={color => paint(`${outer}/${within.name}`, withinOwn, color)} />
                 <button type="button" className="shrink-0 text-muted-foreground outline-none hover:text-foreground" onClick={() => setExpanded(outer)}>{outer}</button>
                 <span aria-hidden className="text-muted-foreground">/</span>
                 <span className="truncate">{within.name}</span>
@@ -237,7 +245,7 @@ export function SiteContentPanel() {
           const mineHere = c.own ? ownOf(c.name) : undefined
           return (
             <Channel key={c.name} shown={c} history={i === 0 ? history : null} expanded={c.name === expanded}
-              dot={<Dot name={c.name} mine={mine} color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""} onPick={color => paint(c.name, mineHere, color)} />}
+              dot={<Dot name={c.name} color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""} onPick={color => paint(c.name, mineHere, color)} />}
               onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)}
               onFile={mineHere ? path => file(mineHere, path) : undefined}>
               {c.name === expanded && (naming === c.name

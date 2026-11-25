@@ -19,22 +19,17 @@ VITE_OHM_SITE=~/development/haeinjung.com npm --prefix app run dev
 - **Dots and the person's own channels.** Every channel's name follows a dot: an empty ring, or filled with a colour, and a click gives it the next one (the person's own colour, forest, green, red, ink, none). **New channel** under the channels makes one; inside an expanded channel, **New channel here** makes one in it. A tile dragged onto a channel the person made is filed in it, and a block can be filed in many. **Remove this channel** takes one away with the channels inside it; the blocks stay where they were. The site's own three channels can't take a block or be removed. All of this is kept in `.ohm/channels.json` in the folder, which git does not track. There are no tools for it yet. Index pages, shared parts, script sources and the pictures inside an article are not blocks. An image or a video keeps its own shape; an article or a project is a 3:4 sheet holding the start of its own writing in miniature. A tile opens its block. Every tile can be dragged onto a page.
 - **A block, open:** it covers the canvas, and every block opens in the app's own editor view, not as a web page: the toolbar's pills (what it is and where it is filed, then Text, Image, Table and Insert), the title and the line under it, then the body. An article or a project is its own writing with its pictures in place, read from the page's first language; a photograph is a block holding the picture, to read; only a video, which the editor can't hold, plays as it is. Writing has everything the editor has: Markdown as you type (`## `, `- `, `**bold**`), the `/` menu, the selection toolbar, block handles and tables. The toolbar's Image is off: a new picture has to be filed in the site's folder first. On the right: the block's title and path, its kind, its channel and when it last changed, then its connections, which for an image or a video are the pages that show it. A connection, or **Show on canvas**, goes to that page's frame. Arrows step through the channel and Escape closes, except while the caret is in the text.
 - **Saving an article:** each paragraph whose words changed is changed in the page's file, by what it said before, through the same handler as every other save. A paragraph that was added or removed, or that holds a link or bold text, can't be placed that way yet: nothing is written for it, and the person is told.
-- **Dropping a block on a page:** dragging a tile over a frame makes it the active one. The block lands after an element that holds only text (an image, a video, or a link to a page), or, an image on an image, takes that image's place. The frame shows it at once and the save bar says what changed; one change waits at a time.
 - **Sync**, in the canvas header: the branch and where it stands (files changed, commits to publish, commits behind), then **Pull** (fetch, then fast-forward only), **Commit** (tracked files only, after naming the change) and **Publish** (push, after a dialog that says where it goes and that everyone can see it). The folder is an ordinary git checkout, so `git` in a terminal works beside it.
-- **Main screen: the canvas.** One endless white sheet that continues the person's website, in its ink: the name on top, then Writings and Projects as 3:4 cards and Photographs as a masonry, one run per place. Blocks lie on it directly, not inside framed pages. Wheel pans, ⌘ or Ctrl with the wheel zooms. A click opens a block; dragging one puts it anywhere, and a tile dropped from the side panel lands where it is let go. Where blocks were put is kept in this browser only, and **Tidy** puts them back. It has no tools yet.
-- **Pages**, beside Canvas in the header: the site's pages as frames, for changing a page in place. Each page is a live frame. Wheel pans, ⌘ or Ctrl with the wheel zooms, dragging the background pans. One click makes a frame the active one, and a double-click on its title fits it. Desktop and phone widths.
-- **In the active frame:** hover outlines an element, a click chooses it, ⌘-click on a link goes to that page's frame, and a double-click on an element that holds only text edits it. Enter or leaving the element ends the edit; Escape undoes it.
+- **Main screen: the canvas.** The person's website itself, running, with everything it does: its own navigation, filters, viewer and motion. Nothing is drawn for it, and it opens on the gallery (`archive/index.html`), which holds every photograph, writing and project. The site's own links stay inside the canvas. Zooming out gives the site a larger window drawn smaller, so more of it is in view. On top of that it can be composed: a photograph in the gallery is picked up and let go on another, before or after it, and the gallery lays itself out again. A click is still the site's own; ⌘-click on a photograph or a card opens it as a block. **Undo** and **Redo** (⌘Z, ⇧⌘Z) take each move back and do it again. The save bar counts the moves; **Save** writes the new order into the page's file, so what is published is what was arranged, and **Discard** puts everything back. Only photographs move: the writing and project cards are written by the site's own script.
 
 ## Steps
 
 | # | Step | Screen (ohm-ui) | Primary action (forest) | Tool | Annotations | Approval |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | See the pages | canvas of frames | none | `site.pages` | `readOnlyHint` | none |
-| 2 | Open a page | its frame, active | none | `site.open-page` | `readOnlyHint` | none |
-| 3 | Open a block | the block, over the canvas | none | `site.open-block` | `readOnlyHint` | none |
-| 4 | Change text | the save bar | Save | `site.edit-text` | none | none |
-| 5 | Place a block | the save bar | Save | `site.place-block` | none | none |
-
+| 1 | Open a block | the block, over the canvas | none | `site.open-block` | `readOnlyHint` | none |
+| 2 | Change text | an article's save bar | Save | `site.edit-text` | none | none |
+| 3 | Place a block | none yet on screen | Save | `site.place-block` | none | none |
+| 4 | Move a photograph | the canvas's save bar | Save | `site.move-photo` | none | none |
 | 6 | See where the folder stands | the canvas header | none | `site.sync-status` | `readOnlyHint` | none |
 | 7 | Pull | the canvas header | none | `site.pull` | none | none |
 | 8 | Commit | the commit dialog | Commit | `site.commit` | none | none |
@@ -42,7 +37,7 @@ VITE_OHM_SITE=~/development/haeinjung.com npm --prefix app run dev
 
 **Publish has no tool.** Pushing is what puts the site in front of everyone, and only the person publishes (the repository's AGENTS.md). An agent can pull and commit; it cannot push.
 
-`site.edit-text`, `site.place-block` and **Save** call the same handler (`save` in [src/site/SiteView.tsx](../src/site/SiteView.tsx), over `saveChange` in [src/site/source.ts](../src/site/source.ts)). It is not consequential: it changes one file on the person's computer, which git can undo, and no one else sees it.
+`site.edit-text`, `site.place-block`, `site.move-photo` and every **Save** call the same handler (`save` in [src/site/SiteView.tsx](../src/site/SiteView.tsx), over `saveChange` in [src/site/source.ts](../src/site/source.ts)). It is not consequential: it changes one file on the person's computer, which git can undo, and no one else sees it.
 
 ## How a change is placed
 
@@ -51,6 +46,9 @@ The frame shows what the browser rendered; the file is changed in one place. `re
 A block is placed the same way: `insertAfter` finds the element it follows by its text and writes the block on a new line after that element closes. `replaceSrc` swaps an image only when its `src` is written once in the file.
 
 ## Not built yet
+
+- Dropping a tile from the side panel onto the canvas, and removing a photograph from the gallery there. `site.place-block` writes to a page's file, but nothing on screen does yet.
+- Composing anything but the gallery's photographs: the cards, the other pages, text in place.
 
 - Moving or removing what is on a page, and styles. A placed image is plain markup (`<img src alt="" loading="lazy">`): the site's own styles decide how it sits.
 - The side panel reading the person's vault instead of the site's folder, and the channels coming from the person and not from this site's folders.
