@@ -90,8 +90,15 @@ export function markupFor(item: Pick<SiteItem, "kind" | "path" | "title">): stri
   return `<p><a href="${at}">${escapeHtml(plain(item.title))}</a></p>`
 }
 
-export type SiteItem = { kind: "article" | "project" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[] }
+export type SiteItem = { kind: "article" | "project" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[]; channel?: string }
 export type SiteContent = { site: string; collections: { name: string; items: SiteItem[] }[] }
+
+/** The channels inside a channel, in the order their first block appears, each with its blocks. */
+export function channelsIn(items: SiteItem[]): { name: string; items: SiteItem[] }[] {
+  const found = new Map<string, SiteItem[]>()
+  for (const item of items) if (item.channel) found.set(item.channel, [...(found.get(item.channel) ?? []), item])
+  return [...found].map(([name, list]) => ({ name, items: list }))
+}
 
 export async function readContent(): Promise<SiteContent> {
   const res = await fetch("/site/content")
@@ -104,7 +111,7 @@ export const OPEN_PAGE = "ohm:site-open-page"
 export const askToOpen = (path: string) => window.dispatchEvent(new CustomEvent(OPEN_PAGE, { detail: path }))
 
 /** The person's profile (site-dev.ts `profileOf`): identity as fields, and what they say about themselves as Markdown. */
-export type SiteProfile = { name: string; image: string; handle: string; did: string; wallet: string; body: string; saved: boolean }
+export type SiteProfile = { name: string; image: string; handle: string; did: string; wallet: string; color: string; body: string; saved: boolean }
 
 export async function readProfile(): Promise<SiteProfile> {
   const res = await fetch("/site/profile", { cache: "no-store" })

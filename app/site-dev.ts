@@ -75,6 +75,8 @@ type Item = {
   modified: string
   /** The pages that show this image or video: its connections, as the site itself makes them. */
   usedIn: string[]
+  /** The channel inside its channel that it is filed in, if any: a place for a photograph, a series for an article. */
+  channel?: string
 }
 
 const text = (html: string) => decode(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim()
@@ -129,7 +131,9 @@ async function contentOf(dir: string, files: Set<string>) {
   for (const [path, html] of [...sources].sort()) {
     if (!path.startsWith("writing/") || path.endsWith("index.html") || path.startsWith("writing/substack/")) continue
     const article = articleIn(html)
-    if (article) writings.push({ kind: "article", path, title: article.title || path, excerpt: text(article.body).slice(0, 700), modified: await modified(path), usedIn: [] })
+    // An article in a series folder is filed in that series: `writing/series/collisions/…` is in "collisions".
+    const series = /^writing\/series\/([^/]+)\//.exec(path)?.[1]
+    if (article) writings.push({ kind: "article", path, title: article.title || path, excerpt: text(article.body).slice(0, 700), modified: await modified(path), usedIn: [], channel: series })
   }
 
   const projects: Item[] = []
@@ -137,6 +141,10 @@ async function contentOf(dir: string, files: Set<string>) {
   if (work) for (const project of projectsIn(work)) {
     projects.push({ kind: "project", path: `work/index.html#${project.id}`, title: project.title, excerpt: text(project.body).slice(0, 700), modified: await modified("work/index.html"), usedIn: [] })
   }
+
+  // The archive page says where each photograph was taken (`<figure data-loc>`): that place is its channel.
+  const places = new Map<string, string>()
+  for (const [, place, file] of (sources.get("archive/index.html") ?? "").matchAll(/<figure[^>]*data-loc="([^"]*)"[^>]*>[\s\S]*?src="[^"]*\/([^"/]+)"/g)) places.set(file, decode(place))
 
   const photographs: Item[] = []
   for (const path of [...files].sort()) {
@@ -148,6 +156,7 @@ async function contentOf(dir: string, files: Set<string>) {
       kind, path, title: base, thumb: files.has(small) ? small : kind === "image" ? path : undefined, modified: await modified(path),
       // A page names the file it shows, whatever folder it reaches it from.
       usedIn: [...sources].filter(([, html]) => html.includes(base)).map(([page]) => page),
+      channel: places.get(base) || undefined,
     })
   }
 
@@ -170,7 +179,7 @@ async function articleOf(dir: string, files: Set<string>, path: string) {
 }
 
 const PROFILE = "profile.md"
-const FIELDS = ["name", "image", "handle", "did", "wallet"] as const
+const FIELDS = ["name", "image", "handle", "did", "wallet", "color"] as const
 type Profile = Record<(typeof FIELDS)[number], string> & { body: string; saved: boolean }
 
 /**
@@ -179,7 +188,7 @@ type Profile = Record<(typeof FIELDS)[number], string> & { body: string; saved: 
  * folder already says: the site's domain as the handle, and the name the pages give.
  */
 async function profileOf(dir: string, files: Set<string>): Promise<Profile> {
-  const profile: Profile = { name: "", image: "", handle: "", did: "", wallet: "", body: "", saved: false }
+  const profile: Profile = { name: "", image: "", handle: "", did: "", wallet: "", color: "", body: "", saved: false }
   try {
     const written = await readFile(join(dir, PROFILE), "utf8")
     const parts = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(written)
@@ -194,6 +203,8 @@ async function profileOf(dir: string, files: Set<string>): Promise<Profile> {
     if (files.has("index.html")) profile.name = text(/<a class="mid"[^>]*>([\s\S]*?)<\/a>/.exec(await readFile(join(dir, "index.html"), "utf8"))?.[1] ?? "")
     profile.image = ["portrait-home.jpg", "portrait.jpg"].find(f => files.has(f)) ?? ""
   }
+  // Their own colour, until they choose one: the ink their site is written in.
+  if (!profile.color && files.has("site-header.css")) profile.color = /--ink:\s*(#[0-9a-f]{3,8})/i.exec(await readFile(join(dir, "site-header.css"), "utf8"))?.[1] ?? ""
   return profile
 }
 

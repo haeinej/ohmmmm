@@ -11,10 +11,11 @@ import { cn } from "@/lib/cn"
 import { registerStepTool } from "@/webmcp"
 import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
+import { BlockCanvas } from "./BlockCanvas"
 import { BlockView } from "./BlockView"
 import { SyncControls } from "./SiteSync"
 import { ProfileView } from "./ProfileView"
-import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, OPEN_PROFILE, addressOf, markupFor, plain, readContent, readSync, saveChange, syncStep, type Change, type SiteSync, type SiteContent, type SiteItem, type SitePage } from "./source"
+import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, OPEN_PROFILE, PROFILE_SAVED, readProfile, type SiteProfile, addressOf, markupFor, plain, readContent, readSync, saveChange, syncStep, type Change, type SiteSync, type SiteContent, type SiteItem, type SitePage } from "./source"
 
 type Device = "desktop" | "phone"
 const DEVICES: Record<Device, { w: number; h: number }> = { desktop: { w: 1280, h: 800 }, phone: { w: 390, h: 844 } }
@@ -152,6 +153,8 @@ function instrument(doc: Document, accent: string, on: {
 export function SiteView() {
   const { agentsAllowed } = useWorkspace()
   const [pages, setPages] = useState<SitePage[] | null>(null)
+  /** What the main screen is: the white sheet of blocks, or the site's pages as frames to edit in place. */
+  const [mode, setMode] = useState<"canvas" | "pages">("canvas")
   const [content, setContent] = useState<SiteContent | null>(null)
   /** The block that is open over the canvas, by its path. */
   const [block, setBlock] = useState<string | null>(null)
@@ -207,7 +210,7 @@ export function SiteView() {
     const watch = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
     watch.observe(el)
     return () => watch.disconnect()
-  }, [pages])
+  }, [pages, mode])
 
   /** Bring one frame, or the whole front row, into view. */
   const fit = useCallback((path?: string) => {
@@ -243,7 +246,7 @@ export function SiteView() {
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [zoomAt, pages])
+  }, [zoomAt, pages, mode])
 
   // A page's frame loads the first time it comes near the view, and stays.
   useEffect(() => {
@@ -258,6 +261,7 @@ export function SiteView() {
   const openPage = useCallback((path: string) => {
     if (!frames.some(f => f.path === path)) throw new DOMException("That page isn't in the site", "DataError")
     moved.current = true
+    setMode("pages")
     setActive(path); fit(path)
     return { page: path }
   }, [frames, fit])
@@ -284,6 +288,13 @@ export function SiteView() {
   }, [content, block])
   const stepBlock = useCallback((by: -1 | 1) => { const next = opened?.items[opened.channel.at + by]; if (next) setBlock(next.path) }, [opened])
   const closeBlock = useCallback(() => setBlock(null), [])
+  const [profile, setProfile] = useState<SiteProfile | null>(null)
+  useEffect(() => {
+    readProfile().then(setProfile, () => {})
+    const onSaved = (e: Event) => setProfile((e as CustomEvent<SiteProfile>).detail)
+    window.addEventListener(PROFILE_SAVED, onSaved)
+    return () => window.removeEventListener(PROFILE_SAVED, onSaved)
+  }, [])
   const [profileOpen, setProfileOpen] = useState(false)
   const closeProfile = useCallback(() => setProfileOpen(false), [])
   useEffect(() => {
@@ -418,17 +429,25 @@ export function SiteView() {
         <span className="text-small font-medium">Site</span>
         <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">
           {selection ? <>{selection.page} · {selection.tag}{selection.text && <> · “{selection.text}”</>}{selection.editable && " · double-click to change the text"}</>
+            : mode === "canvas" ? <>{content?.collections.reduce((n, c) => n + c.items.length, 0) ?? 0} blocks · drag one to place it, click to open</>
             : active ? <>{active} · click an element to choose it</> : <>{pages.length} pages · click a page to work in it</>}
         </span>
         <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
-        <Button size="icon-sm" variant="ghost" aria-label="Desktop width" aria-pressed={device === "desktop"} className="aria-pressed:bg-muted" onClick={() => setDevice("desktop")}><Icon icon={MonitorIcon} /></Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Phone width" aria-pressed={device === "phone"} className="aria-pressed:bg-muted" onClick={() => setDevice("phone")}><Icon icon={SmartphoneIcon} /></Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.25, size.w / 2, size.h / 2)}><Icon icon={MinusIcon} /></Button>
-        <span className="w-10 text-center text-small text-muted-foreground tabular-nums">{Math.round(camera.k * 100)}%</span>
-        <Button size="icon-sm" variant="ghost" aria-label="Zoom in" onClick={() => zoomAt(1.25, size.w / 2, size.h / 2)}><Icon icon={PlusIcon} /></Button>
-        <Button size="sm" variant="ghost" onClick={() => { moved.current = true; fit(active ?? undefined) }}>Fit</Button>
+        <Button size="sm" variant="ghost" aria-pressed={mode === "canvas"} className="aria-pressed:bg-muted" onClick={() => setMode("canvas")}>Canvas</Button>
+        <Button size="sm" variant="ghost" aria-pressed={mode === "pages"} className="aria-pressed:bg-muted" onClick={() => setMode("pages")}>Pages</Button>
+        {mode === "pages" && <>
+          <Button size="icon-sm" variant="ghost" aria-label="Desktop width" aria-pressed={device === "desktop"} className="aria-pressed:bg-muted" onClick={() => setDevice("desktop")}><Icon icon={MonitorIcon} /></Button>
+          <Button size="icon-sm" variant="ghost" aria-label="Phone width" aria-pressed={device === "phone"} className="aria-pressed:bg-muted" onClick={() => setDevice("phone")}><Icon icon={SmartphoneIcon} /></Button>
+          <Button size="icon-sm" variant="ghost" aria-label="Zoom out" onClick={() => zoomAt(1 / 1.25, size.w / 2, size.h / 2)}><Icon icon={MinusIcon} /></Button>
+          <span className="w-10 text-center text-small text-muted-foreground tabular-nums">{Math.round(camera.k * 100)}%</span>
+          <Button size="icon-sm" variant="ghost" aria-label="Zoom in" onClick={() => zoomAt(1.25, size.w / 2, size.h / 2)}><Icon icon={PlusIcon} /></Button>
+          <Button size="sm" variant="ghost" onClick={() => { moved.current = true; fit(active ?? undefined) }}>Fit</Button>
+        </>}
       </header>
 
+      {mode === "canvas" && content ? (
+        <BlockCanvas content={content} profile={profile} onOpen={path => { try { openBlock(path) } catch { /* a block that is no longer there */ } }} />
+      ) : (
       <div ref={stage} className="relative min-h-0 flex-1 touch-none overflow-hidden bg-muted"
         onPointerDown={e => {
           // Panning starts on the canvas itself; a frame or the save bar keeps its own clicks.
@@ -489,6 +508,7 @@ export function SiteView() {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

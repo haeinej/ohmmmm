@@ -8,7 +8,7 @@ import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
 import { ProfileCard } from "./ProfileView"
 import { SidePanelFrame } from "@/workspace/Surface"
-import { askToOpenBlock, readContent, siteUrl as url, type SiteContent, type SiteItem } from "./source"
+import { askToOpenBlock, channelsIn, readContent, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
 const tile = "relative block overflow-hidden rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -42,12 +42,31 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
   )
 }
 
+/** A channel inside a channel, as Are.na shows one among blocks: its name and how many blocks it holds. */
+function ChannelTile({ name, count, masonry, onOpen }: { name: string; count: number; masonry?: boolean; onOpen(): void }) {
+  return (
+    <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
+      className={cn(tile, "aspect-[3/4] flex-col items-center justify-center gap-1 p-2 text-center ring-1 ring-border ring-inset hover:bg-accent", masonry ? "mb-1.5 flex w-full break-inside-avoid" : "flex h-full shrink-0")}>
+      <span className="line-clamp-3 font-medium break-words">{name}</span>
+      <span className="text-small text-muted-foreground">{count === 1 ? "1 block" : `${count} blocks`}</span>
+    </button>
+  )
+}
+
 /**
- * One channel: its name and how many blocks it holds, then its blocks side by side in one row.
- * Expanded, it is the only channel shown and fills the panel under the profile, its blocks in a
- * two-column masonry that scrolls down.
+ * One channel: its name and how many blocks it holds, then what is in it side by side in one row:
+ * the channels inside it first, then the blocks filed in none of them. Expanded, it is the only
+ * channel shown and fills the panel under the profile, as a masonry that scrolls down.
  */
-function Channel({ name, items, expanded, onExpand }: { name: string; items: SiteItem[]; expanded: boolean; onExpand(on: boolean): void }) {
+function Channel({ name, items, inner, expanded, onExpand, onOpenInner }: {
+  name: string; items: SiteItem[]; inner: { name: string; items: SiteItem[] }[]
+  expanded: boolean; onExpand(on: boolean): void; onOpenInner(name: string): void
+}) {
+  const loose = items.filter(i => !i.channel)
+  const tiles = (masonry?: boolean) => <>
+    {inner.map(c => <ChannelTile key={c.name} name={c.name} count={c.items.length} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
+    {loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
+  </>
   return (
     <section aria-label={name} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
       <header className="flex items-center justify-between gap-2 ps-1">
@@ -60,9 +79,10 @@ function Channel({ name, items, expanded, onExpand }: { name: string; items: Sit
         </span>
       </header>
       {expanded ? (
-        <div className="columns-2 gap-1.5">{items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
+        // Two columns in a narrow panel, more as it widens.
+        <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{tiles(true)}</div>
       ) : (
-        <div className="flex h-36 gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{items.map(item => <Tile key={item.path} item={item} />)}</div>
+        <div className="flex h-36 gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{tiles()}</div>
       )}
     </section>
   )
@@ -70,15 +90,34 @@ function Channel({ name, items, expanded, onExpand }: { name: string; items: Sit
 
 export function SiteContentPanel() {
   const [content, setContent] = useState<SiteContent | null>(null)
-  /** The one channel that is expanded, by name. */
+  /** What is expanded: a channel by name, or a channel inside it as `Photographs/Berlin`. */
   const [expanded, setExpanded] = useState<string | null>(null)
   useEffect(() => { readContent().then(setContent, () => setContent({ site: "", collections: [] })) }, [])
+  const [outer, innerName] = expanded?.split("/") ?? []
+  const within = innerName ? channelsIn(content?.collections.find(c => c.name === outer)?.items ?? []).find(c => c.name === innerName) : undefined
   return (
     // The profile is the panel's heading, so it stays in place while the channels scroll under it.
     <SidePanelFrame label="Your home" heading={<ProfileCard />}>
       <div className="flex flex-col gap-3 pt-1">
-        {content?.collections.filter(c => !expanded || c.name === expanded).map(c => (
-          <Channel key={c.name} name={c.name} items={c.items} expanded={c.name === expanded} onExpand={on => setExpanded(on ? c.name : null)} />
+        {within ? (
+          // A channel inside a channel, open: where it is, then its blocks.
+          <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2">
+            <header className="flex items-center justify-between gap-2 ps-1">
+              <h3 className="flex min-w-0 items-baseline gap-1.5 font-medium">
+                <button type="button" className="shrink-0 text-muted-foreground outline-none hover:text-foreground" onClick={() => setExpanded(outer)}>{outer}</button>
+                <span aria-hidden className="text-muted-foreground">/</span>
+                <span className="truncate">{within.name}</span>
+              </h3>
+              <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground">
+                {within.items.length === 1 ? "1 block" : `${within.items.length} blocks`}
+                <Button size="icon-xs" variant="ghost" aria-label="Back to all channels" onClick={() => setExpanded(null)}><Icon icon={Minimize2Icon} size="xs" /></Button>
+              </span>
+            </header>
+            <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{within.items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
+          </section>
+        ) : content?.collections.filter(c => !expanded || c.name === expanded).map(c => (
+          <Channel key={c.name} name={c.name} items={c.items} inner={channelsIn(c.items)} expanded={c.name === expanded}
+            onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)} />
         ))}
       </div>
     </SidePanelFrame>
