@@ -19,7 +19,7 @@ export function SignIn() {
     <Empty className="flex-1">
       <EmptyHeader>
         <EmptyTitle>Sign in to open your home</EmptyTitle>
-        <EmptyDescription>Your vault and cortex are kept by your vault service. Sign in with your ohm account to see them here.</EmptyDescription>
+        <EmptyDescription>Your Collections and Agents are kept by ohm's service. Sign in with your ohm account to see them here.</EmptyDescription>
       </EmptyHeader>
       <EmptyContent className="flex-row justify-center">
         <Button nativeButton={false} render={<a href="/vault/" />}>Sign in</Button>

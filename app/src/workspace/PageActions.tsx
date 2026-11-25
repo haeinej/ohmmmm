@@ -90,10 +90,10 @@ export function DeleteDialog() {
           <DialogTitle>{doc && !isBlock(doc) ? (doc.kind === "observation" ? "Forget" : "Remove") : "Delete"} “{doc && titleOf(doc)}”?</DialogTitle>
           <DialogDescription>
             {doc && !isBlock(doc)
-              ? "It leaves your cortex, so agents no longer read it. The cortex keeps it in its history, so it can be restored."
+              ? "It leaves Agents, so agents no longer read it. Agents keeps it in its history, so it can be restored."
               : doc?.visibility === "private"
-              ? "It is removed from your vault. This cannot be undone."
-              : "It is removed from your vault. If it is published, taking down the post is its own step, and copies others made stay where they are."}
+              ? "It is removed from your Collections. This cannot be undone."
+              : "It is removed from your Collections. If it is published, taking down the post is its own step, and copies others made stay where they are."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

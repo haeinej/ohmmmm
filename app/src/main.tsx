@@ -19,7 +19,7 @@ applyDensity()
 const opening = new URLSearchParams(location.search).get("open")
 const opened = () => { if (opening) { try { open(opening) } catch { /* not in this home */ } } }
 
-// The link `ohmmmm serve` prints pairs this browser with the home on this computer. A pairing link
+// The link `ohm serve` prints pairs this browser with the home on this computer. A pairing link
 // opened in a tab already on the app changes only the fragment, which loads nothing: pair from it,
 // and open again on the home it names.
 pairFromLocation()
@@ -50,7 +50,7 @@ if (bridge) {
     })
     .catch(problem => {
       notify({
-        message: problem instanceof DOMException && problem.name === "NotAllowedError" ? UNPAIRED : "Your home on this computer did not answer. Run ohmmmm serve in your home, then reload.",
+        message: problem instanceof DOMException && problem.name === "NotAllowedError" ? UNPAIRED : "Your home on this computer did not answer. Run ohm serve in your home, then reload.",
         tone: "info",
       })
       void report(connectHome().then(opened))

@@ -1125,7 +1125,7 @@ async function command(args) {
   const [name, ...rest] = COMMANDS.includes(args[0]) ? args : ['serve', ...args];
   const { values, positionals } = parseArgs({ args: rest, options, allowPositionals: name === 'agents' || name === 'browsers' });
   const layout = findHome();
-  if (!layout) throw new Error(`Run ohmmmm ${name} inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.`);
+  if (!layout) throw new Error(`Run ohm ${name} inside your ohm (a folder named ohm.<handle>), or set OHMMMM_HOME.`);
   const port = values.port === undefined ? PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port is a port number');
   const apps = values.app?.length ? values.app.map(app => new URL(app).origin) : [APP];

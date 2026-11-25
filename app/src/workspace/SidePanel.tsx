@@ -83,8 +83,11 @@ const folderIds = (nodes: FileTreeNode[]): string[] =>
 
 const toggle = "text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
 
+/** What people call each part: the code keeps vault and cortex, people see Collections and Agents. */
+const PRIME_NAME: Record<string, string> = { vault: "Collections", cortex: "Agents" }
+
 const AUDIENCES: { id: Audience; label: string; note: string; icon: LucideIcon }[] = [
-  { id: "private", label: "You", note: "As you: everything, your vault and your cortex.", icon: LockIcon },
+  { id: "private", label: "You", note: "As you: everything, your Collections and Agents.", icon: LockIcon },
   { id: "friends", label: "Friends", note: "As a friend: blocks for friends, and for everyone.", icon: UsersIcon },
   { id: "public", label: "Public", note: "As anyone: blocks for everyone.", icon: GlobeIcon },
 ]
@@ -229,13 +232,13 @@ function PrimeRow({ prime, open: isOpen, onOpen, locked, onExpandAll, allOpen, o
         className="ux-row flex w-full items-center gap-1.5 px-1.5 pe-8 text-left">
         <Icon icon={isOpen ? ChevronDownIcon : ChevronRightIcon} size="sm" className={cn("text-muted-foreground", locked && "invisible")} />
         <PrimeIcon kind={prime} filled={isOpen} className="text-primary dark:text-foreground" />
-        <span className="text-body font-bold text-primary dark:text-foreground">{prime}</span>
-        {locked && <Icon icon={LockIcon} size="xs" className="ms-auto text-muted-foreground" aria-label="Only you see your cortex" />}
+        <span className="text-body font-bold text-primary dark:text-foreground">{PRIME_NAME[prime]}</span>
+        {locked && <Icon icon={LockIcon} size="xs" className="ms-auto text-muted-foreground" aria-label="Only you see Agents" />}
       </button>
       {!locked && (
         <DropdownMenu open={menu} onOpenChange={setMenu}>
           <DropdownMenuTrigger render={
-            <button type="button" aria-label={`More for ${prime}`}
+            <button type="button" aria-label={`More for ${PRIME_NAME[prime]}`}
               className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,background-color] duration-(--ohm-duration-press) group-hover/prime:opacity-100 hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 aria-expanded:bg-foreground/10 aria-expanded:opacity-100" />
           }>
             <Icon icon={EllipsisIcon} size="sm" />
@@ -245,7 +248,7 @@ function PrimeRow({ prime, open: isOpen, onOpen, locked, onExpandAll, allOpen, o
             {onNew && <DropdownMenuItem onClick={() => run("n")}>New block<DropdownMenuShortcut>N</DropdownMenuShortcut></DropdownMenuItem>}
             {onNewChannel && <DropdownMenuItem onClick={() => run("c")}>New channel<DropdownMenuShortcut>C</DropdownMenuShortcut></DropdownMenuItem>}
             <DropdownMenuItem onClick={() => run("e")}>{allOpen ? "Collapse all" : "Expand all"}<DropdownMenuShortcut>E</DropdownMenuShortcut></DropdownMenuItem>
-            <DropdownMenuItem onClick={() => run("o")}>Show only {prime}<DropdownMenuShortcut>O</DropdownMenuShortcut></DropdownMenuItem>
+            <DropdownMenuItem onClick={() => run("o")}>Show only {PRIME_NAME[prime]}<DropdownMenuShortcut>O</DropdownMenuShortcut></DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -338,8 +341,8 @@ function RepoPanel() {
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuCheckboxItem checked={scope.cortex && scope.vault} onCheckedChange={() => setScope({ cortex: true, vault: true })}>All</DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem checked={scope.cortex} onCheckedChange={v => setScope({ ...scope, cortex: v })}>Cortex</DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={scope.vault} onCheckedChange={v => setScope({ ...scope, vault: v })}>Vault</DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={scope.cortex} onCheckedChange={v => setScope({ ...scope, cortex: v })}>Agents</DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={scope.vault} onCheckedChange={v => setScope({ ...scope, vault: v })}>Collections</DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }
@@ -399,7 +402,7 @@ function RepoPanel() {
             </div>
           )}
           {!showCortex && !showVault && (
-            <p className="px-2 py-6 text-center text-small text-muted-foreground">Choose Cortex or Vault from the menu above.</p>
+            <p className="px-2 py-6 text-center text-small text-muted-foreground">Choose Agents or Collections from the menu above.</p>
           )}
           {showCortex && <>
             <PrimeRow prime="cortex" locked={cortexLocked} open={!cortexLocked && expanded.has("prime:cortex")} onOpen={() => flip("prime:cortex")}
@@ -420,7 +423,7 @@ function RepoPanel() {
             {expanded.has("prime:vault") && !filtering && blocks.length === 0 && (
               <Empty className="py-6">
                 <EmptyHeader>
-                  <EmptyTitle>Your vault is empty</EmptyTitle>
+                  <EmptyTitle>Your Collections are empty</EmptyTitle>
                   <EmptyDescription>
                     {privateLayer === "open" ? "Start a block, or drop a Markdown file here." : "Nothing shared is here yet. Private blocks show once this device unlocks your keys."}
                   </EmptyDescription>

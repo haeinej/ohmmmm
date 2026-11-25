@@ -20,11 +20,12 @@ const scratch = async t => {
 };
 
 test('a home is named for a handle, and found from anywhere inside it', async t => {
-  assert.equal(homeName('@Alice.Example.com'), 'ohmmmm.alice.example.com');
+  assert.equal(homeName('@Alice.Example.com'), 'ohm.alice.example.com');
   for (const bad of ['', 'did:plc:abc', 'alice/../x', 'a..b', '-alice.com']) assert.throws(() => homeName(bad), /not a handle/);
   const parent = await scratch(t);
   const layout = await initHome(parent, 'alice.example.com');
-  assert.deepEqual(layout, { home: join(parent, 'ohmmmm.alice.example.com'), handle: 'alice.example.com', vault: join(parent, 'ohmmmm.alice.example.com', 'vault'), cortex: join(parent, 'ohmmmm.alice.example.com', 'cortex') });
+  const at = join(parent, 'ohm.alice.example.com');
+  assert.deepEqual(layout, { home: at, handle: 'alice.example.com', vault: join(at, 'collections'), cortex: join(at, 'agents'), profile: join(at, 'profile'), site: join(at, 'site') });
   await mkdir(join(layout.vault, 'essays'), { recursive: true });
   assert.deepEqual(findHome(join(layout.vault, 'essays'), {}), layout);
   assert.equal(defaultVault(join(layout.cortex, 'memory'), {}), layout.vault);
@@ -37,6 +38,17 @@ test('a home is named for a handle, and found from anywhere inside it', async t 
   await initHome(parent, 'alice.example.com');
   assert.equal(await readFile(join(layout.vault, '.vault', 'config.json'), 'utf8'), config);
   assert.match(await readFile(join(layout.cortex, 'profile.md'), 'utf8'), /account: "alice\.example\.com"/);
+});
+
+test('a home made before (ohmmmm.<handle>, vault/ and cortex/) is still found as it is', async t => {
+  const parent = await scratch(t);
+  const old = join(parent, 'ohmmmm.carol.example.com');
+  await mkdir(join(old, 'vault', 'essays'), { recursive: true });
+  await mkdir(join(old, 'cortex'), { recursive: true });
+  const layout = findHome(join(old, 'vault', 'essays'), {});
+  assert.deepEqual(layout, { home: old, handle: 'carol.example.com', vault: join(old, 'vault'), cortex: join(old, 'cortex'), profile: join(old, 'profile'), site: join(old, 'site') });
+  assert.deepEqual(homeVaultFor(join(old, 'cortex')), { kind: 'module', module: VAULT_READER, path: join(old, 'vault') });
+  assert.equal(homeVaultFor(join(old, 'agents')), null);
 });
 
 test('one contract: what cortex asks is what the vault reader answers', () => {

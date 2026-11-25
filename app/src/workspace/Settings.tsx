@@ -85,7 +85,7 @@ function PairedBrowsers() {
       .finally(() => setBusy(false))
   }
   return (
-    <Section title="Browsers paired with your home" intro="Each has its own key. Forget one you no longer use, or have lost: it can no longer open your home. To pair a browser, run ohmmmm pair in your home.">
+    <Section title="Browsers paired with your home" intro="Each has its own key. Forget one you no longer use, or have lost: it can no longer open your home. To pair a browser, run ohm pair in your home.">
       {problem ? <Row title="The list could not be read" note={problem} /> : null}
       {browsers?.map(each => (
         <Row key={each.id}
@@ -99,8 +99,8 @@ function PairedBrowsers() {
             <DialogTitle>{forgetting?.you ? "Forget this browser?" : forgetting?.name ? `Forget ${forgetting.name}?` : `Forget the browser paired ${dayOf(forgetting?.made)}?`}</DialogTitle>
             <DialogDescription>
               {forgetting?.you
-                ? "This browser can no longer open your home, and goes back to the sample. To use it again, run ohmmmm pair in your home and open the link."
-                : "It can no longer open your home, from now on. To use it again, pair it with ohmmmm pair."}
+                ? "This browser can no longer open your home, and goes back to the sample. To use it again, run ohm pair in your home and open the link."
+                : "It can no longer open your home, from now on. To use it again, pair it with ohm pair."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -129,7 +129,7 @@ const copy = (text: string) => {
 }
 
 const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] = [
-  { name: "workspace.search", title: "Search", does: "Searches your vault and cortex", reads: true },
+  { name: "workspace.search", title: "Search", does: "Searches your Collections and Agents", reads: true },
   { name: "workspace.open", title: "Open", does: "Opens a block or cortex file", reads: true },
   { name: "workspace.graph", title: "Show graph", does: "Shows the graph of your blocks, or of those mentioning a person", reads: true },
   { name: "workspace.create", title: "New block", does: "Starts a private draft", reads: false },
@@ -143,7 +143,7 @@ const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] =
   { name: "history.revert", title: "Revert this change", does: "Undoes one change", reads: false },
   { name: "history.versions", title: "Versions", does: "Reads the versions of the open block", reads: true },
   { name: "history.restore", title: "Restore this version", does: "Brings a private block back to an earlier version", reads: false },
-  { name: "cortex.observe", title: "Write observation", does: "Writes an observation about the open block into your cortex, once you approve it", reads: false },
+  { name: "cortex.observe", title: "Write observation", does: "Writes an observation about the open block into Agents, once you approve it", reads: false },
 ]
 
 /** Friends: each one, with what they see, changed or taken away here. */
@@ -266,9 +266,9 @@ function Page({ tab }: { tab: SettingsTab }) {
       return <>
         <Section title="Where this is">
           {home
-            ? <Row title={`Your home, ohmmmm.${home.handle}`} note={`On this computer, through ohmmmm serve at ${home.url}. Changes are written to its files.`}
+            ? <Row title={`Your ohm, ohm.${home.handle}`} note={`On this computer, through ohm serve at ${home.url}. Changes are written to its files.`}
                 action={<Button variant="secondary" onClick={() => { forgetBridge(); void setSource() }}>Use the sample</Button>} />
-            : <Row title="A sample home" note="Run ohmmmm serve in your home and open the link it prints, to work on your own files. Changes here last until you reload." />}
+            : <Row title="A sample home" note="Run ohm serve in your home and open the link it prints, to work on your own files. Changes here last until you reload." />}
         </Section>
         {home ? <PairedBrowsers /> : null}
         <Section title="New blocks">
@@ -318,7 +318,7 @@ function CortexPage() {
   const answer = (kind: "profile" | "skill", id: string, yes: boolean, said: string) => {
     answerCortex(kind, id, yes)
       .then(() => notify({ message: said, tone: "info" }))
-      .catch((error: unknown) => notify({ message: error instanceof Error ? error.message : "Your cortex did not take the answer" }))
+      .catch((error: unknown) => notify({ message: error instanceof Error ? error.message : "Agents did not take the answer" }))
   }
   const waits = waiting.profile.length + waiting.skills.length + waiting.tools.length
   return <>
@@ -339,10 +339,10 @@ function CortexPage() {
           </>} />
       ))}
       {waiting.tools.map(t => (
-        <Row key={t.name} title={<span>Tool asked for: {t.name}</span>} note={`${t.description}${t.by ? ` · asked by ${t.by}` : ""}. A tool is built, then added to tools/ in your cortex, where you switch it on.`} />
+        <Row key={t.name} title={<span>Tool asked for: {t.name}</span>} note={`${t.description}${t.by ? ` · asked by ${t.by}` : ""}. A tool is built, then added to tools/ in Agents, where you switch it on.`} />
       ))}
     </Section>
-    <Section title="Cortex">
+    <Section title="Agents">
       <Row title="Profile" note="Your preferences, goals and notes. Agents read it every session and only propose changes. Open it to edit it." />
       <Row title="Observations" note={`${count("observation")} written as your agents work, and by you. Open one to edit, pin or forget it`} />
       <Row title="Skills" note={`${count("skill")} approved. Open one to edit or remove it`} />

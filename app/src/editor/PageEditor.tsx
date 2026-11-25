@@ -453,10 +453,10 @@ export function PageEditor({ doc }: { doc: Doc }) {
           {cortexPart && <CortexActions doc={doc} />}
           {!editable && (
             <span className="flex min-w-0 items-center gap-1.5 ps-1 text-small whitespace-nowrap text-muted-foreground"
-              title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}>
+              title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From Agents"}>
               <Icon icon={LockIcon} size="xs" className="flex-none" />
               {/* The note gives way first when the toolbar is narrow; the lock and its tooltip stay. */}
-              <span className="truncate">{isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}</span>
+              <span className="truncate">{isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From Agents"}</span>
             </span>
           )}
         </div>

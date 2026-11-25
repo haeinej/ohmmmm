@@ -113,7 +113,7 @@ export function ObserveButton({ doc, className }: { doc: Doc; className?: string
       await write(text)
       setText("")
       setOpen(false)
-      notify({ message: "Kept in your cortex, about this block", tone: "info" })
+      notify({ message: "Kept in Agents, about this block", tone: "info" })
     } catch (error) {
       notify({ message: error instanceof Error ? error.message : "The observation could not be kept" })
     }
@@ -126,7 +126,7 @@ export function ObserveButton({ doc, className }: { doc: Doc; className?: string
       </PopoverTrigger>
       <PopoverContent align="end" className="flex w-80 flex-col gap-2">
         <span className="text-body font-semibold">What did you notice?</span>
-        <span className="text-small text-muted-foreground">Kept in your cortex, about “{titleOf(doc)}”. Your agents read it when they read this block.</span>
+        <span className="text-small text-muted-foreground">Kept in Agents, about “{titleOf(doc)}”. Your agents read it when they read this block.</span>
         <Textarea value={text} maxLength={LIMIT} rows={4} aria-label="Observation" onChange={e => setText(e.target.value)} />
         <Button disabled={!text.trim()} onClick={mine}>Write observation</Button>
       </PopoverContent>
@@ -136,7 +136,7 @@ export function ObserveButton({ doc, className }: { doc: Doc; className?: string
         <DialogHeader>
           <DialogTitle>An agent asks to keep an observation</DialogTitle>
           <DialogDescription>
-            About “{titleOf(doc)}”{asking?.why ? <>, because “{asking.why}”</> : null}. It goes into your cortex as the agent’s, and you can edit or forget it.
+            About “{titleOf(doc)}”{asking?.why ? <>, because “{asking.why}”</> : null}. It goes into Agents as the agent’s, and you can edit or forget it.
           </DialogDescription>
         </DialogHeader>
         <p className="rounded-xl bg-muted px-4 py-3 text-body">{asking?.text}</p>

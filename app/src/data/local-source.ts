@@ -1,4 +1,4 @@
-// Your home on this computer, through `ohmmmm serve` (docs/serve.md). The vault's Markdown is read
+// Your home on this computer, through `ohm serve` (docs/serve.md). The vault's Markdown is read
 // once through the bridge into a working copy, which the workspace reads and edits at once, as it
 // does the sample; each change is then written back to the home folder in the background, only over
 // the version that was read (If-Match), so nothing on disk is written over unseen.
@@ -35,7 +35,7 @@ import type { CortexWaiting, Doc, Entity } from "./workspace-model"
 
 const visibleLayers: readonly Layer[] = ["public", "friends", "private"]
 const stale = () => new DOMException("The block changed. Read it again before saving.", "InvalidStateError")
-const notHere = (what: string) => new DOMException(`${what} is not read through ohmmmm serve yet.`, "NotSupportedError")
+const notHere = (what: string) => new DOMException(`${what} is not read through ohm serve yet.`, "NotSupportedError")
 const missing = () => new DOMException("There is no such block in your home.", "NotFoundError")
 const CHANNEL_FILE = "_channel.md"
 
@@ -185,7 +185,7 @@ export function pastEntries(past: readonly PastChange[], sessions: readonly Past
 }
 
 /** What the person reads when the bridge no longer takes this browser's key. */
-export const UNPAIRED = "This browser's key no longer opens your home. In your home, run ohmmmm pair and open the link it prints."
+export const UNPAIRED = "This browser's key no longer opens your home. In your home, run ohm pair and open the link it prints."
 
 /** Reads the home through the bridge, and gives the workspace its working copy. */
 export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, onChange = () => {} }: LocalOptions = {}) {
@@ -365,7 +365,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
   }
 
   // ---- The cortex, through its routes ----
-  const noCortex = () => new DOMException("This home has no cortex yet. Start one with: ohmmmm init <handle>", "NotSupportedError")
+  const noCortex = () => new DOMException("This ohm has no Agents folder yet. Start one with: ohm init <handle>", "NotSupportedError")
   const journalEntries = entries.map((entry, seq) => ({ seq, created: entry.line.at, entry: entry as unknown as Record<string, unknown> }))
   const asJsonBody = (value: unknown) => ({ body: JSON.stringify(value), headers: { "Content-Type": "application/json" } })
   /** The cortex's name for a part: an observation's id, or a skill's or tool's name, from the app's ID. */
@@ -407,7 +407,7 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
     if (!doc) throw new DOMException("Give a cortex file: profile.md, or one in observations, skills or tools.", "DataError")
     // A new part is an observation; its name in the cortex is its file's.
     const name = names.get(id) ?? (doc.kind === "observation" && replaces === null ? doc.slug.replace(/^observation-/, "") : undefined)
-    if (!name) throw new DOMException("Only an observation is new in the cortex here. Skills and tools are proposed by agents, and approved in Settings › Cortex.", "DataError")
+    if (!name) throw new DOMException("Only an observation is new in the cortex here. Skills and tools are proposed by agents, and approved in Settings › Agents.", "DataError")
     const line = (journal as { line?: { actor?: Actor; reason?: string } } | undefined)?.line
     const agent = line?.actor?.kind === "agent" ? line.actor.name.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 64) || "agent" : undefined
     const body = doc.body.trim()

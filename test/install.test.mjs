@@ -10,7 +10,10 @@ const json = path => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.u
 test('the root package runs the vault, cortex and home commands, with what the vault needs to run', () => {
   const root = json('package.json');
   for (const [name, file] of Object.entries(root.bin)) assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), `${name}: ${file}`);
-  assert.equal(root.bin.ohm, 'vault/bin/ohm.mjs');
+  // People type ohm: the home's command, which hands anything it does not keep to the vault's.
+  assert.equal(root.bin.ohm, 'bin/ohmmmm.mjs');
+  assert.match(route(['site', 'connect', 'x']).program, /home\/site\.mjs$/);
+  assert.match(route(['site', 'scan']).program, /vault\/bin\/ohm\.mjs$/);
   assert.deepEqual(root.dependencies, json('vault/package.json').dependencies);
   assert.equal(json('cortex/package.json').dependencies, undefined);
 });

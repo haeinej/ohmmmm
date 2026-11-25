@@ -2,7 +2,7 @@
 // vault/vault/visibility.mjs); one that shows a block to more people asks for approval, and public
 // is finished on the Publish page, which previews the one post. While the pills are on screen, an
 // agent has the same two steps as tools: visibility.preview and visibility.move. On the home on this
-// computer (ohmmmm serve) public is Publish's dialog instead (PublishDialog): the bridge writes the post
+// computer (ohm serve) public is Publish's dialog instead (PublishDialog): the bridge writes the post
 // to the person's PDS, and taking a public block back first takes its post down.
 // The tree's rows are ohm-ui's, so the pills sit over them, measured from the rows.
 import { useEffect, useLayoutEffect, useState } from "react"
@@ -142,7 +142,7 @@ export function VisibilityMarks({ container }: { container: HTMLElement | null }
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <span className={pill} title="Only you: your cortex is yours alone" aria-label="Only you"><Icon icon={LockIcon} size="xs" /></span>
+            <span className={pill} title="Only you: Agents is yours alone" aria-label="Only you"><Icon icon={LockIcon} size="xs" /></span>
           )}
         </div>
       )

@@ -15,8 +15,8 @@ import { open, openSettings, setSearchOpen, showGraph, useWorkspace } from "./st
 
 type Category = { scope: Exclude<SearchScope, "all">; label: string; icon: LucideIcon; has: (h: SearchHit) => boolean }
 const CATEGORIES: Category[] = [
-  { scope: "vault", label: "Vault", icon: FileTextIcon, has: h => isBlockKind(h.kind) },
-  { scope: "cortex", label: "Cortex", icon: BrainIcon, has: h => !isBlockKind(h.kind) && h.kind !== "entity" && h.kind !== "setting" },
+  { scope: "vault", label: "Collections", icon: FileTextIcon, has: h => isBlockKind(h.kind) },
+  { scope: "cortex", label: "Agents", icon: BrainIcon, has: h => !isBlockKind(h.kind) && h.kind !== "entity" && h.kind !== "setting" },
   { scope: "entities", label: "Entities", icon: UserIcon, has: h => h.kind === "entity" },
   { scope: "settings", label: "Settings", icon: SettingsIcon, has: h => h.kind === "setting" },
 ]
