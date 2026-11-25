@@ -119,8 +119,9 @@ export function IdentityCard({ did, wallet, name, address, avatarSrc, bannerSrc,
     <span className="truncate">{address}</span>
     <ArrowUpRight aria-hidden className="size-icon-sm shrink-0 opacity-70" />
   </>;
-  const pill = cn('relative inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-body text-foreground transition-colors', !matt && 'backdrop-blur-md');
-  const pillTone = onPaper ? 'var(--ohm-wash)' : 'var(--ohm-identity-pill)';
+  const pill = cn('relative -ml-3 inline-flex min-w-0 max-w-full items-center gap-1.5 self-start rounded-full px-3 py-1.5 text-body text-foreground transition-colors', !matt && 'backdrop-blur-md');
+  // The pill is an edge, not a fill: its text keeps the name's leading edge, and a filled shape reaching past that edge reads as a mistake.
+  const pillEdge = { boxShadow: `inset 0 0 0 1px ${onPaper ? 'var(--ohm-line)' : 'var(--ohm-identity-pill-hover)'}` };
 
   return <div className={cn("w-(--ohm-identity-width) max-w-full flex-none [perspective:var(--ohm-identity-perspective)]", className)} style={onPaper ? { '--tx': '0', '--ty': '0' } as CSSProperties : material}>
     <section
@@ -175,10 +176,10 @@ export function IdentityCard({ did, wallet, name, address, avatarSrc, bannerSrc,
             <h2 className="truncate text-h2">{name}</h2>
             {address && (onOpenWorkspace
               ? <button type="button" onClick={onOpenWorkspace} className={`${pill} hover:bg-(--ohm-identity-pill-hover)`}
-                  style={{ background: pillTone }} aria-label={`Open the workspace at ${address}`}>
+                  style={pillEdge} aria-label={`Open the workspace at ${address}`}>
                   {addressContent}
                 </button>
-              : <span className={pill} style={{ background: pillTone }} title={address}>{addressContent}</span>)}
+              : <span className={pill} style={pillEdge} title={address}>{addressContent}</span>)}
             {did && <CardNumber label="did" value={did} />}
             {wallet && <CardNumber label="wallet" value={wallet} />}
           </div>
