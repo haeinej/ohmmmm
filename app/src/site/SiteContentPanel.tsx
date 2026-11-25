@@ -62,8 +62,9 @@ function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; ite
   const colour = worn ? markColor(worn.key) : undefined
   return (
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
-      className={cn(tile, "flex flex-col items-center justify-center gap-2 bg-background p-2 hover:bg-accent", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
-      <span aria-hidden className="relative size-14 shrink-0 overflow-hidden rounded-md bg-muted">
+      className={cn(tile, "flex flex-col items-center gap-1.5 bg-background p-1.5 hover:bg-accent", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
+      {/* The picture takes all the room the name leaves; the cover itself never changes size. */}
+      <span aria-hidden className="relative min-h-0 w-full flex-1 overflow-hidden rounded-sm bg-muted">
         {front && (front.kind === "image" || front.kind === "video"
           ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
           : <Face item={front} fill={false} />)}
