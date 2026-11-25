@@ -9,7 +9,7 @@ import { TaskItem, TaskList } from "@tiptap/extension-list"
 import { TableKit } from "@tiptap/extension-table"
 import Highlight from "@tiptap/extension-highlight"
 import { Markdown } from "@tiptap/markdown"
-import { XIcon } from "lucide-react"
+import { ArrowUpRightIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { Input } from "@/components/ui/input"
@@ -31,7 +31,23 @@ function Picture({ profile, className }: { profile: SiteProfile; className: stri
     : <span aria-hidden className={`${className} flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground`}>{(profile.name || profile.handle || "?").slice(0, 1)}</span>
 }
 
-/** The profile, fixed at the top of the side panel. */
+/** `did:web:pds.alice.example.com` or a wallet's address, in fours, read like a card number. */
+function Number({ label, value }: { label: string; value: string }) {
+  const at = value.startsWith("did:") ? value.lastIndexOf(":") + 1 : value.startsWith("0x") ? 2 : 0
+  return (
+    <p className="flex min-w-0 items-baseline gap-2 font-mono text-small text-muted-foreground" title={value}>
+      <span className="shrink-0 opacity-70">{value.slice(0, at) || label}</span>
+      <span className="flex min-w-0 gap-1.5 overflow-hidden tracking-wider">{(value.slice(at).match(/.{1,4}/g) ?? []).map((g, i) => <span key={i}>{g}</span>)}</span>
+    </p>
+  )
+}
+
+/**
+ * The profile, fixed at the top of the side panel, in the shape of ohm-ui's identity card (4:3,
+ * the picture above, then the name, the address of the home in a pill, and the identity read in
+ * fours) on white paper in place of its forest glass. The card opens the profile; the pill opens
+ * the home itself.
+ */
 export function ProfileCard() {
   const [profile, setProfile] = useState<SiteProfile | null>(null)
   useEffect(() => {
@@ -40,17 +56,26 @@ export function ProfileCard() {
     window.addEventListener(PROFILE_SAVED, onSaved)
     return () => window.removeEventListener(PROFILE_SAVED, onSaved)
   }, [])
-  if (!profile) return <div className="h-12" aria-busy />
+  if (!profile) return <div className="aspect-[4/3] w-full rounded-2xl bg-background" aria-busy />
   return (
-    <button type="button" aria-label="Open your profile" onClick={askToOpenProfile}
-      className="flex w-full items-center gap-3 rounded-lg p-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40">
+    <section aria-label={`Identity card for ${profile.name || "you"}`} className="relative flex aspect-[4/3] w-full flex-col justify-between rounded-2xl bg-background p-4 text-left shade-2 dark:bg-muted">
+      {/* The whole card opens the profile; the address pill, above it, is its own link. */}
+      <button type="button" aria-label="Open your profile" onClick={askToOpenProfile} className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40" />
       <Picture profile={profile} className="size-12" />
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate font-medium">{profile.name || "Your name"}</span>
-        <span className="truncate text-small text-muted-foreground">{profile.handle ? `@${profile.handle}` : "No handle yet"}</span>
-        <span className="truncate text-small text-muted-foreground">{profile.wallet ? short(profile.wallet) : profile.did ? short(profile.did) : "Add your identity and wallet"}</span>
-      </span>
-    </button>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <h2 className="truncate text-h3">{profile.name || "Your name"}</h2>
+        {profile.handle && (
+          <a href={`https://${profile.handle}`} target="_blank" rel="noopener noreferrer" aria-label={`Open ${profile.handle}`}
+            className="relative -ml-2.5 inline-flex min-w-0 max-w-full items-center gap-1 self-start rounded-full bg-muted px-2.5 py-1 text-small outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 dark:bg-background">
+            <span className="truncate">{profile.handle}</span>
+            <Icon icon={ArrowUpRightIcon} size="xs" className="shrink-0 opacity-70" />
+          </a>
+        )}
+        {profile.did ? <Number label="did" value={profile.did} /> : null}
+        {profile.wallet ? <Number label="wallet" value={profile.wallet} /> : null}
+        {!profile.did && !profile.wallet && <p className="text-small text-muted-foreground">Add your identity and wallet</p>}
+      </div>
+    </section>
   )
 }
 

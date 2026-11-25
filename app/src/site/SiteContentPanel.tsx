@@ -55,7 +55,7 @@ function Channel({ name, items, expanded, onExpand }: { name: string; items: Sit
         <span className="flex shrink-0 items-center gap-1 text-small text-muted-foreground">
           {items.length === 1 ? "1 block" : `${items.length} blocks`}
           <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Back to all channels` : `Expand ${name}`} aria-pressed={expanded} onClick={() => onExpand(!expanded)}>
-            <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} />
+            <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} size="xs" />
           </Button>
         </span>
       </header>
