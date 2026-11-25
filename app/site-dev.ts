@@ -143,8 +143,9 @@ async function contentOf(dir: string, files: Set<string>) {
   }
 
   // The archive page says where each photograph was taken (`<figure data-loc>`): that place is its channel.
+  // A file's name is read without the version some pages put after it (`x.jpg?v=8848c22`).
   const places = new Map<string, string>()
-  for (const [, place, file] of (sources.get("archive/index.html") ?? "").matchAll(/<figure[^>]*data-loc="([^"]*)"[^>]*>[\s\S]*?src="[^"]*\/([^"/]+)"/g)) places.set(file, decode(place))
+  for (const [, place, file] of (sources.get("archive/index.html") ?? "").matchAll(/<figure[^>]*data-loc="([^"]*)"[^>]*>[\s\S]*?src="[^"?]*\/([^"/?]+)(?:\?[^"]*)?"/g)) places.set(file, decode(place))
 
   const photographs: Item[] = []
   for (const path of [...files].sort()) {
