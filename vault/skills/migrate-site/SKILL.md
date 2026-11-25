@@ -9,6 +9,17 @@ The site and its source show what readers should continue to get. Take a baselin
 before editing, then use it as the specification for the copy. For moving the
 pages onto Astro and the ohm loader, follow [move-to-astro](../move-to-astro/SKILL.md).
 
+## Start with the command
+
+`ohm site scan --folder <site>` does the mechanical part of this skill for a site
+folder: it inventories pages, finds what the site holds many of, maps each item's
+fields and checks every repeated item can be read back exactly. Read its plan with
+the owner, who names each channel. `ohm site import` brings the content into the
+vault, private, and `ohm site check` compares the vault with the site.
+[The contract](../../docs/agents/bring-in-a-site.md) says what it reads and writes.
+The baseline below still applies to what the command does not cover: screenshots,
+routes, query states and anything outside lists and articles.
+
 ## Take a baseline
 
 Work from a recorded commit or export. Serve a read-only snapshot with the
