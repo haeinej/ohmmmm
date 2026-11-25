@@ -51,10 +51,10 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
 }
 
 /**
- * A channel inside a channel, as a cover: the block at its front, exactly as its own tile shows it,
- * blurred and frosted under the channel's name and count, so the name reads on any picture. It wears its
- * channel's mark: an edge in that colour, and its name written in it; with no mark, a plain line and ink. Under the pointer the
- * blur and the name ease away, so the block itself is seen, and ease back when the pointer leaves.
+ * A channel inside a channel, as a cover of one fixed size: the block at its front on top, as its
+ * own tile shows it, and under it a white half with the channel's name and count. It wears its
+ * channel's mark: an edge in that colour and its name written in it; with no mark, a plain line
+ * and ink.
  */
 function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; items: SiteItem[]; mark?: string; masonry?: boolean; onOpen(): void }) {
   const front = items.find(i => i.kind === "image") ?? items[0]
@@ -62,17 +62,16 @@ function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; ite
   const colour = worn ? markColor(worn.key) : undefined
   return (
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
-      className={cn(tile, "group/cover aspect-[3/4]", masonry ? "mb-1.5 w-full break-inside-avoid" : "h-full shrink-0")}>
-      <span aria-hidden className="absolute inset-0 overflow-hidden blur-[3px] transition-[filter] duration-300 ease-out group-hover/cover:blur-none group-focus-visible/cover:blur-none">
+      className={cn(tile, "flex flex-col text-left hover:brightness-95", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
+      <span aria-hidden className="relative min-h-0 flex-1 overflow-hidden">
         {front && (front.kind === "image" || front.kind === "video"
-          ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
+          ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="absolute inset-0 size-full object-cover" />
           : <Face item={front} fill={false} />)}
       </span>
-      <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background/75 p-2 text-center transition-opacity duration-300 ease-out group-hover/cover:opacity-0 group-focus-visible/cover:opacity-0" style={{ color: colour }}>
-        <span className="line-clamp-3 font-medium break-words">{name}</span>
+      <span className="flex h-1/2 shrink-0 flex-col justify-center gap-0.5 bg-background px-2" style={{ color: colour }}>
+        <span className="line-clamp-2 font-medium leading-tight break-words">{name}</span>
         <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
       </span>
-      {/* The edge stays when the name eases away. */}
       <span aria-hidden className="absolute inset-0 rounded-md" style={{ boxShadow: `inset 0 0 0 1.5px ${colour ?? "var(--border)"}` }} />
     </button>
   )
