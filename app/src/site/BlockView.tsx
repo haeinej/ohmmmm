@@ -51,11 +51,10 @@ export function BlockView({ item, channel, titleOf, onStep, onClose, onShowPage,
   const writing = item.kind === "article" || item.kind === "project"
   return (
     <div role="dialog" aria-label={title} className="absolute inset-0 z-10 flex min-h-0 bg-card">
-      <div className={writing ? "flex min-h-0 min-w-0 flex-1" : "flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted p-6"}>
-        {writing ? (
-          <ArticleView path={item.path} onSave={onSave} />
-        ) : item.kind === "image" ? (
-          <img src={siteUrl(item.path)} alt={title} className="max-h-full max-w-full object-contain" />
+      <div className={item.kind !== "video" ? "flex min-h-0 min-w-0 flex-1" : "flex min-h-0 min-w-0 flex-1 items-center justify-center bg-muted p-6"}>
+        {item.kind !== "video" ? (
+          // Every block opens in the same editor view; only a video, which the editor can't hold, plays as it is.
+          <ArticleView item={item} channel={channel.name} onSave={onSave} />
         ) : (
           <video src={siteUrl(item.path)} controls playsInline className="max-h-full max-w-full" />
         )}

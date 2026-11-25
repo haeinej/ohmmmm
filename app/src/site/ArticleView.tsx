@@ -1,16 +1,32 @@
-// An article or a project, opened as writing and not as a web page (flows/site.md): its title, the
-// line under it, and its body in the app's own editor, pictures in place. What is saved goes back
-// into the page's file, one changed paragraph at a time.
+// A block of the site, opened as the app's editor shows a block and not as a web page
+// (flows/site.md): the toolbar's pills, the title, then the body with every way of writing the
+// editor has: the `/` menu, the selection toolbar, block handles and tables. An article or a
+// project is its own writing with its pictures in place; a photograph is a block holding the
+// picture. What is saved goes back into the page's file, one changed paragraph at a time.
 import { useEffect, useRef, useState } from "react"
 import { EditorContent, useEditor } from "@tiptap/react"
+import DragHandle from "@tiptap/extension-drag-handle-react"
 import StarterKit from "@tiptap/starter-kit"
-import Image from "@tiptap/extension-image"
+import { Placeholder } from "@tiptap/extensions"
+import { TaskItem, TaskList } from "@tiptap/extension-list"
+import { TableKit } from "@tiptap/extension-table"
 import Highlight from "@tiptap/extension-highlight"
 import { Markdown } from "@tiptap/markdown"
+import type { Node as PMNode } from "@tiptap/pm/model"
+import { FileTextIcon, FolderKanbanIcon, GripVerticalIcon, ImageIcon, PlusIcon, TableIcon, TypeIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import "@/editor/editor.css"
-import { plain, readArticle, type Change, type SiteArticle } from "./source"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/cn"
+import { insertTable, insertText } from "@/editor/commands"
+import { ActiveCell, SlashCommand } from "@/editor/extensions"
+import { PlusMenu, SlashMenu } from "@/editor/InsertMenu"
+import { BlockMenu, pill, pillButton, ToolButton, WebImage } from "@/editor/PageEditor"
+import { SelectionToolbar } from "@/editor/SelectionToolbar"
+import { TableControls } from "@/editor/TableControls"
+import { addressOf, plain, readArticle, type Change, type SiteArticle, type SiteItem } from "./source"
 
 /** What each top-level block of the editor says, in order. */
 function blocksOf(json: { content?: unknown[] }) {
@@ -24,33 +40,55 @@ function saying(node: unknown): string {
   return n.text ?? (n.content ?? []).map(saying).join("")
 }
 
-export function ArticleView({ path, onSave }: {
-  path: string
-  /** Save one change to the article's page. The Site view's own handler, shared with its tools. */
+const KIND = { article: { label: "Article", icon: FileTextIcon }, project: { label: "Project", icon: FolderKanbanIcon }, image: { label: "Photograph", icon: ImageIcon }, video: { label: "Video", icon: ImageIcon } } as const
+
+export function ArticleView({ item, channel, onSave }: {
+  item: SiteItem
+  channel: string
+  /** Save one change to the block's page. The Site view's own handler, shared with its tools. */
   onSave(page: string, change: Change): Promise<unknown>
 }) {
   const [article, setArticle] = useState<SiteArticle | null>(null)
   const [failed, setFailed] = useState("")
-  useEffect(() => { setArticle(null); setFailed(""); readArticle(path).then(setArticle, e => setFailed((e as Error).message)) }, [path])
+  useEffect(() => {
+    setArticle(null); setFailed("")
+    // A photograph has no writing of its own: its block holds the picture.
+    if (item.kind === "image") return setArticle({ title: item.title, details: "", markdown: `![${item.title}](${addressOf(item.path)})` })
+    readArticle(item.path).then(setArticle, e => setFailed((e as Error).message))
+  }, [item.path, item.kind, item.title])
   if (failed) return <p className="p-8 text-small text-muted-foreground">{failed}</p>
   if (!article) return <div className="flex-1" aria-busy />
-  return <Writing key={path} path={path} article={article} onSave={onSave} />
+  return <Writing key={item.path} item={item} channel={channel} article={article} onSave={onSave} />
 }
 
-function Writing({ path, article, onSave }: { path: string; article: SiteArticle; onSave(page: string, change: Change): Promise<unknown> }) {
+function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: string; article: SiteArticle; onSave(page: string, change: Change): Promise<unknown> }) {
+  const writing = item.kind === "article" || item.kind === "project"
+  const page = item.path.split("#")[0]
   const [changed, setChanged] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [plusOpen, setPlusOpen] = useState(false)
+  const [canvas, setCanvas] = useState<HTMLDivElement | null>(null)
+  const [block, setBlock] = useState<{ node: PMNode; pos: number } | null>(null)
+  const [blockMenu, setBlockMenu] = useState(false)
   const first = useRef<string[]>([])
+  const updated = item.modified.slice(0, 10)
   const editor = useEditor({
+    editable: writing,
     immediatelyRender: true,
-    extensions: [StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false } }), Image, Highlight, Markdown],
+    extensions: [
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: { openOnClick: false } }),
+      Placeholder.configure({ placeholder: ({ node }) => (node.type.name === "heading" ? `Heading ${node.attrs.level}` : "Type / for commands"), includeChildren: false }),
+      TaskList, TaskItem.configure({ nested: true }),
+      TableKit.configure({ table: { resizable: true, lastColumnResizable: false } }),
+      WebImage, Highlight, SlashCommand, ActiveCell, Markdown,
+    ],
     content: article.markdown,
     contentType: "markdown",
     editorProps: { attributes: { class: "ohm-prose", "aria-label": article.title } },
-    // What the article said when it opened, read once the Markdown is in the editor.
+    // What the block said when it opened, read once the Markdown is in the editor.
     onCreate: ({ editor: e }) => { first.current = blocksOf(e.getJSON()) },
     onUpdate: ({ editor: e }) => setChanged(blocksOf(e.getJSON()).join("\n") !== first.current.join("\n")),
-  }, [path])
+  }, [item.path])
 
   /**
    * Each paragraph whose words changed is changed in the page's file, by what it said before.
@@ -61,9 +99,8 @@ function Writing({ path, article, onSave }: { path: string; article: SiteArticle
     const now = blocksOf(editor.getJSON())
     const before = first.current
     if (!before.length) return
-    if (now.length !== before.length) return notify({ message: "Adding or removing a paragraph can't be saved to the page yet. Change words within paragraphs, or undo.", tone: "error" })
+    if (now.length !== before.length) return notify({ message: "Adding or removing a paragraph, a picture or a table can't be saved to the page yet. Change words within paragraphs, or discard.", tone: "error" })
     setSaving(true)
-    const page = path.split("#")[0]
     let saved = 0
     const refused: string[] = []
     for (let i = 0; i < now.length; i++) {
@@ -77,21 +114,68 @@ function Writing({ path, article, onSave }: { path: string; article: SiteArticle
   }
 
   return (
-    <div className="flex size-full min-h-0 flex-col bg-card">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <article className="mx-auto flex w-full max-w-[720px] flex-col gap-2 px-10 py-12">
-          <h1 className="break-words">{article.title}</h1>
-          {article.details && <p className="text-small text-muted-foreground">{article.details}</p>}
-          <div className="pt-4"><EditorContent editor={editor} /></div>
-        </article>
+    <div className="relative flex size-full min-h-0 flex-col bg-card">
+      {/* Toolbar: what the block is and where it is filed, then the inserts. */}
+      <div className="flex h-14 shrink-0 items-center gap-1.5 px-3">
+        <div className={cn(pill, "h-9 gap-1.5 ps-3 pe-3 text-small text-muted-foreground")} title={item.path}>
+          <Icon icon={KIND[item.kind].icon} size="sm" />
+          <span className="truncate">{channel}</span>
+          <span aria-hidden>/</span>
+          <span className="max-w-48 truncate font-medium text-foreground">{article.title}</span>
+        </div>
+        {writing && (
+          <div className={pill}>
+            <ToolButton label="Text" icon={TypeIcon} onClick={() => insertText(editor)} />
+            {/* A new picture has to be filed in the site's folder first, which isn't built. */}
+            <ToolButton label="Image: not yet" icon={ImageIcon} disabled />
+            <ToolButton label="Table" icon={TableIcon} onClick={() => insertTable(editor)} />
+            <Popover open={plusOpen} onOpenChange={setPlusOpen}>
+              <PopoverTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Insert" className={pillButton} />}>
+                <Icon icon={PlusIcon} size="sm" />
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-auto p-1">
+                <PlusMenu editor={editor} onClose={() => setPlusOpen(false)} />
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
       </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">
+          <h1 className="text-h2 font-semibold tracking-tight break-words">{article.title}</h1>
+          {article.details && <p className="pt-2 text-small text-muted-foreground">{article.details}</p>}
+          <div ref={setCanvas} className="relative mt-6">
+            {writing && (
+              <DragHandle editor={editor} onNodeChange={({ node, pos }) => { if (!blockMenu) setBlock(node ? { node, pos } : null) }}>
+                <DropdownMenu open={blockMenu} onOpenChange={setBlockMenu}>
+                  <DropdownMenuTrigger render={
+                    <button type="button" aria-label="Block menu" onDragStart={() => setBlockMenu(false)}
+                      className="flex h-6 w-5 cursor-grab items-center justify-center rounded text-muted-foreground opacity-70 transition-opacity hover:bg-muted hover:opacity-100 active:cursor-grabbing aria-expanded:bg-muted aria-expanded:opacity-100" />
+                  }>
+                    <Icon icon={GripVerticalIcon} size="sm" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="left" className="w-56">
+                    {block && <BlockMenu editor={editor} block={block} updated={updated} onClose={() => setBlockMenu(false)} />}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </DragHandle>
+            )}
+            <EditorContent editor={editor} />
+            {writing && <TableControls editor={editor} container={canvas} updated={updated} />}
+          </div>
+        </div>
+      </div>
+
       {changed && (
         <div role="status" className="flex shrink-0 items-center justify-end gap-2 px-5 py-3 text-small">
-          <span className="me-auto text-muted-foreground">Changed. Saving writes it into {path.split("#")[0]}.</span>
+          <span className="me-auto text-muted-foreground">Changed. Saving writes it into {page}.</span>
           <Button size="sm" variant="ghost" disabled={saving} onClick={() => { editor.commands.setContent(article.markdown, { contentType: "markdown" }); setChanged(false) }}>Discard</Button>
           <Button size="sm" disabled={saving} onClick={() => void save()}>Save</Button>
         </div>
       )}
+      {writing && <SelectionToolbar editor={editor} docId={`site:${item.path}`} />}
+      <SlashMenu />
     </div>
   )
 }
