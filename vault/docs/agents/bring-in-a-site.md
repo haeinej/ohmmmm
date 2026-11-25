@@ -2,6 +2,10 @@
 
 For people: [docs/bring-in-a-site.md](../bring-in-a-site.md). Code: [site-import/](../../site-import/) (`html.mjs`, `scan.mjs`, `apply.mjs`, `check.mjs`), the command [scripts/site.mjs](../../scripts/site.mjs), tests [test/site-import.test.mjs](../../test/site-import.test.mjs). It automates the mechanical parts of [migrate-site](../../skills/migrate-site/SKILL.md) and [design-home](../../skills/design-home/SKILL.md); it does not replace their decisions.
 
+## The site folder
+
+`ohm site connect <repository> [--project] [--branch]` is the home's, not the vault's: [bin/ohmmmm.mjs](../../../bin/ohmmmm.mjs) routes it to [home/site.mjs](../../../home/site.mjs), which clones into `<home>/site` and writes `site/.ohm/site.json`. Every other `ohm site` subcommand below is this folder's. The editor's routes for that folder (save, files, publish, history) are the bridge's, in [docs/serve.md](../../../docs/serve.md); no MCP or WebMCP tool pushes, deploys or publishes it.
+
 ## Commands
 
 ```sh

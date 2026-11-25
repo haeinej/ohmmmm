@@ -12,6 +12,7 @@ import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
 import { LiveCanvas, type LiveCanvasHandle, type LiveState } from "./LiveCanvas"
 import { FileEditor } from "./FileEditor"
+import { SiteHistory } from "@/history/SiteHistory"
 import { ProfileView } from "./ProfileView"
 import { DeployControl } from "./SiteDeploy"
 import { PublishControl } from "./SitePublish"
@@ -34,6 +35,7 @@ export function SiteView() {
   const [profileOpen, setProfileOpen] = useState(false)
   /** A file open in the text editor, by its path. */
   const [editing, setEditing] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [sync, setSync] = useState<SiteSync | null>(null)
   const [syncing, setSyncing] = useState(false)
   /** Pull, Commit, Push and Deploy one by one, for people who want them: behind Advanced. */
@@ -219,6 +221,7 @@ export function SiteView() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       {profileOpen && <ProfileView onClose={closeProfile} />}
       {editing && <FileEditor path={editing} onClose={() => setEditing(null)} />}
+      {historyOpen && <SiteHistory onClose={() => setHistoryOpen(false)} />}
       {opened && (
         <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
           titleOf={path => path}
@@ -238,6 +241,7 @@ export function SiteView() {
           <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
           <DeployControl />
         </>}
+        <Button size="sm" variant="ghost" aria-pressed={historyOpen} onClick={() => setHistoryOpen(o => !o)}>History</Button>
         <PublishControl advanced={advanced} onAdvanced={() => setAdvanced(a => !a)} />
       </header>
 

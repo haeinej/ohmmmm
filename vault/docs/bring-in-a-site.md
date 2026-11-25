@@ -4,6 +4,10 @@ You already have a website. It holds things you made: articles, photographs, pro
 
 The agent reference for this is [docs/agents/bring-in-a-site.md](agents/bring-in-a-site.md).
 
+## Your site in your ohm
+
+Before any of this, you can keep the site itself in your ohm and edit it there: `ohm site connect https://github.com/you/your-site.git --project your-site` (run inside `~/ohm.<handle>`) clones it into `site/`. With `ohm serve` running, the app opens on it: change it on the canvas or in Files, every save is kept, and nothing goes live until you press Publish. The scan below can read that same folder: `ohm site scan --folder ~/ohm.<handle>/site`.
+
 ## What it does
 
 Four steps, each one you run and read:

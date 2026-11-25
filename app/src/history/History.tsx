@@ -24,10 +24,10 @@ import { registerStepTool } from "@/webmcp"
 import { finishSession, focusHistory, open, restoreVersion, revertChange, saveNow, useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 
-const when = (at: string) => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+export const when = (at: string) => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
 const time = (at: string) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-const dayKey = (at: string) => new Date(at).toLocaleDateString("en-CA")
-const dayOf = (at: string) => new Date(at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
+export const dayKey = (at: string) => new Date(at).toLocaleDateString("en-CA")
+export const dayOf = (at: string) => new Date(at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })
 const byName = (a: Actor) => (a.kind === "human" ? "You" : a.name)
 /** A block's name: as it is now, or for a block that is gone, as its last version had it. */
 const nodeTitle = (node: string) => {
@@ -44,8 +44,8 @@ const VERB: Record<ChangeOp, string> = {
 }
 // ─── The timeline's parts ───────────────────────────────────────────────────────
 
-type Mark = "human" | "agent" | "save" | "day"
-function MarkIcon({ mark, title }: { mark: Mark; title: string }) {
+export type Mark = "human" | "agent" | "save" | "day"
+export function MarkIcon({ mark, title }: { mark: Mark; title: string }) {
   const icon: Record<Mark, LucideIcon> = { human: UserIcon, agent: BotIcon, save: FlagIcon, day: CalendarIcon }
   return (
     <span title={title} aria-label={title}
@@ -59,7 +59,7 @@ function MarkIcon({ mark, title }: { mark: Mark; title: string }) {
 }
 
 /** One entry on the line: an icon for who, one line of text, the time; open for its details. */
-function Stop({ mark, who, text, at, tag, open: isOpen, onToggle, first, last, children }: {
+export function Stop({ mark, who, text, at, tag, open: isOpen, onToggle, first, last, children }: {
   mark: Mark; who: string; text: React.ReactNode; at?: string; tag?: React.ReactNode
   open: boolean; onToggle: () => void; first?: boolean; last?: boolean; children?: React.ReactNode
 }) {
@@ -82,7 +82,7 @@ function Stop({ mark, who, text, at, tag, open: isOpen, onToggle, first, last, c
   )
 }
 
-function Day({ day }: { day: string }) {
+export function Day({ day }: { day: string }) {
   return (
     <li className="relative flex gap-2">
       <span aria-hidden className="relative flex w-5 flex-none justify-center"><span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border" /></span>

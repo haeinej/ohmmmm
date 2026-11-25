@@ -219,7 +219,7 @@ export async function syncStep(step: "pull" | "commit" | "push", message?: strin
 }
 
 /** One deploy to Cloudflare, as the folder remembers it (home/site.mjs). */
-export type Deployed = { at: string; commit: string; subject: string; branch: string; project: string; url: string; production: boolean }
+export type Deployed = { at: string; commit: string; subject: string; branch: string; project: string; url: string; production: boolean; putBack?: boolean }
 /** Where a deploy would go and what it would carry (home/site.mjs `deployStatus`). */
 export type DeployStatus = {
   signedIn: boolean; account: string; problem: string; projects: string[]; project: string; exists: boolean; productionBranch: string
@@ -313,4 +313,26 @@ export async function publishSite(message: string): Promise<Published> {
   const res = await bridgeFetch("/site/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) })
   if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Publish did not start")
   return (await res.json()) as Published
+}
+
+// ---- History (flows/site.md, History) ----
+
+export type SiteSave = { at: string; by: string; kind: "save" | "move"; path: string; before: string; after: string; via: string; from?: unknown }
+export type SiteCommit = { hash: string; at: string; author: string; subject: string; files: string[] }
+export type SiteHistory = { saves: SiteSave[]; commits: SiteCommit[]; deploys: Deployed[] }
+
+const asked = async <T,>(res: Response): Promise<T> => {
+  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Your ohm did not answer")
+  return (await res.json()) as T
+}
+
+export const readHistory = async () => asked<SiteHistory>(await bridgeFetch("/site/history", { cache: "no-store" }))
+export const readKept = async (hash: string) => (await asked<{ text: string }>(await bridgeFetch(`/site/kept?hash=${hash}`, { cache: "no-store" }))).text
+export const readCommitFile = async (hash: string, path: string) =>
+  asked<{ path: string; before: string | null; after: string | null }>(await bridgeFetch(`/site/commit?hash=${hash}&path=${encodeURIComponent(path)}`, { cache: "no-store" }))
+
+/** Put a version back on this computer, as a new save. Nothing goes live until the person publishes. */
+export async function restoreVersion(input: { path: string; hash?: string; commit?: string }): Promise<void> {
+  await asked(await bridgeFetch("/site/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }))
+  saved()
 }
