@@ -12,7 +12,7 @@ import { registerStepTool } from "@/webmcp"
 import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
 import { BlockView } from "./BlockView"
-import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, plain, readContent, saveText, type SiteContent, type SitePage } from "./source"
+import { EditProblem, listPages, OPEN_BLOCK, OPEN_PAGE, addressOf, markupFor, plain, readContent, saveChange, type Change, type SiteContent, type SiteItem, type SitePage } from "./source"
 
 type Device = "desktop" | "phone"
 const DEVICES: Record<Device, { w: number; h: number }> = { desktop: { w: 1280, h: 800 }, phone: { w: 390, h: 844 } }
@@ -21,7 +21,9 @@ const GAP = 96, HEADER = 44, PER_ROW = 5, ZOOM = { min: 0.08, max: 2 }
 type Camera = { x: number; y: number; k: number }
 type Placed = SitePage & { x: number; y: number; group: string }
 type Selection = { page: string; tag: string; text: string; editable: boolean }
-type Pending = { page: string; before: string; after: string; nth: number; count: number; undo: () => void }
+/** A change the frame already shows, waiting to be saved to the page's file or discarded. */
+type Pending = { page: string; label: string; change: Change; undo: () => void }
+const ITEM = "application/x-ohm-site-item"
 
 /** Front pages in one row (the home page, then each section's index), each section's other pages under it. */
 function place(pages: SitePage[], device: Device): { frames: Placed[]; labels: { text: string; x: number; y: number }[] } {
@@ -51,6 +53,7 @@ const leafText = (el: Element) => el.childElementCount === 0 && !["SCRIPT", "STY
 function instrument(doc: Document, accent: string, on: {
   select(sel: Omit<Selection, "page"> | null): void
   edited(change: Omit<Pending, "page">): void
+  refused(why: string): void
   follow(href: string): void
   zoom(deltaY: number): void
 }) {
@@ -59,6 +62,8 @@ function instrument(doc: Document, accent: string, on: {
     * { cursor: default !important; }
     [data-ohm-over] { outline: 1px solid ${accent} !important; outline-offset: 2px !important; }
     [data-ohm-chosen] { outline: 2px solid ${accent} !important; outline-offset: 2px !important; }
+    [data-ohm-drop] { outline: 2px dashed ${accent} !important; outline-offset: 2px !important; }
+    :not(img)[data-ohm-drop] { box-shadow: 0 6px 0 -2px ${accent} !important; }
     [contenteditable] { cursor: text !important; }
     /* haeinjung.com's pointer circle and its opening screen get in the way of editing. */
     .site-cursor { display: none !important; }
@@ -99,7 +104,7 @@ function instrument(doc: Document, accent: string, on: {
       el.removeAttribute("contenteditable"); editing = null
       const after = el.textContent ?? ""
       if (!keep || plain(after) === plain(before) || !plain(after)) { el.textContent = before; return }
-      on.edited({ before, after, nth: same.indexOf(el), count: same.length, undo: () => { el.textContent = before } })
+      on.edited({ label: "Text changed", change: { type: "text", before, after, nth: same.indexOf(el), count: same.length }, undo: () => { el.textContent = before } })
     }
     const onBlur = () => done(true)
     const onKey = (k: KeyboardEvent) => {
@@ -107,6 +112,38 @@ function instrument(doc: Document, accent: string, on: {
       if (k.key === "Enter" && !k.shiftKey) { k.preventDefault(); el.blur() }
     }
     el.addEventListener("blur", onBlur); el.addEventListener("keydown", onKey)
+  }, true)
+
+  // A block dragged from the side panel. It lands after an element that holds only text, or, an
+  // image on an image, takes that image's place. The frame shows it at once; saving writes it.
+  const landing = (el: Element | null, types: readonly string[]) =>
+    !types.includes(ITEM) || !el ? null : el.tagName === "IMG" ? el as HTMLElement : leafText(el) ? el as HTMLElement : null
+  doc.addEventListener("dragover", e => {
+    const to = landing(e.target as Element, e.dataTransfer?.types ?? [])
+    mark("data-ohm-drop", to)
+    if (to) { e.preventDefault(); e.dataTransfer!.dropEffect = "copy" }
+  }, true)
+  doc.addEventListener("dragleave", e => { if (!e.relatedTarget) mark("data-ohm-drop", null) }, true)
+  doc.addEventListener("drop", e => {
+    const to = landing(e.target as Element, e.dataTransfer?.types ?? [])
+    mark("data-ohm-drop", null)
+    if (!to) return
+    e.preventDefault(); e.stopPropagation()
+    const item = JSON.parse(e.dataTransfer!.getData(ITEM)) as SiteItem
+    if (to.tagName === "IMG") {
+      const from = to.getAttribute("src") ?? ""
+      if (item.kind !== "image" || !from) return on.refused("Only an image can take an image's place")
+      to.setAttribute("src", addressOf(item.path))
+      return on.edited({ label: "Image swapped", change: { type: "src", from, to: addressOf(item.path) }, undo: () => to.setAttribute("src", from) })
+    }
+    const anchor = to.textContent ?? ""
+    const same = [...doc.querySelectorAll("body *")].filter(other => leafText(other) && plain(other.textContent ?? "") === plain(anchor))
+    const html = markupFor(item)
+    const holder = doc.createElement("template")
+    holder.innerHTML = html
+    const placed = holder.content.firstElementChild!
+    to.after(placed)
+    on.edited({ label: `${item.kind === "page" ? "Link" : item.kind === "image" ? "Image" : "Video"} added`, change: { type: "insert", anchor, html, nth: same.indexOf(to), count: same.length }, undo: () => placed.remove() })
   }, true)
 }
 
@@ -225,16 +262,26 @@ export function SiteView() {
     return () => window.removeEventListener(OPEN_PAGE, onAsk)
   }, [openPage])
 
-  /** One handler for the Save button and the `site.edit-text` tool. */
-  const save = useCallback(async (change: { page: string; before: string; after: string; nth?: number; count?: number }) => {
-    await saveText(change.page, change.before, change.after, change.nth, change.count)
-    notify({ message: `Saved to ${change.page}. It is on your computer only until you publish your site.` })
-    return { page: change.page, saved: true }
+  /** One handler for the Save button and the tools that change a page (`site.edit-text`, `site.place-block`). */
+  const save = useCallback(async (page: string, change: Change) => {
+    await saveChange(page, change)
+    notify({ message: `Saved to ${page}. It is on your computer only until you publish your site.` })
+    return { page, saved: true }
   }, [])
+  /** A tool's change isn't in the frame yet, so the frame reads its page again. */
+  const saveAndShow = useCallback(async (page: string, change: Change) => {
+    try {
+      const out = await save(page, change)
+      setReloads(r => ({ ...r, [page]: (r[page] ?? 0) + 1 }))
+      return out
+    } catch (e) {
+      throw e instanceof EditProblem ? new DOMException(e.message, "DataError") : e
+    }
+  }, [save])
 
   const onSave = async () => {
     if (!pending) return
-    try { await save(pending); setPending(null) }
+    try { await save(pending.page, pending.change); setPending(null) }
     catch (e) { pending.undo(); setPending(null); notify({ message: (e as Error).message, tone: "error" }) }
   }
 
@@ -271,18 +318,29 @@ export function SiteView() {
         properties: { page, before: { type: "string", minLength: 1, maxLength: 2000 }, after: { type: "string", minLength: 1, maxLength: 2000 }, nth: { type: "integer", minimum: 0, default: 0 } },
         required: ["page", "before", "after"], additionalProperties: false,
       },
-      run: withAgent("Changing text on your site", async (input: { page: string; before: string; after: string; nth?: number }) => {
-        try {
-          const out = await save(input)
-          setReloads(r => ({ ...r, [input.page]: (r[input.page] ?? 0) + 1 }))
-          return out
-        } catch (e) {
-          throw e instanceof EditProblem ? new DOMException(e.message, "DataError") : e
-        }
+      run: withAgent("Changing text on your site", async (input: { page: string; before: string; after: string; nth?: number }) =>
+        saveAndShow(input.page, { type: "text", before: input.before, after: input.after, nth: input.nth })),
+    }, ac.signal).catch(console.error)
+    registerStepTool<{ page: string; block: string; after?: string; nth?: number; replace?: string }, { page: string; saved: boolean }>({
+      name: "site.place-block", title: "Save",
+      description: "Places one block of the site on a page, in the page's file on the person's computer. With `after`, the block goes after the element that says exactly that text (`nth` chooses among elements saying the same). With `replace`, an image block takes the place of the image whose `src` is written exactly so. Nothing is published. Returns the page's path.",
+      inputSchema: {
+        type: "object",
+        properties: { page, block: page, after: { type: "string", minLength: 1, maxLength: 2000 }, nth: { type: "integer", minimum: 0, default: 0 }, replace: { type: "string", minLength: 1, maxLength: 500 } },
+        required: ["page", "block"], additionalProperties: false,
+      },
+      run: withAgent("Placing a block on your site", async (input: { page: string; block: string; after?: string; nth?: number; replace?: string }) => {
+        const item = content?.collections.flatMap(c => c.items).find(i => i.path === input.block)
+        if (!item) throw new DOMException("That block isn't in the site", "DataError")
+        if (Boolean(input.after) === Boolean(input.replace)) throw new DOMException("Say one of `after` or `replace`", "DataError")
+        if (input.replace && item.kind !== "image") throw new DOMException("Only an image can take an image's place", "DataError")
+        return saveAndShow(input.page, input.replace
+          ? { type: "src", from: input.replace, to: addressOf(item.path) }
+          : { type: "insert", anchor: input.after!, html: markupFor(item), nth: input.nth })
       }),
     }, ac.signal).catch(console.error)
     return () => ac.abort()
-  }, [agentsAllowed, pages, openPage, openBlock, save])
+  }, [agentsAllowed, pages, content, openPage, openBlock, saveAndShow])
 
   if (failed) return <Empty className="flex-1"><EmptyHeader><EmptyTitle>Your site couldn't be opened</EmptyTitle><EmptyDescription>{failed}</EmptyDescription></EmptyHeader></Empty>
   if (!pages) return <div className="flex-1" aria-busy />
@@ -342,7 +400,9 @@ export function SiteView() {
                       if (!doc) return
                       instrument(doc, accent, {
                         select: sel => setSelection(sel && { ...sel, page: f.path }),
-                        edited: change => setPending({ ...change, page: f.path }),
+                        // One change waits at a time: a second one first puts the frame back as it was.
+                        edited: change => setPending(was => { was?.undo(); return { ...change, page: f.path } }),
+                        refused: why => notify({ message: why, tone: "error" }),
                         follow: href => {
                           const path = new URL(href).pathname.replace(/^\/site\//, "/").replace(/^\//, "")
                           const to = frames.find(o => o.path === path || o.path === `${path.replace(/\/$/, "")}/index.html`.replace(/^\//, "") || o.path === `${path}.html`)
@@ -353,7 +413,9 @@ export function SiteView() {
                     }} />
                 )}
                 {/* A frame that isn't active is a picture of its page: one click makes it the one you work in. */}
-                {active !== f.path && <button type="button" aria-label={`Work in ${f.title || f.path}`} className="absolute inset-0 outline-none" onClick={() => { setActive(f.path); setSelection(null) }} onDoubleClick={() => fit(f.path)} />}
+                {active !== f.path && <button type="button" aria-label={`Work in ${f.title || f.path}`} className="absolute inset-0 outline-none" onClick={() => { setActive(f.path); setSelection(null) }} onDoubleClick={() => fit(f.path)}
+                  // A block dragged over a frame makes it the active one, so the page itself can take the drop.
+                  onDragEnter={e => { if (e.dataTransfer.types.includes(ITEM)) setActive(f.path) }} />}
               </div>
             </section>
           ))}
@@ -361,7 +423,7 @@ export function SiteView() {
 
         {pending && (
           <div role="status" data-bar className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-card py-2 ps-4 pe-2 text-small shade-2">
-            <span>Text changed in {pending.page}</span>
+            <span>{pending.label} in {pending.page}</span>
             <Button size="sm" variant="ghost" onClick={() => { pending.undo(); setPending(null) }}>Discard</Button>
             <Button size="sm" onClick={() => void onSave()}>Save</Button>
           </div>

@@ -40,6 +40,56 @@ export function replaceText(source: string, before: string, after: string, nth =
   return source.slice(0, at.index) + written + source.slice(at.index! + at[0].length)
 }
 
+/** Where a block sits on the site, as its pages write it: from the site's root. */
+export const addressOf = (path: string) => `/${path.replace(/(^|\/)index\.html$/, "$1")}`
+
+/**
+ * Put markup after one element in a page's file: the element that says `anchor`, found as
+ * `replaceText` finds it. The new line takes the indentation of the line it follows.
+ */
+export function insertAfter(source: string, anchor: string, html: string, nth = 0, count?: number): string {
+  if (!plain(anchor)) throw new EditProblem("There is no text here to put it after")
+  const found = [...source.matchAll(pattern(anchor))]
+  if (!found.length) throw new EditProblem("This text isn't written in the page's file as it shows here, so nothing can be placed after it")
+  if (count !== undefined && found.length !== count) throw new EditProblem("The page shows this text a different number of times than its file holds it, so the place isn't certain")
+  const at = found[nth]
+  if (!at) throw new EditProblem("That place isn't in the page's file")
+  const closing = at.index! + at[0].length - 1
+  if (!source.startsWith("</", closing)) throw new EditProblem("This element holds more than text in the page's file, so the place after it isn't certain")
+  const end = source.indexOf(">", closing) + 1
+  const indent = /(?:^|\n)([ \t]*)[^\n]*$/.exec(source.slice(0, at.index))?.[1] ?? ""
+  return `${source.slice(0, end)}\n${indent}${html}${source.slice(end)}`
+}
+
+/** Point one image of a page at another file: the one whose `src` is written exactly as `from`. */
+export function replaceSrc(source: string, from: string, to: string): string {
+  const written = [`src="${from}"`, `src='${from}'`].filter(each => source.includes(each))
+  const places = written.reduce((n, each) => n + source.split(each).length - 1, 0)
+  if (places === 0) throw new EditProblem("This image isn't written in the page's file as it shows here, so it can't be swapped in place")
+  if (places > 1) throw new EditProblem("The page's file names this image more than once, so which one to swap isn't certain")
+  return source.replace(written[0], `${written[0].slice(0, 5)}${to}${written[0].at(-1)}`)
+}
+
+/** One change to a page's file. */
+export type Change =
+  | { type: "text"; before: string; after: string; nth?: number; count?: number }
+  | { type: "insert"; anchor: string; html: string; nth?: number; count?: number }
+  | { type: "src"; from: string; to: string }
+
+export function applyChange(source: string, change: Change): string {
+  if (change.type === "text") return replaceText(source, change.before, change.after, change.nth, change.count)
+  if (change.type === "insert") return insertAfter(source, change.anchor, change.html, change.nth, change.count)
+  return replaceSrc(source, change.from, change.to)
+}
+
+/** A block as markup a page can hold: an image, a video, or a link to a page. */
+export function markupFor(item: Pick<SiteItem, "kind" | "path" | "title">): string {
+  const at = escapeHtml(addressOf(item.path)).replace(/"/g, "&quot;")
+  if (item.kind === "image") return `<img src="${at}" alt="" loading="lazy">`
+  if (item.kind === "video") return `<video src="${at}" controls playsinline></video>`
+  return `<p><a href="${at}">${escapeHtml(plain(item.title))}</a></p>`
+}
+
 export type SiteItem = { kind: "page" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[] }
 export type SiteContent = { site: string; collections: { name: string; items: SiteItem[] }[] }
 
@@ -65,12 +115,12 @@ export async function listPages(): Promise<SitePage[]> {
   return ((await res.json()) as { pages: SitePage[] }).pages
 }
 
-/** Save one text change to a page's file. It refuses to write over a file that changed on disk. */
-export async function saveText(page: string, before: string, after: string, nth = 0, count?: number): Promise<void> {
+/** Save one change to a page's file. It refuses to write over a file that changed on disk. */
+export async function saveChange(page: string, change: Change): Promise<void> {
   const url = `/site/${page.split("/").map(encodeURIComponent).join("/")}`
   const read = await fetch(url, { cache: "no-store" })
   if (!read.ok) throw new EditProblem("That page isn't in the site")
-  const next = replaceText(await read.text(), before, after, nth, count)
+  const next = applyChange(await read.text(), change)
   const wrote = await fetch(url, { method: "PUT", headers: { "If-Match": read.headers.get("ETag") ?? "" }, body: next })
   if (wrote.status === 412) throw new EditProblem("This page changed on disk since it was read. Reload it and try again")
   if (!wrote.ok) throw new EditProblem("The page couldn't be saved")
