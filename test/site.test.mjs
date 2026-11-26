@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { initHome } from '../bin/ohmmmm.mjs';
 import { homeBridge, listenHome, pairApp, addAgent } from '../home/serve.mjs';
-import { connect, savesOf } from '../home/site.mjs';
+import { connect, contentOf, savesOf } from '../home/site.mjs';
 
 const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@x', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@x' } });
 
@@ -141,4 +141,27 @@ test('an agent\'s key reaches no route of the site', async t => {
   const { layout, ask } = await setUp(t);
   const agent = await addAgent(layout.home, 'claude-code');
   for (const path of ['/site', '/site/file/', '/site/publish', '/site/deploy']) assert.equal((await ask(path, {}, agent)).status, 403, path);
+});
+
+test('a site arranged by what it holds is read as the same channels as one from before', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'ohm-layout-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', dir]);
+  const put = async (path, text) => { await mkdir(join(dir, path, '..'), { recursive: true }); await writeFile(join(dir, path), text); };
+  const article = title => `<html><body><article><h1>${title}</h1><p>Words.</p></article></body></html>`;
+  await put('writings/index.html', '<html><body>list</body></html>');
+  await put('writings/elsewheren/index.html', article('elsewheren'));
+  await put('writings/collisions/index.html', '<html><body>series</body></html>');
+  await put('writings/collisions/episode-01/index.html', article('ep.01'));
+  await put('photographs/index.html', '<figure data-loc="Berlin" class="item"><img src="/photographs/berlin/small/a.jpg"></figure>');
+  await put('photographs/berlin/a.jpg', 'jpg');
+  await put('photographs/berlin/small/a.jpg', 'jpg');
+  await put('projects/index.html', '<details class="entry" id="ohm"><summary>ohm.</summary><p>Rebuilding.</p></details>');
+  git(dir, 'add', '.');
+  const { start, collections } = await contentOf(dir);
+  assert.equal(start, 'photographs/index.html');
+  const [writings, photographs, projects] = collections;
+  assert.deepEqual(writings.items.map(i => [i.path, i.channel]), [['writings/collisions/episode-01/index.html', 'collisions'], ['writings/elsewheren/index.html', undefined]]);
+  assert.deepEqual(photographs.items.map(i => [i.path, i.thumb, i.channel]), [['photographs/berlin/a.jpg', 'photographs/berlin/small/a.jpg', 'Berlin']]);
+  assert.deepEqual(projects.items.map(i => i.path), ['projects/index.html#ohm']);
 });

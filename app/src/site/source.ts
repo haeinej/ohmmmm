@@ -123,7 +123,7 @@ export function markupFor(item: Pick<SiteItem, "kind" | "path" | "title">): stri
 }
 
 export type SiteItem = { kind: "article" | "project" | "image" | "video"; path: string; title: string; thumb?: string; excerpt?: string; modified: string; usedIn: string[]; channel?: string }
-export type SiteContent = { site: string; collections: { name: string; items: SiteItem[] }[] }
+export type SiteContent = { site: string; /** The gallery the canvas opens on (home/site.mjs `layoutOfSite`). */ start?: string; collections: { name: string; items: SiteItem[] }[] }
 
 /** The channels inside a channel, in the order their first block appears, each with its blocks. */
 export function channelsIn(items: SiteItem[]): { name: string; items: SiteItem[] }[] {

@@ -224,32 +224,53 @@ function markdownOf(body, page) {
   return images.reduce((md, image) => md.replaceAll(`media:${image.id}`, new URL(image.url).pathname), markdown);
 }
 
+/**
+ * Where a site keeps each kind of thing. A site arranged by what it holds keeps writings/<slug>/
+ * (a series as writings/<series>/<episode>/), photographs/<place>/ with small copies in small/,
+ * and projects/; a site from before keeps writing/, archive/img|thumb|vid|vidsm/ and work/. Both
+ * are read.
+ */
+export function layoutOfSite(files) {
+  const arranged = files.has('photographs/index.html') || files.has('writings/index.html') || files.has('projects/index.html');
+  return arranged
+    ? { arranged, gallery: 'photographs/index.html', projects: 'projects/index.html', writings: 'writings/' }
+    : { arranged, gallery: 'archive/index.html', projects: 'work/index.html', writings: 'writing/' };
+}
+
 /** The site's content as channels of blocks: Writings, Photographs and Projects, read from where this site keeps each. */
 export async function contentOf(dir, files = tracked(dir)) {
   const read = path => readFile(join(dir, path), 'utf8');
   const modified = async path => (await stat(join(dir, path))).mtime.toISOString();
   const sources = new Map();
   for (const path of files) if (path.endsWith('.html')) sources.set(path, await read(path));
+  const where = layoutOfSite(files);
+  const pages = [...sources.keys()];
 
   const writings = [];
   for (const [path, html] of [...sources].sort()) {
-    if (!path.startsWith('writing/') || path.endsWith('index.html') || path.startsWith('writing/substack/')) continue;
+    if (!path.startsWith(where.writings) || path === `${where.writings}index.html` || path.startsWith('writing/substack/')) continue;
+    // An index page that holds others (a series' own page) is not a block; an article in its own folder is.
+    const folder = path.slice(0, path.lastIndexOf('/') + 1);
+    if (path.endsWith('index.html') && (!where.arranged || pages.some(other => other !== path && other.startsWith(folder) && other.endsWith('.html')))) continue;
     const article = articleIn(html);
-    const series = /^writing\/series\/([^/]+)\//.exec(path)?.[1];
+    const series = where.arranged ? /^writings\/([^/]+)\/[^/]+\/index\.html$/.exec(path)?.[1] : /^writing\/series\/([^/]+)\//.exec(path)?.[1];
     if (article) writings.push({ kind: 'article', path, title: article.title || path, excerpt: text(article.body).slice(0, 700), modified: await modified(path), usedIn: [], channel: series });
   }
   const projects = [];
-  const work = sources.get('work/index.html');
-  if (work) for (const project of projectsIn(work)) projects.push({ kind: 'project', path: `work/index.html#${project.id}`, title: project.title, excerpt: text(project.body).slice(0, 700), modified: await modified('work/index.html'), usedIn: [] });
+  const work = sources.get(where.projects);
+  if (work) for (const project of projectsIn(work)) projects.push({ kind: 'project', path: `${where.projects}#${project.id}`, title: project.title, excerpt: text(project.body).slice(0, 700), modified: await modified(where.projects), usedIn: [] });
 
   const places = new Map();
-  for (const [, place, file] of (sources.get('archive/index.html') ?? '').matchAll(/<figure[^>]*data-loc="([^"]*)"[^>]*>[\s\S]*?src="[^"?]*\/([^"/?]+)(?:\?[^"]*)?"/g)) places.set(file, decode(place));
+  for (const [, place, file] of (sources.get(where.gallery) ?? '').matchAll(/<figure[^>]*data-loc="([^"]*)"[^>]*>[\s\S]*?src="[^"?]*\/([^"/?]+)(?:\?[^"]*)?"/g)) places.set(file, decode(place));
   const photographs = [];
   for (const path of [...files].sort()) {
-    const kind = /^archive\/img\//.test(path) && IMAGE.test(path) ? 'image' : /^archive\/vid\//.test(path) && VIDEO.test(path) ? 'video' : undefined;
+    const media = IMAGE.test(path) ? 'image' : VIDEO.test(path) ? 'video' : undefined;
+    const kind = !media ? undefined
+      : where.arranged ? (/^photographs\/[^/]+\/[^/]+$/.test(path) ? media : undefined)
+      : (media === 'image' ? /^archive\/img\//.test(path) : /^archive\/vid\//.test(path)) ? media : undefined;
     if (!kind) continue;
     const base = path.split('/').at(-1);
-    const small = `archive/${kind === 'image' ? 'thumb' : 'vidsm'}/${base}`;
+    const small = where.arranged ? `${path.slice(0, path.lastIndexOf('/'))}/small/${base}` : `archive/${kind === 'image' ? 'thumb' : 'vidsm'}/${base}`;
     photographs.push({
       kind, path, title: base, thumb: files.has(small) ? small : kind === 'image' ? path : undefined, modified: await modified(path),
       usedIn: [...sources].filter(([, html]) => html.includes(base)).map(([page]) => page), channel: places.get(base) || undefined,
@@ -257,7 +278,7 @@ export async function contentOf(dir, files = tracked(dir)) {
   }
   let site = '';
   try { site = (await read('CNAME')).trim(); } catch { /* no domain of its own */ }
-  return { site, collections: [{ name: 'Writings', items: writings }, { name: 'Photographs', items: photographs }, { name: 'Projects', items: projects }].filter(c => c.items.length) };
+  return { site, start: where.gallery, collections: [{ name: 'Writings', items: writings }, { name: 'Photographs', items: photographs }, { name: 'Projects', items: projects }].filter(c => c.items.length) };
 }
 
 export async function articleOf(dir, files, path) {
@@ -323,9 +344,10 @@ export async function profileOf(profileDir, dir, files) {
   } else {
     try { profile.handle = (await readFile(join(dir, 'CNAME'), 'utf8')).trim(); } catch { /* none */ }
     if (files.has('index.html')) profile.name = text(/<a class="mid"[^>]*>([\s\S]*?)<\/a>/.exec(await readFile(join(dir, 'index.html'), 'utf8'))?.[1] ?? '');
-    profile.image = ['portrait-home.jpg', 'portrait.jpg'].find(f => files.has(f)) ?? '';
+    profile.image = ['assets/portrait-home.jpg', 'portrait-home.jpg', 'portrait.jpg'].find(f => files.has(f)) ?? '';
   }
-  if (!profile.color && files.has('site-header.css')) profile.color = /--ink:\s*(#[0-9a-f]{3,8})/i.exec(await readFile(join(dir, 'site-header.css'), 'utf8'))?.[1] ?? '';
+  const header = ['assets/site-header.css', 'site-header.css'].find(f => files.has(f));
+  if (!profile.color && header) profile.color = /--ink:\s*(#[0-9a-f]{3,8})/i.exec(await readFile(join(dir, header), 'utf8'))?.[1] ?? '';
   return profile;
 }
 

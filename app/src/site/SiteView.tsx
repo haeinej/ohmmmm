@@ -19,8 +19,8 @@ import { PublishControl } from "./SitePublish"
 import { SyncControls } from "./SiteSync"
 import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_FILE, OPEN_PAGE, OPEN_PROFILE, readContent, SITE_SAVED, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
 
-/** The page the canvas opens on: the gallery, which holds every photograph, writing and project. */
-const START = "/site/archive/index.html"
+/** The page the canvas opens on: the gallery, which holds every photograph, writing and project, wherever the site keeps it. */
+const startOf = (content: SiteContent) => `/site/${content.start ?? "archive/index.html"}`
 const ZOOMS = [0.33, 0.5, 0.67, 0.8, 1]
 
 export function SiteView() {
@@ -230,7 +230,7 @@ export function SiteView() {
       <header className="flex h-14 shrink-0 items-center gap-2 px-5">
         <span className="text-small font-medium">Site</span>
         <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">
-          {live.page || "Opening your site"}{live.page.startsWith("archive/") && " · drag a photograph to move it, ⌘-click to open it as a block"}
+          {live.page || "Opening your site"}{content?.start && live.page === content.start && " · drag a photograph to move it, ⌘-click to open it as a block"}
         </span>
         <Button size="icon-sm" variant="ghost" aria-label="Undo (⌘Z)" disabled={!live.canUndo} onClick={() => canvas.current?.undo()}><Icon icon={Undo2Icon} /></Button>
         <Button size="icon-sm" variant="ghost" aria-label="Redo (⇧⌘Z)" disabled={!live.canRedo} onClick={() => canvas.current?.redo()}><Icon icon={Redo2Icon} /></Button>
@@ -245,7 +245,7 @@ export function SiteView() {
         <PublishControl advanced={advanced} onAdvanced={() => setAdvanced(a => !a)} />
       </header>
 
-      <LiveCanvas ref={canvas} start={START} zoom={zoom} accent={accent} onState={setLive} onOpen={openFromCanvas} />
+      {content && <LiveCanvas ref={canvas} start={startOf(content)} zoom={zoom} accent={accent} onState={setLive} onOpen={openFromCanvas} />}
 
       {live.moves.length > 0 && (
         <div role="status" className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-card py-2 ps-4 pe-2 text-small shade-2">
