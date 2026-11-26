@@ -12,6 +12,9 @@ import { openDropped, opensOnDrop } from "./drop"
 import { closeSettings, createDraft, showMain, readShared, report, setAudience, setSearchOpen, useWorkspace } from "./store"
 import { useEffect, useState } from "react"
 import { readNode } from "../../../vault/vault/node.mjs"
+import { FileEditor } from "@/site/FileEditor"
+import { ProfileView } from "@/site/ProfileView"
+import type { Unit } from "@/data/units"
 
 /** Signed out: the home lives on the vault service, so the way in is ohm's sign-in. */
 export function SignIn() {
@@ -80,6 +83,8 @@ export function MainPanel() {
         <PageEditor key={`${doc.id}:${restored?.id === doc.id ? restored.n : 0}`} doc={doc} />
       ) : view.kind === "shared" ? (
         <SharedView key={`${view.owner}:${view.id}`} owner={view.owner} id={view.id} />
+      ) : view.kind === "unit" ? (
+        <UnitView key={view.unit.key} unit={view.unit} />
       ) : view.kind === "settings" ? (
         <>
           <header className="flex h-14 shrink-0 items-center justify-end px-5">
@@ -104,6 +109,24 @@ export function MainPanel() {
   )
 }
 
+
+/**
+ * A unit that is not a block or an agent's file (docs/plans/units.md): the profile and its wallet open
+ * the profile, a file of the site opens in the site's file view. Every unit shows something: one with
+ * no view of its own yet says what it is and where its file is.
+ */
+function UnitView({ unit }: { unit: Unit }) {
+  if (unit.type === "profile" || unit.type === "wallet") return <ProfileView onClose={showMain} />
+  if (unit.type === "artifact" && unit.path.startsWith("site/")) return <FileEditor path={unit.path.slice(5)} onClose={showMain} />
+  return (
+    <Empty className="flex-1">
+      <EmptyHeader>
+        <EmptyTitle>{unit.title ?? unit.path}</EmptyTitle>
+        <EmptyDescription>It is in your home at {unit.path}.</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  )
+}
 
 /** A block a friend shares with you: theirs, so it is read here and never edited. */
 function SharedView({ owner, id }: { owner: string; id: string }) {

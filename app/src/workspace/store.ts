@@ -1,6 +1,7 @@
 // Workspace state, and the handlers both the UI and the WebMCP tools call (AGENTS.md rule 2).
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
+import { docOfUnit, type Unit } from "@/data/units"
 import { useSyncExternalStore } from "react"
 import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
   inOrder, isBlock, isCortexKind, journalOf, landBlock, landChannel, landCortex, heldCortex, dropCortex, owner, blocks, selectSource,
@@ -105,6 +106,8 @@ export type View =
   /** A block a friend shares with you, read-only. */
   | { kind: "shared"; owner: string; id: string }
   | { kind: "settings"; tab: SettingsTab }
+  /** A unit that is not a block or an agent's file: the profile, the wallet, or a file of the site. */
+  | { kind: "unit"; unit: Unit }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
 export type Density = "compact" | "comfortable" | "rounded"
@@ -627,6 +630,17 @@ export function open(id: string, mode: "read" | "edit" = "read") {
   marks.unread.delete(id)
   set({ view: { kind: "doc", id, mode }, searchOpen: false, ...sideAfterOpen() })
   return { id, title: doc.title, view: mode, next: mode === "edit" ? "workspace.save-draft" : "workspace.open" }
+}
+
+/**
+ * Opens any unit of the home (docs/plans/units.md): a block or an agent's file in the editor, as open()
+ * does, and anything else (the profile, the wallet, a file of the site) in its own view.
+ */
+export function openUnit(unit: Unit) {
+  const doc = docOfUnit(unit)
+  if (doc) return open(doc.id)
+  set({ view: { kind: "unit", unit }, searchOpen: false, ...sideAfterOpen() })
+  return { id: unit.key, title: unit.title ?? unit.path, view: "read", next: "workspace.open" }
 }
 
 /** The graph lives in the side panel, in the home. */

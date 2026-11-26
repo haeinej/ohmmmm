@@ -7,7 +7,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { FileTree, type FileTreeNode } from "@/components/ui/file-tree"
+import type { FileTreeNode } from "@/components/ui/file-tree"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inOrder, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience, type Doc } from "@/data/workspace-data"
@@ -18,6 +18,7 @@ import { GraphView } from "./GraphView"
 import { RepoHistory } from "@/history/History"
 import { PrimeIcon } from "./PrimeIcon"
 import { RowMenu } from "./RowMenu"
+import { UnitTree, useUnitLevels } from "./UnitTree"
 import { FilterMenu } from "./FilterMenu"
 import { activeCount, NO_FILTERS } from "./filters"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -322,6 +323,14 @@ function RepoPanel() {
   }
   const flip = (id: string) => setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const selected = view.kind === "doc" ? view.id : null
+  // The tree reads the home a folder at a time (docs/plans/units.md); the top tells it the parts' folders.
+  const { levels, load } = useUnitLevels(rev)
+  const top = levels.get("")
+  const partFolder = (names: string[], fallback: string) => (typeof top === "object" ? top.folders.find(f => names.includes(f.path))?.path : undefined) ?? fallback
+  const collectionsFolder = partFolder(["collections", "vault"], "collections")
+  const agentsFolder = partFolder(["agents", "cortex"], "agents")
+  const treeProps = { levels, load, audience, expanded, onExpandedChange: setExpanded, selected }
+  const treeClass = "ms-4 [--tree-inset:1rem] animate-in fade-in-0 slide-in-from-top-1 duration-(--ohm-duration-open)"
 
   return (
     <SidePanelFrame
@@ -404,12 +413,12 @@ function RepoPanel() {
           {!showCortex && !showVault && (
             <p className="px-2 py-6 text-center text-small text-muted-foreground">Choose Agents or Collections from the menu above.</p>
           )}
+          {showCortex && audience === "private" && <UnitTree root="" only={["profile"]} label="Profile" {...treeProps} />}
           {showCortex && <>
             <PrimeRow prime="cortex" locked={cortexLocked} open={!cortexLocked && expanded.has("prime:cortex")} onOpen={() => flip("prime:cortex")}
               allOpen={primeAllOpen("cortex")} onExpandAll={() => expandPrime("cortex")} onOnly={() => setScope({ cortex: true, vault: false })} />
             {!cortexLocked && expanded.has("prime:cortex") && (
-              <FileTree aria-label="cortex" className="ms-4 [--tree-inset:1rem] animate-in fade-in-0 slide-in-from-top-1 duration-(--ohm-duration-open)" nodes={cortexTree}
-                expanded={expanded} onExpandedChange={setExpanded} selected={selected} onSelect={id => open(id)} />
+              <UnitTree root={agentsFolder} label="Agents" className={treeClass} {...treeProps} />
             )}
           </>}
           {showVault && <>
@@ -417,8 +426,7 @@ function RepoPanel() {
               allOpen={primeAllOpen("vault")} onExpandAll={() => expandPrime("vault")} onOnly={() => setScope({ cortex: false, vault: true })}
               onNew={() => void report(createDraft())} onNewChannel={() => startChannel()} />
             {expanded.has("prime:vault") && (
-              <FileTree aria-label="vault" className="ms-4 [--tree-inset:1rem] animate-in fade-in-0 slide-in-from-top-1 duration-(--ohm-duration-open)" nodes={vaultTree}
-                expanded={expanded} onExpandedChange={setExpanded} selected={selected} onSelect={id => open(docIdOf(id))} />
+              <UnitTree root={collectionsFolder} label="Collections" className={treeClass} {...treeProps} />
             )}
             {expanded.has("prime:vault") && !filtering && blocks.length === 0 && (
               <Empty className="py-6">
@@ -431,6 +439,7 @@ function RepoPanel() {
               </Empty>
             )}
           </>}
+          {showVault && <UnitTree root="" only={["site"]} label="Site" {...treeProps} />}
           {archived.length > 0 && <>
             <button type="button" onClick={() => setShowArchived(v => !v)} aria-expanded={showArchived}
               className="ux-row mt-2 flex w-full items-center gap-1.5 px-1.5 text-left text-small text-muted-foreground">
