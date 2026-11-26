@@ -189,31 +189,45 @@ function FixedScale({ width, children }: { width: number; children: React.ReactN
   )
 }
 
+/**
+ * Every post of the feed, framed the same way, as on Twitter: the picture beside it, the name in bold and
+ * when on top, then what was posted (words, a writing, a picture, a channel). Yours and everyone's alike.
+ */
+function PostFrame({ name, picture, when, seen, children }: {
+  name: string; picture?: string | null; when?: string; seen?: Unit["visibility"]; children: React.ReactNode
+}) {
+  const mark = seen ? SEEN_BY[seen] : null
+  return (
+    <div className="flex w-full gap-2.5 px-1 py-1.5 text-left">
+      <Avatar className="size-9 flex-none">
+        {picture && <AvatarImage src={picture} alt="" referrerPolicy="no-referrer" />}
+        <AvatarFallback className="bg-muted text-small">{name.slice(0, 1)}</AvatarFallback>
+      </Avatar>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="truncate text-body font-semibold">{name}</span>
+          {when && <span className="flex-none text-small text-muted-foreground">{ago(when)}</span>}
+          {mark && <Icon icon={mark.icon} size="xs" aria-label={mark.label} className="ms-auto flex-none self-center text-muted-foreground" />}
+        </span>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 /** One tile of the masonry: the block, then its title, then who made it, when, and who sees it. */
 export function FeedTile({ unit, onOpen }: { unit: Unit; onOpen(): void }) {
   const author = authorOf(unit)
   if (unit.kind === "short") return <PostLayout name={author.name} picture={author.picture} when={unit.updated} text={unit.excerpt ?? ""} onOpen={onOpen} />
-  const seen = SEEN_BY[unit.visibility]
   // A block or an agent's file is named as everywhere in the app; anything else by its own title.
   const doc = docOfUnit(unit)
   const title = doc ? titleOf(doc) : unit.title || unit.path.split("/").at(-1)
   return (
     <article>
-      <button type="button" onClick={onOpen} aria-label={title} className="group flex w-full flex-col gap-2.5 text-left outline-none">
-        <span className="block rounded-2xl group-focus-visible:ring-2 group-focus-visible:ring-ring/40">
-          <Face unit={unit} />
-        </span>
-        <span className="flex min-w-0 items-center gap-2 px-1 text-small text-muted-foreground">
-          <Avatar className="size-5 flex-none">
-            {author.picture && <AvatarImage src={author.picture} alt="" />}
-            <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">{author.name.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <span className="truncate">{author.name}</span>
-          <span className="ms-auto flex flex-none items-center gap-1.5">
-            {unit.updated && <time dateTime={unit.updated}>{ago(unit.updated)}</time>}
-            <Icon icon={seen.icon} size="xs" aria-label={seen.label} />
-          </span>
-        </span>
+      <button type="button" onClick={onOpen} aria-label={title} className="group block w-full rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+        <PostFrame name={author.name} picture={author.picture} when={unit.updated} seen={unit.visibility}>
+          <span className="mt-1 block"><Face unit={unit} /></span>
+        </PostFrame>
       </button>
     </article>
   )
@@ -306,16 +320,8 @@ function PostLayout({ name, picture, when, text, images, link, replies, likes, o
   const image = images?.[0]
   return (
     <article>
-      <button type="button" onClick={onOpen} className="flex w-full gap-2.5 rounded-2xl px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-        <Avatar className="size-9 flex-none">
-          {picture && <AvatarImage src={picture} alt="" referrerPolicy="no-referrer" />}
-          <AvatarFallback className="bg-muted text-small">{name.slice(0, 1)}</AvatarFallback>
-        </Avatar>
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate text-body font-semibold">{name}</span>
-            {when && <span className="flex-none text-small text-muted-foreground">{ago(when)}</span>}
-          </span>
+      <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+        <PostFrame name={name} picture={picture} when={when}>
           {text && <span className="text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={text} /></span>}
           {image && <img src={image.thumb} alt={image.alt} draggable={false} referrerPolicy="no-referrer" decoding="async" className="mt-1.5 block h-auto w-full rounded-2xl bg-muted" style={{ aspectRatio: image.ratio ?? 4 / 3 }} />}
           {!image && link && (
@@ -330,7 +336,7 @@ function PostLayout({ name, picture, when, text, images, link, replies, likes, o
               <span className="flex items-center gap-1"><Icon icon={HeartIcon} size="xs" />{likes ?? 0}</span>
             </span>
           ) : null}
-        </span>
+        </PostFrame>
       </button>
     </article>
   )
@@ -393,7 +399,8 @@ function ChannelBlockTile({ block, onOpen }: { block: ChannelBlock; onOpen(): vo
     <article role="button" tabIndex={0} aria-label={`Open ${block.name}`} onClick={onOpen}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
       className="block w-full cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-      <div className="aspect-[3/4] w-full">
+      <PostFrame name={authorOf().name} picture={authorOf().picture}>
+      <div className="mt-1 aspect-[3/4] w-full">
       {block.kind === "tools" ? (
         <span className="flex size-full flex-col gap-1.5 rounded-2xl bg-muted p-1.5 shade-2">
           <span className="flex items-center gap-1.5 px-1.5 pt-1 text-small font-semibold">
@@ -417,14 +424,7 @@ function ChannelBlockTile({ block, onOpen }: { block: ChannelBlock; onOpen(): vo
         </FixedScale>
       )}
       </div>
-      {/* A channel is a post of yours too: who it is by, as every tile says. */}
-      <span className="mt-2.5 flex min-w-0 items-center gap-2 px-1 text-small text-muted-foreground">
-        <Avatar className="size-5 flex-none">
-          {authorOf().picture && <AvatarImage src={authorOf().picture} alt="" />}
-          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">{authorOf().name.slice(0, 1)}</AvatarFallback>
-        </Avatar>
-        <span className="truncate">{authorOf().name}</span>
-      </span>
+      </PostFrame>
     </article>
   )
 }
@@ -471,11 +471,12 @@ const itemOf = (unit: Unit): Item => ({ key: unit.key, at: unit.updated ?? "", u
 const postItem = (post: NetPost): Item => ({ key: post.uri, at: post.createdAt, post })
 
 // The page's columns, as a website's: they fill the window's width, and zoom sets how many.
-const COLUMN = 240
-const GAP = 24
+// One block is about as wide as a post on Twitter reads well at.
+const COLUMN = 360
+const GAP = 28
 const FEWEST_COLUMNS = 1
 const MOST_COLUMNS = 8
-const columnsFor = (room: number) => Math.min(6, Math.max(2, Math.floor((room + GAP) / (COLUMN + GAP))))
+const columnsFor = (room: number) => Math.min(4, Math.max(1, Math.floor((room + GAP) / (COLUMN + GAP))))
 const PAGE = 60
 /** A tile's height before it is drawn, in a column's widths, to place it in the shortest column. */
 const guess = ({ unit, post, block }: Item) => block ? 4 / 3 + 0.2 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
