@@ -1,4 +1,5 @@
 import { useSite } from "@/site/connect"
+import { SiteContentPanel } from "@/site/SiteContentPanel"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -458,8 +459,14 @@ function ProfilePanel() {
 export function SidePanel() {
   const { side, view } = useWorkspace()
   const site = useSite().connected
-  // The feed is a canvas of its own: it takes the whole page, as the site's canvas does.
-  if (view.kind === "feed") return null
+  // Beside the feed, your side panel is always open: your home as the Site view shows it (your card, then
+  // your channels), or the home's tree without a site. Agents and You still open their own.
+  if (view.kind === "feed") {
+    if (side === "agents") return <AgentsPanel />
+    if (side === "profile") return <ProfilePanel />
+    if (site) return <SiteContentPanel />
+    return homeStatus() === "ready" ? <RepoPanel /> : null
+  }
   // Beside the site, the home's panel is its content as tiles, and it stays: closing it is not offered.
   // Beside the site, the home panel lives on the canvas itself, as the profile card (SiteView).
   // With a site, the home is the Site view's own panel and canvas: the tree never shows beside it.

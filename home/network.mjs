@@ -10,12 +10,13 @@
 // them as theirs, and nothing here passes them to an agent.
 export const APPVIEW = 'https://public.api.bsky.app';
 export const JETSTREAM = 'wss://jetstream2.us-east.bsky.network/subscribe';
-// Discover, for now: tech and AI, blended from public feed generators anyone can read.
+// Discover, for now: AI and the people building it, blended from public feed generators anyone can read.
 export const DISCOVER_FEEDS = [
-  'at://did:plc:cndfx4udwgvpjaakvxvh7wm5/app.bsky.feed.generator/flipboard-tech', // Tech by Flipboard
   'at://did:plc:lrzkd5exmxqrblbruvjieofj/app.bsky.feed.generator/MLBlend',        // AI/ML Feed: Blend
-  'at://did:plc:vpkhqolt662uhesyj6nxm7ys/app.bsky.feed.generator/devfeed',        // Developers
   'at://did:plc:rwkarouaeku2g6qkvqkirwa5/app.bsky.feed.generator/MLSky',          // MLSky
+  'at://did:plc:ugbenc43qu4v3hemephm2cry/app.bsky.feed.generator/aaamqhwmov3y4',  // Artificial Intelligence
+  'at://did:plc:3x2yyg4s6c6n26caev222yv3/app.bsky.feed.generator/whats-llm',      // LLM
+  'at://did:plc:mp33qrwuvsxucbzoh7kykslu/app.bsky.feed.generator/ai-agents',      // AI Agents
 ];
 export const KEPT = 500;
 const MOST_FOLLOWS = 2000;
@@ -32,7 +33,7 @@ function embedOf(did, embed) {
   const media = embed.$type === 'app.bsky.embed.recordWithMedia' ? embed.media : embed;
   const out = {};
   if (media?.$type === 'app.bsky.embed.images' && Array.isArray(media.images)) {
-    out.images = media.images.map(image => ({ thumb: blobCid(image.image) ? cdn(did, blobCid(image.image)) : null, alt: text(image.alt) })).filter(image => image.thumb).slice(0, 4);
+    out.images = media.images.map(image => ({ thumb: blobCid(image.image) ? cdn(did, blobCid(image.image)) : null, alt: text(image.alt), ...(image.aspectRatio?.width ? { ratio: image.aspectRatio.width / image.aspectRatio.height } : {}) })).filter(image => image.thumb).slice(0, 4);
   }
   if (media?.$type === 'app.bsky.embed.external' && media.external?.uri) {
     out.link = { uri: media.external.uri, title: text(media.external.title), description: text(media.external.description), thumb: blobCid(media.external.thumb) ? cdn(did, blobCid(media.external.thumb)) : null };
@@ -63,10 +64,11 @@ export function postOfView(view) {
   const out = {
     uri: view.uri, cid: view.cid ?? null, author, text: text(record.text), facets: record.facets ?? [], createdAt: text(record.createdAt) || text(view.indexedAt),
     ...(record.reply?.parent?.uri ? { replyTo: record.reply.parent.uri } : {}),
+    replies: view.replyCount ?? 0, likes: view.likeCount ?? 0, reposts: view.repostCount ?? 0,
   };
   const embed = view.embed ?? {};
   const media = embed.$type === 'app.bsky.embed.recordWithMedia#view' ? embed.media : embed;
-  if (media?.$type === 'app.bsky.embed.images#view') out.images = (media.images ?? []).map(image => ({ thumb: image.thumb, alt: text(image.alt) })).slice(0, 4);
+  if (media?.$type === 'app.bsky.embed.images#view') out.images = (media.images ?? []).map(image => ({ thumb: image.thumb, alt: text(image.alt), ...(image.aspectRatio?.width ? { ratio: image.aspectRatio.width / image.aspectRatio.height } : {}) })).slice(0, 4);
   if (media?.$type === 'app.bsky.embed.external#view' && media.external?.uri) out.link = { uri: media.external.uri, title: text(media.external.title), description: text(media.external.description), thumb: media.external.thumb ?? null };
   return out;
 }
@@ -96,9 +98,19 @@ export async function followsOf(actor, fetchImpl = fetch) {
   return out;
 }
 
+// What Discover keeps: posts about AI, by their words or the page they link to. The feeds' authors post
+// about their weekends too.
+const AI_WORDS = /\b(ai|a\.i\.|agi|llms?|gpt[-\w]*|chatgpt|openai|anthropic|claude|gemini|llama|mistral|deepmind|hugging ?face|nvidia|models?|agents?|agentic|machine learning|ml|deep learning|neural|transformers?|diffusion|inference|fine-?tun\w*|embeddings?|rag|prompts?|robot\w*|reinforcement learning|rl|datasets?|benchmarks?|arxiv|neurips|icml|iclr|copilot|cursor)\b/i;
+export const aboutAi = post => AI_WORDS.test(`${post.text} ${post.link?.title ?? ''} ${post.link?.description ?? ''}`);
+// What is left out as noise: trading bots, and posts that are only hashtags and links.
+const BOT = /smart money|\b(dumped|accumulated|bought|sold)\b.*\$\d|price:\s*\$|\bpump\b|airdrop|\$[A-Z]{2,6}\b|#(crypto|btc|eth|near|sol)\b/i;
+const words = text => text.replace(/https?:\/\/\S+|www\.\S+|#\S+|@\S+/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean).length;
+export const worthReading = post => !BOT.test(post.text) && (words(post.text) >= 6 || Boolean(post.link?.title) || Boolean(post.images?.length && words(post.text) >= 3));
+
 /**
- * Discover: the newest posts of a few feed generators together, read from the public AppView, each post
- * once, newest first. A feed that does not answer is left out; if none answers, Discover does not.
+ * Discover: the posts of a few feed generators together, read from the public AppView, each post once,
+ * threads first and ranked (see below). A feed that does not answer is left out; if none answers,
+ * Discover does not.
  */
 export async function discover({ feeds = DISCOVER_FEEDS, limit = 60, fetchImpl = fetch } = {}) {
   const each = Math.min(100, Math.ceil(limit / feeds.length) + 5);
@@ -109,7 +121,14 @@ export async function discover({ feeds = DISCOVER_FEEDS, limit = 60, fetchImpl =
     const post = postOfView(item.post);
     if (post.uri && !posts.has(post.uri)) posts.set(post.uri, post);
   }
-  return [...posts.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+  // Threads first: a post that starts a conversation, not a reply on its own; ranked by how much it was
+  // talked about, fading with age (a day halves it), so what is new and discussed comes first.
+  const now = Date.now();
+  const score = post => {
+    const hours = Math.max(0, (now - Date.parse(post.createdAt || 0)) / 3.6e6);
+    return (1 + post.replies * 3 + post.reposts * 2 + post.likes) / 2 ** (hours / 24);
+  };
+  return [...posts.values()].filter(post => !post.replyTo && aboutAi(post) && worthReading(post)).sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 
 /**

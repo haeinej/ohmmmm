@@ -6,7 +6,7 @@ import { bridgeFetch, currentBridge } from "./bridge"
 export type NetAuthor = { did: string; handle?: string; name?: string; avatar?: string | null }
 export type NetPost = {
   uri: string; cid?: string | null; author: NetAuthor; text: string; createdAt: string; replyTo?: string; quote?: string
-  images?: { thumb: string; alt: string }[]
+  images?: { thumb: string; alt: string; ratio?: number }[]
   link?: { uri: string; title: string; description: string; thumb: string | null }
 }
 export type Live = { connected: boolean; following: number; problem: string | null; posts: NetPost[] }
@@ -20,9 +20,9 @@ export async function readLive(limit = 200): Promise<Live> {
 }
 
 /** Discover: posts from a feed generator. */
-export async function readDiscover(): Promise<NetPost[]> {
+export async function readDiscover(fresh = false): Promise<NetPost[]> {
   if (!currentBridge()) return []
-  const answer = await bridgeFetch("/feed/discover")
+  const answer = await bridgeFetch(`/feed/discover${fresh ? "?fresh" : ""}`)
   if (!answer.ok) throw new DOMException("Discover did not answer.", "OperationError")
   return ((await answer.json()) as { posts: NetPost[] }).posts
 }

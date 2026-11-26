@@ -4,9 +4,9 @@
 // it. Each tile is the card the canvas already uses (site/Cards.tsx): a picture as itself, a writing as its
 // first page in miniature, and under it its title and who made it. A tile opens what it shows. What it
 // shows follows View as: a friend sees public and friends blocks, anyone public ones.
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { LucideIcon } from "lucide-react"
-import { ExternalLinkIcon, GlobeIcon, LockIcon, UsersIcon, XIcon } from "lucide-react"
+import { ExternalLinkIcon, GlobeIcon, LockIcon, RefreshCwIcon, UsersIcon, XIcon } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Icon } from "@/components/ui/icon"
@@ -161,7 +161,9 @@ function FixedScale({ width, children }: { width: number; children: React.ReactN
   const outer = useRef<HTMLDivElement>(null)
   const inner = useRef<HTMLDivElement>(null)
   const [fit, setFit] = useState({ scale: 1, height: 0 })
-  useEffect(() => {
+  // Measured before the page is painted, and again whenever the room or the content changes size, so
+  // the scaled page never shows at the wrong size first.
+  useLayoutEffect(() => {
     const measure = () => {
       const room = outer.current?.clientWidth ?? width
       const scale = room / width
@@ -292,7 +294,7 @@ function NetTile({ post, onOpen }: { post: NetPost; onOpen(): void }) {
     <article>
       <button type="button" onClick={onOpen} className="group flex w-full flex-col gap-2.5 text-left outline-none">
         <span className={cn(face, "group-focus-visible:ring-2 group-focus-visible:ring-ring/40")}>
-          {picture && <img src={picture.thumb} alt={picture.alt} draggable={false} referrerPolicy="no-referrer" className="block h-auto w-full" />}
+          {picture && <img src={picture.thumb} alt={picture.alt} draggable={false} referrerPolicy="no-referrer" decoding="async" className="block h-auto w-full bg-muted" style={{ aspectRatio: picture.ratio ?? 4 / 3 }} />}
           {post.text && <span className="block p-4 text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={post.text} /></span>}
           {!post.text && !picture && post.link && <span className="block p-4 text-body font-medium">{post.link.title || post.link.uri}</span>}
         </span>
@@ -331,7 +333,7 @@ function NetPopup({ post, onClose }: { post: NetPost; onClose(): void }) {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-8">
           {post.replyTo && <p className="text-small text-muted-foreground">A reply</p>}
           <p className="text-body leading-relaxed break-words whitespace-pre-wrap"><Faceted text={post.text} /></p>
-          {post.images?.map((image, i) => <img key={i} src={image.thumb} alt={image.alt} referrerPolicy="no-referrer" className="w-full rounded-xl" />)}
+          {post.images?.map((image, i) => <img key={i} src={image.thumb} alt={image.alt} referrerPolicy="no-referrer" className="w-full rounded-xl bg-muted" style={{ aspectRatio: image.ratio ?? 4 / 3 }} />)}
           {post.link && (
             <a href={post.link.uri} target="_blank" rel="noopener noreferrer" className="flex flex-col gap-1 rounded-xl bg-muted p-4">
               <span className="text-body font-medium">{post.link.title || post.link.uri}</span>
@@ -397,7 +399,28 @@ export function FeedView() {
     const every = setInterval(read, 30_000)
     return () => { current = false; clearInterval(every) }
   }, [])
-  useEffect(() => { if (tab === "discover" && !found) void report(readDiscover().then(setFound)) }, [tab, found])
+  // Discover is read as soon as the feed opens, so switching to it is instant, and again every two minutes.
+  useEffect(() => {
+    let current = true
+    const read = (fresh = false) => { readDiscover(fresh).then(posts => { if (current) setFound(posts) }, () => {}) }
+    read()
+    const every = setInterval(() => read(true), 120_000)
+    return () => { current = false; clearInterval(every) }
+  }, [])
+  // Refresh: the tab you are on, read again now, past every cache.
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      if (tab === "discover") setFound(await readDiscover(true))
+      else {
+        const [mine, said] = await Promise.all([readFeed({ audience, limit: PAGE }), readLive().catch(() => null)])
+        setUnits(mine); setMore(mine.length === PAGE)
+        if (said) setLive(said.posts)
+      }
+      page.current?.scrollTo({ top: 0, behavior: "smooth" })
+    } catch (problem) { void report(Promise.reject(problem)) } finally { setRefreshing(false) }
+  }, [tab, audience])
   // You, first: your profile as the feed's first tile, read as the profile view reads it.
   const [profile, setProfile] = useState<SiteProfile | null>(null)
   useEffect(() => {
@@ -412,6 +435,14 @@ export function FeedView() {
   // It starts at what the window holds, and stays as you set it.
   const [count, setCount] = useState(() => columnsFor((document.querySelector("main")?.clientWidth ?? 1200) - 48))
   const zoomIn = useCallback(() => setCount(n => Math.max(FEWEST_COLUMNS, n - 1)), [])
+  // Where you were, as a share of the page, when the zoom changed; put back once the page has its new size.
+  const place = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const el = page.current
+    if (place.current === null || !el) return
+    el.scrollTop = place.current * (el.scrollHeight - el.clientHeight)
+    place.current = null
+  }, [count])
   const zoomOut = useCallback(() => setCount(n => Math.min(MOST_COLUMNS, n + 1)), [])
 
   useEffect(() => {
@@ -436,20 +467,27 @@ export function FeedView() {
   }, [audience, more, units])
   const onScroll = () => {
     const el = page.current
-    if (el && el.scrollTop + el.clientHeight > el.scrollHeight - 800) loadMore()
+    // Well before the end: the next page and its pictures are on their way while you still read this one.
+    if (el && el.scrollTop + el.clientHeight > el.scrollHeight - 2400) loadMore()
   }
   // ⌘-scroll or a pinch zooms: a column fewer or more, one step at a time. A plain scroll scrolls the page.
   useEffect(() => {
     const el = page.current
     if (!el) return
+    // One step per gesture: a pinch sends many small events, so a step waits for a firm move and then rests.
     let held = 0
+    let resting = 0
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return
       e.preventDefault()
+      if (Date.now() < resting) return
       held += e.deltaY
-      if (Math.abs(held) < 40) return
+      if (Math.abs(held) < 60) return
+      // Keep your place: the same share of the way down the page, at the new size.
+      place.current = el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0
       if (held < 0) zoomIn(); else zoomOut()
       held = 0
+      resting = Date.now() + 350
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
@@ -470,26 +508,36 @@ export function FeedView() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div ref={page} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
-          <div className="sticky top-0 z-10 flex items-center gap-1 bg-card py-4">
-            <div role="tablist" aria-label="Feed" className="flex flex-1 gap-1">
-              {(["following", "discover"] as const).map(each => (
-                <Button key={each} role="tab" aria-selected={tab === each} size="sm" variant="ghost" onClick={() => setTab(each)}
-                  className="text-muted-foreground aria-selected:bg-muted aria-selected:text-foreground">{each === "following" ? "Following" : "Discover"}</Button>
-              ))}
-            </div>
-          </div>
-          <div role="feed" aria-busy={more} className="flex items-start" style={{ gap: GAP }}>
-            {placed(items, count).map((column, i) => (
-              <div key={i} className="flex min-w-0 flex-1 flex-col" style={{ gap: GAP }}>
-                {tab === "following" && i === 0 && profile && <ProfileTile profile={profile} onOpen={() => setOpened(youUnit)} />}
-                {column.map(item => item.post
-                  ? <NetTile key={item.key} post={item.post} onOpen={() => setOpenedPost(item.post!)} />
-                  : <FeedTile key={item.key} unit={item.unit!} onOpen={() => setOpened(item.unit!)} />)}
-              </div>
+        <>
+          {/* The header is its own bar: the page scrolls under nothing. */}
+        <header className="flex h-14 shrink-0 items-center gap-1 px-6">
+          <div role="tablist" aria-label="Feed" className="flex flex-1 gap-1">
+            {(["following", "discover"] as const).map(each => (
+              <Button key={each} role="tab" aria-selected={tab === each} size="sm" variant="ghost" onClick={() => setTab(each)}
+                className="text-muted-foreground aria-selected:bg-muted aria-selected:text-foreground">{each === "following" ? "Following" : "Discover"}</Button>
             ))}
           </div>
-        </div>
+          <Button size="icon-sm" variant="ghost" aria-label="Refresh" title="Refresh" disabled={refreshing} onClick={() => void refresh()}>
+            <Icon icon={RefreshCwIcon} className={cn(refreshing && "animate-spin")} />
+          </Button>
+        </header>
+          <div ref={page} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-6 pb-10">
+          {/* Every tile is drawn at one size, and the whole grid is scaled to the window: zooming shrinks or
+              grows them all in proportion, and nothing in a tile moves. */}
+          <FixedScale width={count * COLUMN + (count - 1) * GAP}>
+            <div role="feed" aria-busy={more} className="flex items-start" style={{ gap: GAP }}>
+              {placed(items, count).map((column, i) => (
+                <div key={i} className="flex flex-col" style={{ width: COLUMN, gap: GAP }}>
+                  {tab === "following" && i === 0 && profile && <ProfileTile profile={profile} onOpen={() => setOpened(youUnit)} />}
+                  {column.map(item => item.post
+                    ? <NetTile key={item.key} post={item.post} onOpen={() => setOpenedPost(item.post!)} />
+                    : <FeedTile key={item.key} unit={item.unit!} onOpen={() => setOpened(item.unit!)} />)}
+                </div>
+              ))}
+            </div>
+          </FixedScale>
+          </div>
+        </>
       )}
       {opened && <Popup unit={opened} onOpen={setOpened} onClose={close} />}
       {openedPost && <NetPopup post={openedPost} onClose={() => setOpenedPost(null)} />}

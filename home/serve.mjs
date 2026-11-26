@@ -1092,7 +1092,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         return send(res, 200, { ...following.state(), posts: following.posts(limit) });
       }
       if (url.pathname === '/feed/discover' && req.method === 'GET') {
-        if (!discovered || Date.now() - discovered.at > 60_000) discovered = { at: Date.now(), posts: discover({ limit: 60 }) };
+        // Read again at most once a minute, or at once when the person refreshes (?fresh).
+        if (!discovered || Date.now() - discovered.at > 60_000 || url.searchParams.has('fresh')) discovered = { at: Date.now(), posts: discover({ limit: 60 }) };
         try { return send(res, 200, { posts: await discovered.posts }); } catch (problem) { discovered = null; return said(res, 502, `Discover did not answer: ${problem.message}`); }
       }
       if (url.pathname === '/units/feed' && req.method === 'GET') {

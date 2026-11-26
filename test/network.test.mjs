@@ -46,7 +46,7 @@ test('who someone follows is read page by page, and Discover from a feed generat
     'app.bsky.graph.getFollows': url => (url.searchParams.get('cursor')
       ? { follows: [{ did: 'did:plc:cccccccccccccccccccccccc', handle: 'cy.example.com' }] }
       : { follows: [{ did: B, handle: 'bo.example.com', displayName: 'Bo', avatar: 'https://cdn.example/bo.jpg' }], cursor: 'next' }),
-    'app.bsky.feed.getFeed': { feed: [{ post: { uri: `at://${B}/app.bsky.feed.post/1`, cid: 'c1', author: { did: B, handle: 'bo.example.com', displayName: 'Bo' }, record: { text: 'Hot', createdAt: '2026-11-27T09:00:00.000Z' }, embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.example/t.jpg', alt: '' }] } } }] },
+    'app.bsky.feed.getFeed': { feed: [{ post: { uri: `at://${B}/app.bsky.feed.post/1`, cid: 'c1', author: { did: B, handle: 'bo.example.com', displayName: 'Bo' }, record: { text: 'Hot new open model', createdAt: '2026-11-27T09:00:00.000Z' }, embed: { $type: 'app.bsky.embed.images#view', images: [{ thumb: 'https://cdn.example/t.jpg', alt: '' }] } } }] },
   });
   assert.equal(await resolveHandle('ana.example.com', fetchImpl), A);
   assert.equal(await resolveHandle(A, fetchImpl), A);
@@ -54,8 +54,16 @@ test('who someone follows is read page by page, and Discover from a feed generat
   assert.deepEqual(follows.map(each => [each.did, each.name]), [[B, 'Bo'], ['did:plc:cccccccccccccccccccccccc', 'cy.example.com']]);
   // Discover blends its feeds: each post once, newest first, whichever feeds answer.
   const hot = await discover({ fetchImpl });
-  assert.deepEqual(hot.map(post => [post.author.name, post.text, post.images[0].thumb]), [['Bo', 'Hot', 'https://cdn.example/t.jpg']]);
+  assert.deepEqual(hot.map(post => [post.author.name, post.text, post.images[0].thumb]), [['Bo', 'Hot new open model', 'https://cdn.example/t.jpg']]);
   for (const feed of DISCOVER_FEEDS) assert.ok(asked.some(url => url.includes(encodeURIComponent(feed))), feed);
+  // Threads first: replies on their own are left out, and what was talked about ranks above what was not.
+  const now = new Date().toISOString();
+  const view = (n, extra = {}) => ({ post: { uri: `at://${B}/app.bsky.feed.post/${n}`, author: { did: B, handle: 'bo.example.com' }, record: { text: n, createdAt: now, ...extra.record }, replyCount: extra.replies ?? 0, likeCount: 0, repostCount: 0 } });
+  const ranked = await discover({ feeds: ['at://x/app.bsky.feed.generator/one'], fetchImpl: async () => new Response(JSON.stringify({ feed: [
+    view('quiet notes on how agents plan their work'), view('what we learned about LLMs this week', { replies: 5 }), view('my weekend', { replies: 50 }), view('Smart Money DUMPED $13,798 of #NEAR AI agents', { replies: 9 }), view('#AI #ML #agents www.example.com'), view('a reply', { replies: 9, record: { reply: { parent: { uri: 'at://x/app.bsky.feed.post/p' } } } }),
+  ] })) });
+  // Only what is about AI stays, however talked about the rest is.
+  assert.deepEqual(ranked.map(post => post.text), ['what we learned about LLMs this week', 'quiet notes on how agents plan their work']);
   const failing = async () => new Response('{}', { status: 502 });
   await assert.rejects(discover({ fetchImpl: failing }));
   assert.equal(postOfView({ uri: 'at://x/app.bsky.feed.post/2', author: { did: B, handle: 'bo.example.com' }, record: { text: 'plain' }, indexedAt: '2026-11-27T08:00:00.000Z' }).author.name, 'bo.example.com');
