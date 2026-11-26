@@ -8,6 +8,7 @@ export type NetPost = {
   uri: string; cid?: string | null; author: NetAuthor; text: string; createdAt: string; replyTo?: string; quote?: string
   images?: { thumb: string; alt: string; ratio?: number }[]
   link?: { uri: string; title: string; description: string; thumb: string | null }
+  replies?: number; likes?: number; reposts?: number
 }
 export type Live = { connected: boolean; following: number; problem: string | null; posts: NetPost[] }
 

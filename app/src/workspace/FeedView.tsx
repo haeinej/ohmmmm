@@ -6,7 +6,7 @@
 // shows follows View as: a friend sees public and friends blocks, anyone public ones.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { LucideIcon } from "lucide-react"
-import { ExternalLinkIcon, GlobeIcon, LockIcon, RefreshCwIcon, UsersIcon, XIcon } from "lucide-react"
+import { ExternalLinkIcon, GlobeIcon, HeartIcon, LockIcon, MessageCircleIcon, RefreshCwIcon, UsersIcon, XIcon } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Icon } from "@/components/ui/icon"
@@ -45,7 +45,7 @@ const face = "ohm-card relative block w-full overflow-hidden rounded-2xl bg-card
  * so it is shown as yours. The name is your profile's (FeedView reads it), never a handle.
  */
 let you = { name: "", picture: "" }
-const authorOf = (_unit: Unit) => ({ name: you.name || me.name, picture: you.picture })
+const authorOf = (_unit?: Unit) => ({ name: you.name || me.name, picture: you.picture })
 
 /**
  * A cover's address the page can show. A site file comes through the bridge, so it shows whether or not
@@ -192,6 +192,7 @@ function FixedScale({ width, children }: { width: number; children: React.ReactN
 /** One tile of the masonry: the block, then its title, then who made it, when, and who sees it. */
 export function FeedTile({ unit, onOpen }: { unit: Unit; onOpen(): void }) {
   const author = authorOf(unit)
+  if (unit.kind === "short") return <PostLayout name={author.name} picture={author.picture} when={unit.updated} text={unit.excerpt ?? ""} onOpen={onOpen} />
   const seen = SEEN_BY[unit.visibility]
   // A block or an agent's file is named as everywhere in the app; anything else by its own title.
   const doc = docOfUnit(unit)
@@ -293,29 +294,52 @@ function Popup({ unit, onOpen, onClose }: { unit: Unit; onOpen(unit: Unit): void
 
 // ---- Posts from the network: other people's, shown as theirs ----
 
-/** Someone else's post, as a tile like yours: its words and pictures, then who wrote it, by name. */
-function NetTile({ post, onOpen }: { post: NetPost; onOpen(): void }) {
-  const name = post.author.name || post.author.handle || "Someone"
-  const picture = post.images?.[0]
+/**
+ * A post as people read one on Twitter or Bluesky: the picture beside it, the name in bold and when, then
+ * the words as they were written, no card around them; pictures and a link inside, and how much it was
+ * talked about. Your short posts and other people's are drawn the same way.
+ */
+function PostLayout({ name, picture, when, text, images, link, replies, likes, onOpen }: {
+  name: string; picture?: string | null; when?: string; text: string
+  images?: { thumb: string; alt: string; ratio?: number }[]; link?: NetPost["link"]; replies?: number; likes?: number; onOpen(): void
+}) {
+  const image = images?.[0]
   return (
     <article>
-      <button type="button" onClick={onOpen} className="group flex w-full flex-col gap-2.5 text-left outline-none">
-        <span className={cn(face, "group-focus-visible:ring-2 group-focus-visible:ring-ring/40")}>
-          {picture && <img src={picture.thumb} alt={picture.alt} draggable={false} referrerPolicy="no-referrer" decoding="async" className="block h-auto w-full bg-muted" style={{ aspectRatio: picture.ratio ?? 4 / 3 }} />}
-          {post.text && <span className="block p-4 text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={post.text} /></span>}
-          {!post.text && !picture && post.link && <span className="block p-4 text-body font-medium">{post.link.title || post.link.uri}</span>}
-        </span>
-        <span className="flex min-w-0 items-center gap-2 px-1 text-small text-muted-foreground">
-          <Avatar className="size-5 flex-none">
-            {post.author.avatar && <AvatarImage src={post.author.avatar} alt="" referrerPolicy="no-referrer" />}
-            <AvatarFallback className="bg-muted text-[10px] text-muted-foreground">{name.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <span className="truncate">{name}</span>
-          <span className="ms-auto flex-none">{ago(post.createdAt)}</span>
+      <button type="button" onClick={onOpen} className="flex w-full gap-2.5 rounded-2xl px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+        <Avatar className="size-9 flex-none">
+          {picture && <AvatarImage src={picture} alt="" referrerPolicy="no-referrer" />}
+          <AvatarFallback className="bg-muted text-small">{name.slice(0, 1)}</AvatarFallback>
+        </Avatar>
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate text-body font-semibold">{name}</span>
+            {when && <span className="flex-none text-small text-muted-foreground">{ago(when)}</span>}
+          </span>
+          {text && <span className="text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={text} /></span>}
+          {image && <img src={image.thumb} alt={image.alt} draggable={false} referrerPolicy="no-referrer" decoding="async" className="mt-1.5 block h-auto w-full rounded-2xl bg-muted" style={{ aspectRatio: image.ratio ?? 4 / 3 }} />}
+          {!image && link && (
+            <span className="mt-1.5 flex flex-col gap-0.5 rounded-2xl bg-muted px-3 py-2.5">
+              <span className="line-clamp-2 text-small font-medium">{link.title || link.uri}</span>
+              {link.description && <span className="line-clamp-2 text-small text-muted-foreground">{link.description}</span>}
+            </span>
+          )}
+          {(replies || likes) ? (
+            <span className="mt-1 flex items-center gap-4 text-small text-muted-foreground tabular-nums">
+              <span className="flex items-center gap-1"><Icon icon={MessageCircleIcon} size="xs" />{replies ?? 0}</span>
+              <span className="flex items-center gap-1"><Icon icon={HeartIcon} size="xs" />{likes ?? 0}</span>
+            </span>
+          ) : null}
         </span>
       </button>
     </article>
   )
+}
+
+/** Someone else's post, from the network: theirs, by their name and picture. */
+function NetTile({ post, onOpen }: { post: NetPost; onOpen(): void }) {
+  return <PostLayout name={post.author.name || post.author.handle || "Someone"} picture={post.author.avatar} when={post.createdAt}
+    text={post.text} images={post.images} link={post.link} replies={post.replies} likes={post.likes} onOpen={onOpen} />
 }
 
 /** Someone else's post, opened: theirs, so it is read here and answered on Bluesky. */
@@ -368,7 +392,8 @@ function ChannelBlockTile({ block, onOpen }: { block: ChannelBlock; onOpen(): vo
   return (
     <article role="button" tabIndex={0} aria-label={`Open ${block.name}`} onClick={onOpen}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
-      className="block aspect-[3/4] w-full cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+      className="block w-full cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+      <div className="aspect-[3/4] w-full">
       {block.kind === "tools" ? (
         <span className="flex size-full flex-col gap-1.5 rounded-2xl bg-muted p-1.5 shade-2">
           <span className="flex items-center gap-1.5 px-1.5 pt-1 text-small font-semibold">
@@ -382,13 +407,29 @@ function ChannelBlockTile({ block, onOpen }: { block: ChannelBlock; onOpen(): vo
           </span>
         </span>
       ) : (
-        <ChannelCard name={block.name} view="grid" livePages className="size-full" mark={block.mark || undefined}
-          items={block.kind === "collection" ? block.items : []}
-          pages={block.kind === "artifacts" ? block.pages : []} />
+        // Drawn at the size your home panel draws a channel, and scaled to the column, so it looks the same.
+        <FixedScale width={HOME_TILE}>
+          <span className="block aspect-[3/4]" style={{ width: HOME_TILE }}>
+            <ChannelCard name={block.name} view="grid" livePages className="size-full" mark={block.mark || undefined}
+              items={block.kind === "collection" ? block.items : []}
+              pages={block.kind === "artifacts" ? block.pages : []} />
+          </span>
+        </FixedScale>
       )}
+      </div>
+      {/* A channel is a post of yours too: who it is by, as every tile says. */}
+      <span className="mt-2.5 flex min-w-0 items-center gap-2 px-1 text-small text-muted-foreground">
+        <Avatar className="size-5 flex-none">
+          {authorOf().picture && <AvatarImage src={authorOf().picture} alt="" />}
+          <AvatarFallback className="bg-primary text-[10px] text-primary-foreground">{authorOf().name.slice(0, 1)}</AvatarFallback>
+        </Avatar>
+        <span className="truncate">{authorOf().name}</span>
+      </span>
     </article>
   )
 }
+// The width your home panel's channel tiles are drawn at (a 3:4 tile in its row of 11.5rem).
+const HOME_TILE = 168
 
 /** A channel block opened: everything it holds, as the home panel shows a channel expanded. */
 function ChannelBlockOpened({ block, onOpenItem }: { block: ChannelBlock; onOpenItem(item: SiteItem): void }) {
@@ -437,7 +478,7 @@ const MOST_COLUMNS = 8
 const columnsFor = (room: number) => Math.min(6, Math.max(2, Math.floor((room + GAP) / (COLUMN + GAP))))
 const PAGE = 60
 /** A tile's height before it is drawn, in a column's widths, to place it in the shortest column. */
-const guess = ({ unit, post, block }: Item) => block ? 4 / 3 + 0.1 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
+const guess = ({ unit, post, block }: Item) => block ? 4 / 3 + 0.2 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
   : unit!.kind === "short" ? 0.35 + (unit!.excerpt?.length ?? 0) / 400
   : (unit!.cover || unit!.kind === "image" ? 1.25 : 4 / 3) + 0.25
 
