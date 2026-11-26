@@ -131,8 +131,10 @@ const tinted = (mark?: string): React.CSSProperties | undefined => {
  *   row    its blocks side by side, scrolled sideways
  *   list   its blocks as rows: a small picture and a title
  */
-export function ChannelCard({ name, items, mark, view = "cover", onOpenBlock, className, pages = [] }: {
+export function ChannelCard({ name, items, mark, view = "cover", onOpenBlock, className, pages = [], livePages = false }: {
   name: string; items: SiteItem[]; mark?: string; view?: ChannelView
+  /** Its web pages live: scrolled and clicked where they are, as the feed shows them. */
+  livePages?: boolean
   /** Web pages the channel holds (Artifacts), drawn live before its blocks. */
   pages?: { src: string; title: string }[]
   /** A block inside it, chosen. Only grid, row and list show blocks one by one. */
@@ -148,7 +150,7 @@ export function ChannelCard({ name, items, mark, view = "cover", onOpenBlock, cl
         {/* Its header, as a channel's section has: the dot, the name, how many. Then what it holds, inside. */}
         <span className="px-1.5 pt-1"><ChannelName name={label} count={count} mark={mark} /></span>
         <span className="relative min-h-0 w-full flex-1 overflow-hidden rounded-xl bg-card">
-          {!front && pages[0] && <PageCard src={pages[0].src} title={pages[0].title} live={false} className="rounded-xl shadow-none" />}
+          {!front && pages[0] && <PageCard src={pages[0].src} title={pages[0].title} live={livePages} className="rounded-xl shadow-none" />}
           {front && (isPicture(front)
             ? <img src={siteUrl(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
             : <BlockCard item={front} className="rounded-xl shadow-none" />)}
@@ -161,13 +163,13 @@ export function ChannelCard({ name, items, mark, view = "cover", onOpenBlock, cl
       <ChannelName name={label} count={count} mark={mark} />
       {view === "grid" && (
         <span className="grid min-h-0 flex-1 auto-rows-[4.5rem] grid-cols-[repeat(auto-fill,minmax(3.4rem,1fr))] gap-1.5 overflow-hidden">
-          {pages.map(p => <span key={p.src} className="col-span-2 row-span-1 min-w-0"><PageCard src={p.src} title={p.title} live={false} className="rounded-lg shade-1" /></span>)}
+          {pages.map(p => <span key={p.src} className="col-span-2 row-span-1 min-w-0"><PageCard src={p.src} title={p.title} live={livePages} className="rounded-lg shade-1" /></span>)}
           {items.map(i => <span key={i.path} onDoubleClick={open(i)} className="min-w-0"><BlockCard item={i} className="rounded-lg shade-1" /></span>)}
         </span>
       )}
       {view === "row" && (
         <span className="flex min-h-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain" onPointerDown={e => e.stopPropagation()}>
-          {pages.map(p => <span key={p.src} className="aspect-[16/10] h-full shrink-0"><PageCard src={p.src} title={p.title} live={false} className="rounded-lg shade-1" /></span>)}
+          {pages.map(p => <span key={p.src} className="aspect-[16/10] h-full shrink-0"><PageCard src={p.src} title={p.title} live={livePages} className="rounded-lg shade-1" /></span>)}
           {items.map(i => <span key={i.path} onDoubleClick={open(i)} className="aspect-[3/4] h-full shrink-0"><BlockCard item={i} className="rounded-lg shade-1" /></span>)}
         </span>
       )}

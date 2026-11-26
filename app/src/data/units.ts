@@ -21,6 +21,8 @@ export type Unit = {
   cover?: string
   /** A channel's: how many blocks it holds, in it or in a channel inside it. */
   count?: number
+  /** A kept website's: whether it lets itself be shown in a frame. */
+  frameable?: boolean
 }
 export type UnitFolder = { path: string; title: string; count: number; unit?: Unit }
 export type Level = { folder: string; folders: UnitFolder[]; units: Unit[] }

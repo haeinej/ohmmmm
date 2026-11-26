@@ -456,6 +456,20 @@ function ProfilePanel() {
   )
 }
 
+/**
+ * Your home beside the feed: the very panel your home screen floats over the canvas (your card, and your
+ * channels opening below it), here open, in its own column. Fold it to the card, or widen it, as there.
+ */
+function FeedHome() {
+  const [open, setOpen] = useState(true)
+  const [width, setWidth] = useState(336)
+  return (
+    <div className="relative shrink-0 max-md:hidden" style={{ width: (open ? width : 320) + 12 }}>
+      <SiteContentPanel floating={{ open, onOpen: setOpen, width, onWidth: setWidth }} />
+    </div>
+  )
+}
+
 export function SidePanel() {
   const { side, view } = useWorkspace()
   const site = useSite().connected
@@ -464,7 +478,7 @@ export function SidePanel() {
   if (view.kind === "feed") {
     if (side === "agents") return <AgentsPanel />
     if (side === "profile") return <ProfilePanel />
-    if (site) return <SiteContentPanel />
+    if (site) return <FeedHome />
     return homeStatus() === "ready" ? <RepoPanel /> : null
   }
   // Beside the site, the home's panel is its content as tiles, and it stays: closing it is not offered.

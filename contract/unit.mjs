@@ -240,6 +240,8 @@ function linkUnits(folder, links) {
     title: text(link.title) ?? text(link.site) ?? link.url, origin: link.url, excerpt: text(link.description)?.slice(0, EXCERPT_LENGTH),
     cover: typeof link.image === 'string' && /^https?:\/\//i.test(link.image) ? link.image : undefined,
     visibility: 'private', channels: [], updated: text(link.saved),
+    // Whether the page lets itself be shown in a frame, as the site's canvas shows it.
+    frameable: link.frameable === true ? true : undefined,
   }));
 }
 // A tool the person's agent built for them, `tools/<name>/index.html` in the home: kept, and run, only here.

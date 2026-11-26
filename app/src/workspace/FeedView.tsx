@@ -15,7 +15,7 @@ import { docOfUnit, folderOf, readFeed, readLevel, type Unit } from "@/data/unit
 import { blueskyUrl, readDiscover, readLive, type NetPost } from "@/data/network"
 import { titleOf } from "@/data/workspace-data"
 import { cn } from "@/lib/cn"
-import { BlockCard, ReaderScale } from "@/site/Cards"
+import { BlockCard, ChannelCard, LinkCard, PageCard, ReaderScale } from "@/site/Cards"
 import { ToolFrame } from "@/site/ToolFrame"
 import { ago } from "@/site/SitePublish"
 import { MarkdownView } from "@/viewers/MarkdownView"
@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button"
 import { notify } from "@/components/ui/notice"
 import { PageEditor } from "@/editor/PageEditor"
 import { ArticleView } from "@/site/ArticleView"
-import { pictureUrl, readProfile, saveChange, type Change, type SiteProfile } from "@/site/source"
+import { pictureUrl, readContent, readLinks, readOwnChannels, readProfile, readTools, saveChange, type Change, type SiteContent, type SiteItem, type SiteLink, type SiteProfile, type SiteTool } from "@/site/source"
 import { IdentityCard } from "@/components/ui/identity-card"
 import { ProfileView } from "@/site/ProfileView"
 import { unitPlace } from "@/data/units"
@@ -91,6 +91,9 @@ function BlockPage({ unit }: { unit: Unit }) {
 }
 
 /** The tile itself: a cover as a picture at its own shape, a site page as its writing, a block as its page. */
+/** A writing or a project of the site, read as writing; every other page is a page. */
+const isWriting = (path: string) => /^(writings|projects)\/[^/]+\/(?:[^/]+\/)?index\.html?$|\.(md|mdx|markdown)$/i.test(path) && !/^(writings|projects)\/index\.html?$/i.test(path)
+
 function Face({ unit }: { unit: Unit }) {
   const cover = useCover(unit.cover)
   if (unit.type === "channel") return <ChannelFace unit={unit} />
@@ -98,11 +101,15 @@ function Face({ unit }: { unit: Unit }) {
   if (unit.kind === "short") return <span className={cn(face, "p-4 text-body leading-snug break-words whitespace-pre-wrap")}><Faceted text={unit.excerpt ?? ""} /></span>
   // A tool built for you is shown running, as the canvas shows it; it can't be used from its tile.
   if (unit.kind === "tool" && unit.id) return <span className={cn(face, "aspect-3/4")}><ToolFrame name={unit.id} live={false} className="pointer-events-none size-full" /></span>
-  // A page of the site is writing: its text, as the reader shows it, never the picture it is shared with.
+  // A page of the site: a writing or a project is its text, as the reader shows it; any other page (the
+  // home page, a section's index) is the page itself, live in a frame, as your Artifacts channel shows it.
   if (unit.root === "site" && unit.kind === "page") {
     const path = unit.path.replace(/^site\//, "")
+    if (!isWriting(path)) return <span className={cn(face, "aspect-16/10")}><PageCard src={siteUrl(path)} title={unit.title ?? path} live={false} className="rounded-none shadow-none" /></span>
     return <BlockCard className="aspect-3/4 h-auto" item={{ kind: "article", path, title: unit.title ?? path, modified: unit.updated ?? "", usedIn: [] }} />
   }
+  // A kept website that lets itself be framed is shown live, as the site's canvas shows it.
+  if (unit.kind === "link" && unit.frameable && unit.origin) return <span className={cn(face, "aspect-16/10")}><PageCard src={unit.origin} title={unit.title ?? unit.origin} live={false} className="rounded-none shadow-none" /></span>
   if (cover) return <span className={face}><img src={cover} alt="" draggable={false} className="block h-auto w-full" /></span>
   // A kept website with no picture of its own: its name and what it says about itself, as a card.
   if (unit.kind === "link") return (
@@ -346,8 +353,79 @@ function NetPopup({ post, onClose }: { post: NetPost; onClose(): void }) {
   )
 }
 
+// ---- Your channels as blocks, as your home panel shows them ----
+
+/** A channel of your home, as one block of the feed: Tools, Artifacts (your website and the pages you
+ * kept), or a collection of your site. Opening it shows everything it holds. */
+type ChannelBlock =
+  | { kind: "tools"; name: "Tools"; tools: SiteTool[]; mark?: string }
+  | { kind: "artifacts"; name: "Artifacts"; pages: { src: string; title: string }[]; links: SiteLink[]; mark?: string }
+  | { kind: "collection"; name: string; items: SiteItem[]; mark?: string }
+
+/** A channel block's face: the home panel's own channel card; its web pages live, where they are. */
+function ChannelBlockTile({ block, onOpen }: { block: ChannelBlock; onOpen(): void }) {
+  // Not a button: a live page inside takes its own clicks and scrolling; anywhere else opens the channel.
+  return (
+    <article role="button" tabIndex={0} aria-label={`Open ${block.name}`} onClick={onOpen}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
+      className="block aspect-[3/4] w-full cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+      {block.kind === "tools" ? (
+        <span className="flex size-full flex-col gap-1.5 rounded-2xl bg-muted p-1.5 shade-2">
+          <span className="flex items-center gap-1.5 px-1.5 pt-1 text-small font-semibold">
+            <span aria-hidden className="size-2 rounded-full bg-foreground" />Tools
+            <span className="font-normal text-muted-foreground tabular-nums">{block.tools.length}</span>
+          </span>
+          <span className="flex min-h-0 flex-1 flex-col gap-1.5">
+            {block.tools.slice(0, 2).map(tool => (
+              <span key={tool.name} className="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-card"><ToolFrame name={tool.name} live={false} className="pointer-events-none size-full" /></span>
+            ))}
+          </span>
+        </span>
+      ) : (
+        <ChannelCard name={block.name} view="grid" livePages className="size-full" mark={block.mark || undefined}
+          items={block.kind === "collection" ? block.items : []}
+          pages={block.kind === "artifacts" ? block.pages : []} />
+      )}
+    </article>
+  )
+}
+
+/** A channel block opened: everything it holds, as the home panel shows a channel expanded. */
+function ChannelBlockOpened({ block, onOpenItem }: { block: ChannelBlock; onOpenItem(item: SiteItem): void }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8">
+      <h2 className="pb-5 text-(length:--ohm-type-title-size) font-semibold">{block.name}</h2>
+      {block.kind === "tools" ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+          {block.tools.map(tool => <div key={tool.name} className="aspect-[4/3] overflow-hidden rounded-2xl bg-card shade-2"><ToolFrame name={tool.name} className="relative size-full" /></div>)}
+        </div>
+      ) : block.kind === "artifacts" ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-4">
+          {block.pages.map(page => <div key={page.src} className="aspect-[16/10]"><PageCard src={page.src} title={page.title} live /></div>)}
+          {block.links.map(link => <div key={link.id} className="aspect-[16/10]"><LinkCard link={link} live /></div>)}
+        </div>
+      ) : (
+        <div className="columns-[12rem] gap-4">
+          {block.items.map(item => (
+            <button key={item.path} type="button" onClick={() => onOpenItem(item)} aria-label={`Open ${item.title}`}
+              className={cn("mb-4 block w-full break-inside-avoid", item.kind === "image" || item.kind === "video" ? "" : "aspect-[3/4]")}>
+              <BlockCard item={item} natural={item.kind === "image" || item.kind === "video"} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // What the feed places: one of your units, or a post from the network. `at` orders them.
-type Item = { key: string; at: string; unit?: Unit; post?: NetPost }
+type Item = { key: string; at: string; unit?: Unit; post?: NetPost; block?: ChannelBlock }
+/** One of the site's blocks (a writing, a project, a photograph) as the unit it is, to open it. */
+const unitOfItem = (item: SiteItem): Unit => ({
+  key: `site:${item.path}`, type: "artifact", kind: item.kind === "image" || item.kind === "video" ? "image" : "page", root: "site",
+  path: `site/${item.path.split("#")[0]}`, title: item.title, visibility: "public",
+  ...(item.kind === "image" || item.kind === "video" ? { cover: `site:${item.path}` } : {}),
+})
 const itemOf = (unit: Unit): Item => ({ key: unit.key, at: unit.updated ?? "", unit })
 const postItem = (post: NetPost): Item => ({ key: post.uri, at: post.createdAt, post })
 
@@ -359,7 +437,7 @@ const MOST_COLUMNS = 8
 const columnsFor = (room: number) => Math.min(6, Math.max(2, Math.floor((room + GAP) / (COLUMN + GAP))))
 const PAGE = 60
 /** A tile's height before it is drawn, in a column's widths, to place it in the shortest column. */
-const guess = ({ unit, post }: Item) => post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
+const guess = ({ unit, post, block }: Item) => block ? 4 / 3 + 0.1 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
   : unit!.kind === "short" ? 0.35 + (unit!.excerpt?.length ?? 0) / 400
   : (unit!.cover || unit!.kind === "image" ? 1.25 : 4 / 3) + 0.25
 
@@ -386,6 +464,16 @@ export function FeedView() {
   const page = useRef<HTMLDivElement>(null)
   const [opened, setOpened] = useState<Unit | null>(null)
   const [channels, setChannels] = useState<Unit[]>([])
+  // Your channels, as your home panel reads them: the site's collections, the pages you kept, your tools.
+  // Their marks too: each channel wears the colour you gave it there.
+  const [site, setSite] = useState<{ content: SiteContent | null; links: SiteLink[]; tools: SiteTool[]; marks: Record<string, string> }>({ content: null, links: [], tools: [], marks: {} })
+  useEffect(() => {
+    let current = true
+    Promise.all([readContent().catch(() => null), readLinks().catch(() => []), readTools().catch(() => []), readOwnChannels().then(own => own.colors).catch(() => ({}))])
+      .then(([content, links, tools, marks]) => { if (current) setSite({ content, links, tools, marks }) })
+    return () => { current = false }
+  }, [rev])
+  const [openedBlock, setOpenedBlock] = useState<ChannelBlock | null>(null)
   // Following: yours and who you follow, together. Discover: a feed generator's.
   const [tab, setTab] = useState<"following" | "discover">("following")
   const [live, setLive] = useState<NetPost[]>([])
@@ -452,7 +540,7 @@ export function FeedView() {
     // Your channels come first, after you, as a site's sections do; the rest follows newest first.
     void report(readFeed({ audience, limit: 50, types: ["channel"] }).then(read => { if (current) setChannels(read.filter(unit => (unit.count ?? 0) > 0)) }))
     return () => { current = false }
-  }, [audience, rev])
+  }, [audience, viewAs, rev])
 
   // The next page, from where this one ends, once you scroll near the bottom.
   const loadMore = useCallback(() => {
@@ -493,10 +581,23 @@ export function FeedView() {
     return () => el.removeEventListener("wheel", onWheel)
   }, [zoomIn, zoomOut, units === null, !profile && (units?.length ?? 0) === 0])
 
+  // Your channels, first, as your home panel lists them: Tools and Artifacts (yours alone, so only when you
+  // look as yourself), then the site's collections, which are public as the site is.
+  const mine = viewAs === "private"
+  const blocks: ChannelBlock[] = [
+    ...(mine && site.tools.length ? [{ kind: "tools" as const, name: "Tools" as const, tools: site.tools, mark: site.marks["Tools"] }] : []),
+    ...(mine ? [{ kind: "artifacts" as const, name: "Artifacts" as const, links: site.links, mark: site.marks["Artifacts"],
+      pages: [{ src: siteUrl("index.html"), title: "Home" }, ...site.links.filter(link => link.frameable).map(link => ({ src: link.url, title: link.title }))] }] : []),
+    ...(site.content?.collections ?? []).filter(c => c.items.length).map(c => ({ kind: "collection" as const, name: c.name, items: c.items, mark: site.marks[c.name] })),
+  ]
+  // A block of its own in the feed: not a web page, a kept website or a tool, which live in their channels.
+  const blockOfItsOwn = (unit: Unit) => unit.type !== "channel" && unit.kind !== "link" && unit.kind !== "tool"
+    && !(unit.root === "site" && unit.kind === "page" && !isWriting(unit.path.replace(/^site\//, "")))
   // Following: you, your channels, then your blocks and who you follow, newest first. Discover: theirs alone.
   const items: Item[] = tab === "discover"
     ? (found ?? []).map(postItem)
-    : [...channels.map(itemOf), ...[...(units ?? []).filter(unit => unit.type !== "channel").map(itemOf), ...live.map(postItem)].sort((a, b) => b.at.localeCompare(a.at))]
+    : [...blocks.map(block => ({ key: `channel:${block.name}`, at: "", block })), ...channels.map(itemOf),
+       ...(units ?? []).filter(blockOfItsOwn).map(itemOf).concat(live.map(postItem)).sort((a, b) => b.at.localeCompare(a.at))]
   if (!units) return <div className="flex-1" aria-busy />
   return (
     <section aria-label="Feed" className="relative flex min-h-0 flex-1 flex-col">
@@ -529,7 +630,9 @@ export function FeedView() {
               {placed(items, count).map((column, i) => (
                 <div key={i} className="flex flex-col" style={{ width: COLUMN, gap: GAP }}>
                   {tab === "following" && i === 0 && profile && <ProfileTile profile={profile} onOpen={() => setOpened(youUnit)} />}
-                  {column.map(item => item.post
+                  {column.map(item => item.block
+                    ? <ChannelBlockTile key={item.key} block={item.block} onOpen={() => setOpenedBlock(item.block!)} />
+                    : item.post
                     ? <NetTile key={item.key} post={item.post} onOpen={() => setOpenedPost(item.post!)} />
                     : <FeedTile key={item.key} unit={item.unit!} onOpen={() => setOpened(item.unit!)} />)}
                 </div>
@@ -541,6 +644,17 @@ export function FeedView() {
       )}
       {opened && <Popup unit={opened} onOpen={setOpened} onClose={close} />}
       {openedPost && <NetPopup post={openedPost} onClose={() => setOpenedPost(null)} />}
+      {openedBlock && (
+        <div role="dialog" aria-label={openedBlock.name} className="absolute inset-0 z-30 flex bg-black/15 p-3 animate-in fade-in-0"
+          onPointerDown={e => { if (e.target === e.currentTarget) setOpenedBlock(null) }}>
+          <div className="relative mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-card shade-5">
+            <header className="flex h-12 shrink-0 items-center justify-end ps-5 pe-3">
+              <Button size="icon-sm" variant="ghost" aria-label="Close" onClick={() => setOpenedBlock(null)}><Icon icon={XIcon} /></Button>
+            </header>
+            <ChannelBlockOpened block={openedBlock} onOpenItem={item => { setOpenedBlock(null); setOpened(unitOfItem(item)) }} />
+          </div>
+        </div>
+      )}
     </section>
   )
 }

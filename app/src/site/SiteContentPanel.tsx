@@ -147,7 +147,8 @@ export function ChannelTile({ name, items, mark, masonry, onOpen, path }: { name
     <button type="button" aria-label={`Open ${name}`} onClick={onOpen} draggable
       onDragStart={e => { e.dataTransfer.setData(CHANNEL, path ?? name); e.dataTransfer.setData("text/plain", path ?? name); e.dataTransfer.effectAllowed = "copy" }}
       className={cn(press, masonry ? "mb-2 aspect-[3/4] w-full break-inside-avoid" : "aspect-[3/4] h-full shrink-0")}>
-      <ChannelCard name={name} items={items} mark={mark} />
+      {/* Drawn as the feed draws a channel: its blocks in a grid, not one cover. */}
+      <ChannelCard name={name} items={items} mark={mark} view="grid" />
     </button>
   )
 }
