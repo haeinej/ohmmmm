@@ -142,7 +142,7 @@ export async function withKeysLock(home, work) {
 }
 
 /** The paired browsers' keys, as kept: `[{ hash, made, app?, name?, seen? }]`, each `hash` the key's SHA-256 in hex. */
-export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohmmmm pair');
+export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohm pair');
 
 /**
  * A key for one more browser: kept only as its SHA-256, and answered once, for the pairing link.
@@ -203,7 +203,7 @@ export async function browserSeen(home, hash, now = new Date()) {
 }
 
 /** The agents with keys of their own, as kept: `[{ name, hash, made }]`. */
-export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agents', 'ohmmmm agents add <name>')).filter(each => AGENT_NAME.test(each.name ?? ''));
+export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agents', 'ohm agents add <name>')).filter(each => AGENT_NAME.test(each.name ?? ''));
 
 /**
  * A key of its own for the agent named, answered once: the person gives it to that agent, and the
@@ -214,7 +214,7 @@ export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agen
 export async function addAgent(home, name, { replace = false } = {}) {
   if (!AGENT_NAME.test(name ?? '')) throw new VaultProblem('An agent\'s name is 1 to 64 letters, digits, dots, hyphens or underscores, such as claude-code.');
   const kept = await agentKeys(home);
-  if (!replace && kept.some(each => each.name === name)) throw new VaultProblem(`${name} has a key already. To give it a new one, which shuts the old one out: ohmmmm agents add ${name} --new-key`);
+  if (!replace && kept.some(each => each.name === name)) throw new VaultProblem(`${name} has a key already. To give it a new one, which shuts the old one out: ohm agents add ${name} --new-key`);
   const near = kept.find(each => each.name !== name && each.name.toLowerCase() === name.toLowerCase());
   if (near) throw new VaultProblem(`${name} would be too easily taken for ${near.name}, which has a key. Use ${near.name}, or another name.`);
   const key = newKey('agent');
@@ -580,7 +580,7 @@ export async function siteSettings(file) {
 function needsOf({ settings, config, password }) {
   const needs = [];
   if (!settings) needs.push({ what: 'site', say: `Publishing needs your site's configuration in your home. Make it with: ohm configure --site https://… --handle … > ${config}` });
-  if (!password) needs.push({ what: 'password', say: 'Start ohmmmm serve with ATPROTO_APP_PASSWORD set to an app password for your account. It stays on this computer.' });
+  if (!password) needs.push({ what: 'password', say: 'Start ohm serve with ATPROTO_APP_PASSWORD set to an app password for your account. It stays on this computer.' });
   return needs;
 }
 
@@ -1119,8 +1119,8 @@ async function printAgents(layout, port) {
   const own = await agentKeys(layout.home);
   const shared = await readText(join(layout.home, AGENT_KEY));
   const url = `http://127.0.0.1:${port}`;
-  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohmmmm agents add <name>`);
-  if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohmmmm agents remove --shared`);
+  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohm agents add <name>`);
+  if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohm agents remove --shared`);
 }
 
 const options = {
@@ -1142,7 +1142,7 @@ async function command(args) {
     const url = `http://127.0.0.1:${port}`;
     await printPairing(layout, apps, url);
     const answering = await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
-    if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohmmmm serve${port === PORT ? '' : ` --port ${port}`}`);
+    if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohm serve${port === PORT ? '' : ` --port ${port}`}`);
     return;
   }
 
@@ -1151,15 +1151,15 @@ async function command(args) {
     if (action === 'list') {
       const browsers = await pairedBrowsers(layout.home);
       for (const each of browsers) console.log([each.id, each.name ?? 'a browser not named yet', `paired ${day(each.made)}`, each.seen ? `last used ${day(each.seen)}` : 'not used since it was paired', each.app ?? ''].filter(Boolean).join('\t'));
-      if (!browsers.length) console.log('No browser is paired. Pair one with: ohmmmm pair');
+      if (!browsers.length) console.log('No browser is paired. Pair one with: ohm pair');
       return;
     }
     if (action === 'forget') {
-      if (!id) throw new Error('Say which browser, by the ID ohmmmm browsers shows: ohmmmm browsers forget <id>');
-      console.log(await forgetBrowser(layout.home, id) ? `Forgotten: that browser can no longer open your home. To use it again, pair it with: ohmmmm pair` : `No paired browser has the ID ${id}. See them with: ohmmmm browsers`);
+      if (!id) throw new Error('Say which browser, by the ID ohm browsers shows: ohm browsers forget <id>');
+      console.log(await forgetBrowser(layout.home, id) ? `Forgotten: that browser can no longer open your home. To use it again, pair it with: ohm pair` : `No paired browser has the ID ${id}. See them with: ohm browsers`);
       return;
     }
-    throw new Error('ohmmmm browsers [list] | forget <id>');
+    throw new Error('ohm browsers [list] | forget <id>');
   }
 
   if (name === 'agents') {
@@ -1167,8 +1167,8 @@ async function command(args) {
     if (action === 'list') {
       const own = await agentKeys(layout.home);
       for (const each of own) console.log(`${each.name}\tkey made ${each.made}`);
-      if (!own.length) console.log('No agent has a key of its own yet. Give one: ohmmmm agents add <name>');
-      if (await readText(join(layout.home, AGENT_KEY)) !== undefined) console.log('(the shared agent key)\tagents using it name themselves; remove it with: ohmmmm agents remove --shared');
+      if (!own.length) console.log('No agent has a key of its own yet. Give one: ohm agents add <name>');
+      if (await readText(join(layout.home, AGENT_KEY)) !== undefined) console.log('(the shared agent key)\tagents using it name themselves; remove it with: ohm agents remove --shared');
       return;
     }
     if (action === 'add') {
@@ -1182,14 +1182,14 @@ async function command(args) {
     if (action === 'remove') {
       if (values.shared) {
         await removeSharedAgentKey(layout.home);
-        console.log('The shared agent key is gone. Agents still using it are shut out; each needs its own: ohmmmm agents add <name>');
+        console.log('The shared agent key is gone. Agents still using it are shut out; each needs its own: ohm agents add <name>');
         return;
       }
-      if (!agent) throw new Error('Say which agent: ohmmmm agents remove <name>, or --shared for the shared agent key');
+      if (!agent) throw new Error('Say which agent: ohm agents remove <name>, or --shared for the shared agent key');
       console.log(await removeAgent(layout.home, agent) ? `${agent}'s key no longer works.` : `${agent} has no key of its own.`);
       return;
     }
-    throw new Error('ohmmmm agents [list] | add <name> [--new-key] | remove <name> | remove --shared');
+    throw new Error('ohm agents [list] | add <name> [--new-key] | remove <name> | remove --shared');
   }
 
   const sqlite = await import('node:sqlite');
@@ -1207,13 +1207,13 @@ async function command(args) {
   const url = `http://127.0.0.1:${at}`;
   console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
   if (shared?.fromOldToken) console.log('The key this home used for everything now opens only agents\' tools: it is the shared agent key. Pair the app again with the link below.');
-  if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohmmmm agents add <name>');
+  if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohm agents add <name>');
   if (renew || values.pair || paired === 0) await printPairing(layout, apps, url, { replace: renew });
-  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${at === PORT ? '' : ` --port ${at}`}. To see or forget them: ohmmmm browsers, or Settings › Vault in the app.`);
+  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohm pair${at === PORT ? '' : ` --port ${at}`}. To see or forget them: ohm browsers, or Settings › Collections in the app.`);
   await printAgents(layout, at);
-  const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
-  if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
-  else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
+  const settings = await siteSettings(config).catch(problem => { console.log(`Posting blocks to your PDS is off: ${problem.message}`); return undefined; });
+  if (settings === null) console.log(`Posting blocks to your PDS is off until there is a site configuration at ${config} (ohm configure). Publishing your website from the Site view does not need it.`);
+  else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Posting blocks to your PDS is off until ohm serve is started with ATPROTO_APP_PASSWORD set. Publishing your website from the Site view does not need it.');
   else if (settings) console.log(`Publishing to ${settings.site}, as ${settings.did}, when you approve it in the app.`);
 }
 

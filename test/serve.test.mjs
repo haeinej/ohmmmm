@@ -309,7 +309,7 @@ test('ohmmmm serve starts inside a home and prints the link that pairs the app',
   assert.ok(printed.includes(`http://localhost:5190/#bridge=http%3A%2F%2F127.0.0.1%3A`), printed);
   assert.match(key, /^ohm_app_/);
   assert.deepEqual(JSON.parse(await readFile(join(layout.home, APP_KEYS), 'utf8')).keys.map(each => each.hash), [createHash('sha256').update(key).digest('hex')]);
-  assert.match(printed, /No agent has a key yet\. To give one: ohmmmm agents add <name>/);
+  assert.match(printed, /No agent has a key yet\. To give one: ohm agents add <name>/);
 
   // Another browser, while it runs: a new link, and the first key still kept.
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { cwd: layout.vault, env: { ...process.env, OHMMMM_HOME: '' }, encoding: 'utf8' });
