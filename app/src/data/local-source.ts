@@ -733,8 +733,6 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       async rendition(): Promise<Blob> { throw notHere("A media file by name") },
     },
     async agenda(): Promise<never> { throw notHere("The agenda") },
-    async listFriends() { return [] },
-    async removeFriend() { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
     /** The member's coding agents and their approvals are kept by the vault service. */
     agents: {
       async list() { return [] },
@@ -742,21 +740,6 @@ export async function createLocalSource(bridge: Bridge, { onProblem = () => {}, 
       async answer(): Promise<never> { throw new DOMException("Agents' approvals are kept by the vault service.", "NotSupportedError") },
       async setState(): Promise<never> { throw new DOMException("Agents' approvals are kept by the vault service.", "NotSupportedError") },
     },
-    /** Asking someone by email is the vault service's. */
-    people: {
-      async askByEmail(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
-      async asked() { return [] },
-      async friendOf() { return [] },
-    },
-    /** Friends ask and are approved on the vault service; the home on this computer keeps none. */
-    friendRequests: {
-      async list() { return [] },
-      async approve(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
-      async decline(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
-      async setChannels(): Promise<never> { throw new DOMException("Friends are kept by the vault service.", "NotSupportedError") },
-    },
-    async listShared() { return [] },
-    async readShared(): Promise<never> { throw missing() },
     async publishPlan() { return emptyPlan() },
   } satisfies HomeSource<"sync"> & {
     home: { handle: string; url: string }; settled(): Promise<void>; unsent(): boolean

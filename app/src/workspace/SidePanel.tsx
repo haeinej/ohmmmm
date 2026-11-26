@@ -22,8 +22,6 @@ import { folderRowId } from "@/data/units"
 import { FilterMenu } from "./FilterMenu"
 import { activeCount, NO_FILTERS } from "./filters"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ConnectionsPanel } from "./ConnectionsPanel"
-import { features } from "@/features"
 import { AgentsPanel } from "./AgentsPanel"
 import { VisibilityMarks } from "./VisibilityMarks"
 import { startChannel } from "./PageActions"
@@ -464,10 +462,10 @@ export function SidePanel() {
   if (view.kind === "feed") return null
   // Beside the site, the home's panel is its content as tiles, and it stays: closing it is not offered.
   // Beside the site, the home panel lives on the canvas itself, as the profile card (SiteView).
-  if (site && (view.kind === "empty" || view.kind === "doc") && (side === "repo" || side === null)) return null
+  // With a site, the home is the Site view's own panel and canvas: the tree never shows beside it.
+  if (site && (side === "repo" || side === null)) return null
   if (side && homeStatus() !== "ready") return null
   if (side === "repo") return <RepoPanel />
-  if (side === "connections" && features.connections) return <ConnectionsPanel />
   if (side === "agents") return <AgentsPanel />
   if (side === "profile") return <ProfilePanel />
   return null

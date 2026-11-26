@@ -130,16 +130,6 @@ How to read each path:
 | F3a | **Let someone in as a friend** | Bell → Agent → *Asking to be friends* → **Review** → Every channel, or choose channels → **Approve**, or **Decline** | They (and their agents) read your friends-only blocks in those channels, until you remove them. Declined: they see nothing, and aren't told | Choose who sees what | *UI only*: only you, signed in to ohm |
 | F4 | What an agent hid | Opening the home with the private layer unlocked | Blocks an agent with a grant hid on their way to private are sealed into the private layer and journalled | Finish narrowing an agent started | *automatic* |
 
-## F′. Connections (rack)
-
-| # | Path | Entry → steps | End state | For | Agent |
-| --- | --- | --- | --- | --- | --- |
-| K1 | **Connections** | Rack → Connections | The side panel lists everyone around you: friends you let in, people who let you in, both ("Friends both ways"), and who you asked, waiting | See your people | *UI only* |
-| K2 | Graph | Connections → the graph button | You in the middle and everyone around you; a solid line is friends both ways, dashed is one way. Click a person for their card | See how you are connected | *UI only* |
-| K3 | **Make friends** | Connections → **Make friends** → their email, a line → **Ask** | They get a request with your name and email, and answer it (F3a). The answer is the same whether or not the email is on ohm; your list shows it as waiting until they let you in | Find a friend | `connections.ask` (consequential: a dialog first) |
-| K4 | What someone shares with you | Click a person who shares with you → a block | The block opens in the main panel to read; it is theirs, so it is never edited | Read what friends share | *UI only* |
-| K5 | **Stop sharing** | A person you let in → **Stop sharing** → confirm | They and their agents stop reading your friends-only blocks | Take someone out | *UI only* · asks first |
-
 ## F″. Agents (rack)
 
 The coding agents that use ohm's tools (the `ohm-vault` MCP server), and every action they wait on. A two-step tool waits here: a yes in the agent's own chat approves nothing. Talking to an agent stays in its own chat. Flow: [agents.md](agents.md).
@@ -153,8 +143,6 @@ The coding agents that use ohm's tools (the `ohm-vault` MCP server), and every a
 | A5 | Disconnect | Agents → an agent → disconnect → confirm; later **Allow again** | ohm's tools refuse it, and what it waited for is declined | Cut an agent off | *UI only* · asks first |
 
 ## G. Profile and settings
-
-Settings › **Friends** lists each friend you let in, with their name, email and the channels they see. **Channels** changes what they see (Every channel, or some; never none), and **Stop sharing** removes them after a dialog. It also says how many are asking, and who you asked.
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
@@ -204,7 +192,6 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
-| `connections.ask` | Asks someone by email to be friends, after the person approves | K3 | consequential | Asked; declining leaves nothing (`NotAllowedError`) |
 | `visibility.preview` | What moving one block would do, by the shared rules | C3a | read-only | Nothing changes |
 | `visibility.move` | Moves one block after the person approves the same dialog as C2 | C2, C3 | consequential | Moved and journalled, or, to or from public, marked and the Publish page opened; declining leaves it as it was (`NotAllowedError`) |
 | `cortex.observe` | Asks to keep an observation about the open block | J5 | consequential: waits for your Approve | An observation, written as the agent's, once you approved |
@@ -246,7 +233,6 @@ These show a notice saying what they will do. Each will become a path above once
 - **Agent features:** ask an agent (from search and from selected text), and generate or visualise.
 - **Version history.**
 - **Publishing from the sample, and through the vault service.** On your home through `ohmmmm serve` it is built (C6, C7).
-- **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
 - **Unlocking on this device:** the private layer and the cortex open once the account app's keys are wired into the workspace (`privateSession`). The cortex also needs the keys package to seal under `ohm-vault/cortex/v1`.
 - **Media upload from the editor:** the media cache requests are in the source (`HomeSource.media`); dropping a picture does not send its bytes yet.

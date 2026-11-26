@@ -82,6 +82,10 @@ function collectionUnits(folder, files) {
       path: join(folder, mtimes.has(file) ? file : channel.path), id: channel.id,
       title: channel.title ?? channel.path.split('/').at(-1), visibility: visibilityOf(channel.path),
       channels: parent ? [parent] : [], updated: [isoOf(mtimes.get(file)), latest].filter(Boolean).sort().at(-1),
+      // How many blocks it holds, here or in a channel inside it, and the newest few by title, for its tile.
+      count: blocks.filter(block => block.channels.some(at => at === channel.path || at.startsWith(`${channel.path}/`))).length,
+      excerpt: blocks.filter(block => block.channels.includes(channel.path)).sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''))
+        .slice(0, 4).map(block => block.title).filter(Boolean).join(' · ') || undefined,
     });
   });
   return [...channels, ...blocks];
@@ -166,6 +170,15 @@ function pageTitle(path, content) {
   const segments = path.split('/');
   return /^index\.(html?|md|mdx|markdown)$/i.test(segments.at(-1)) && segments.length > 1 ? segments.at(-2) : segments.at(-1);
 }
+// What a page says about itself: an HTML page's description, a Markdown page's description property.
+function pageDescription(path, content) {
+  if (typeof content !== 'string') return undefined;
+  const said = /\.html?$/i.test(path)
+    ? (() => { const meta = /<meta[^>]+name=["']description["'][^>]*>/i.exec(content)?.[0]; return meta && /content=["']([^"']*)["']/i.exec(meta)?.[1]; })()
+    : propertiesOf(content).description;
+  const plain = typeof said === 'string' ? unescape(said).replace(/\s+/g, ' ').trim() : '';
+  return plain ? plain.slice(0, EXCERPT_LENGTH) : undefined;
+}
 // The site's name its pages repeat after their own (`collisions — Haein Jung`): the ending most pages share.
 function siteSuffix(titles) {
   const counts = new Map();
@@ -211,6 +224,7 @@ function siteUnits(folder, files, domain) {
       key: `site:${file.path}`, type: 'artifact', kind, root: 'site', path: join(folder, file.path),
       title: title ?? file.path.split('/').at(-1), visibility: 'public', channels: [], updated: isoOf(file.mtime),
       cover: kind === 'image' ? `site:${file.path}` : kind === 'page' ? pageCover(file.path, file.text, domain) : undefined,
+      excerpt: kind === 'page' ? pageDescription(file.path, file.text) : undefined,
     });
   });
 }
@@ -259,11 +273,14 @@ export const sees = (audience, unit) =>
   audience === 'private' || unit.visibility === 'public' || (audience === 'friends' && unit.visibility === 'friends');
 
 // What a feed is made of unless asked for more: your blocks worth seeing. A block with words or a picture,
-// your site's pages, photographs and videos, the websites you kept and the tools built for you. Agents' files, channels, the profile and the wallet are
+// your site's pages, photographs and videos, the websites you kept, the tools built for you, and every
+// channel with something in it. Agents' files, channels, the profile and the wallet are
 // places, not posts; an empty block has nothing to show.
-export const FEED_TYPES = ['block', 'artifact'];
+export const FEED_TYPES = ['block', 'artifact', 'channel'];
 const FEED_ARTIFACTS = ['page', 'image', 'video', 'link', 'tool'];
-const worthSeeing = unit => unit.type === 'artifact' ? FEED_ARTIFACTS.includes(unit.kind) : Boolean(unit.excerpt || unit.cover || unit.kind === 'media');
+const worthSeeing = unit => unit.type === 'artifact' ? FEED_ARTIFACTS.includes(unit.kind)
+  : unit.type === 'channel' ? unit.count > 0
+  : Boolean(unit.excerpt || unit.cover || unit.kind === 'media');
 const inFeed = (unit, types) => (types ? types.includes(unit.type) : FEED_TYPES.includes(unit.type) && worthSeeing(unit));
 
 /**

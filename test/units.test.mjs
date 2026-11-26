@@ -30,7 +30,7 @@ async function home(t) {
   await put(join(layout.site, 'src', 'content', 'post.md'), '---\ntitle: A post on the site\n---\n\nText.\n', '2026-11-24T00:00:00Z');
   await put(join(layout.site, 'public', 'photo.jpg'), 'not really a jpeg');
   await put(join(layout.site, 'writings', 'walk', 'index.html'), '<html><head><title>A walk &amp; a talk — Alice</title></head></html>');
-  await put(join(layout.site, 'writings', 'quiet', 'index.html'), '<html><head><title>Quiet — Alice</title><meta property="og:image" content="https://www.alice.example.com/writings/quiet/cover%20one.webp"></head></html>');
+  await put(join(layout.site, 'writings', 'quiet', 'index.html'), '<html><head><title>Quiet — Alice</title><meta name="description" content="On quiet &amp; noise."><meta property="og:image" content="https://www.alice.example.com/writings/quiet/cover%20one.webp"></head></html>');
   await put(join(layout.site, 'writings', 'untitled', 'index.html'), '<html><body>no title<img src="../media/a.png"></body></html>');
   await put(join(layout.site, 'CNAME'), 'alice.example.com\n');
   await put(join(layout.site, 'writings', 'far', 'index.html'), '<html><head><title>Far</title><meta name="twitter:image" content="https://elsewhere.example.org/x.png"></head></html>');
@@ -79,6 +79,7 @@ test('every part of a home is read as units, each with its path from the top of 
   // A page is named by its <title>, without the site's name every page repeats; an index page with none by its folder.
   assert.equal(by('site:writings/walk/index.html').title, 'A walk & a talk');
   assert.equal(by('site:writings/quiet/index.html').title, 'Quiet');
+  assert.equal(by('site:writings/quiet/index.html').excerpt, 'On quiet & noise.');
   assert.equal(by('site:writings/untitled/index.html').title, 'untitled');
   assert.equal(by('site:google1a2b3c.html'), undefined);
   // A card's cover: what a page says to show when shared, else its first picture; a picture is its own.
@@ -106,7 +107,11 @@ test('the feed is what an audience sees, the latest change first', async t => {
   // Unasked, the feed is your blocks worth seeing: no agents' files, channels, profile or wallet, no empty block.
   await put(join(layout.vault, 'notes', 'empty.md'), '---\ntitle: Nothing yet\n---\n');
   const yours = await readFeed(layout);
-  assert.ok(yours.every(unit => unit.type === 'block' || unit.type === 'artifact'), JSON.stringify(yours.map(unit => unit.type)));
+  assert.ok(yours.every(unit => ['block', 'artifact', 'channel'].includes(unit.type)), JSON.stringify(yours.map(unit => unit.type)));
+  // A channel with something in it is a tile too, with how many it holds and its newest titles.
+  const essays = yours.find(unit => unit.type === 'channel' && unit.title === 'Essays');
+  assert.equal(essays.count, 1);
+  assert.equal(essays.excerpt, 'On slowness');
   assert.ok(!yours.some(unit => unit.title === 'Nothing yet'));
   assert.ok(yours.some(unit => unit.kind === 'image'));
   const friend = await readFeed(layout, { audience: 'friends', types: ['block'] });

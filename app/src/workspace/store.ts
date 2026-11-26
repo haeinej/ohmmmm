@@ -13,8 +13,8 @@ import { cortexFileOf } from "@/data/cortex-document"
 import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
-import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
+import { newOpaqueId } from "@/data/ids"
+import { type BlockRef, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -22,7 +22,6 @@ import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
 import type { CortexWaiting } from "@/data/workspace-model"
-import { features } from "@/features"
 import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
 import { keep, makeSizes, measure } from "@/media/cache"
 
@@ -100,12 +99,10 @@ async function saveChannelProperty(path: string, key: string, value: unknown) {
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "connections" | "agents" | "profile" | null
+export type Side = "repo" | "agents" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
-  /** A block a friend shares with you, read-only. */
-  | { kind: "shared"; owner: string; id: string }
   | { kind: "settings"; tab: SettingsTab }
   /** A unit that is not a block or an agent's file: the profile, the wallet, or a file of the site. */
   | { kind: "unit"; unit: Unit }
@@ -205,15 +202,15 @@ const set = (patch: Partial<State>) => {
 const bump = () => ({ rev: state.rev + 1 })
 
 /**
- * Chooses the home: the vault service (the default, once signed in), a source given directly (tests
- * give a fixture), or null for signed out.
+ * Chooses the home: the folder on this computer through its bridge (main.tsx), a source given directly
+ * (tests give a fixture), or null when no home is open.
  */
-export async function setSource<Master, Sealed>(
-  next: HomeSource | HomeSource<"sync"> | { service: ServiceOptions<Master, Sealed> } | null = null,
+export async function setSource(
+  next: HomeSource | HomeSource<"sync"> | null = null,
   { keepView = false } = {},
 ) {
   set(bump())
-  if (!await selectSource(next && "service" in next ? createServiceSource(next.service) : next)) return
+  if (!await selectSource(next)) return
   usedSlugs.clear()
   for (const doc of [...blocks, ...cortex]) usedSlugs.add(doc.slug)
   await movesOnOpen()
@@ -440,27 +437,6 @@ async function publishBlock(held: { ref: BlockRef; version: string }, block: Doc
 
 // Agents' requests for moves they may not finish, waiting for the member.
 let moveRequests: MoveRequest[] = []
-// People asking to be friends, waiting for the member, as devices wait on a private network.
-let friendRequests: FriendRequest[] = []
-export const waitingFriends = () => friendRequests
-export async function loadFriendRequests() {
-  friendRequests = await live().friendRequests.list()
-  set(bump())
-  return friendRequests
-}
-/** Lets someone who asked into the friends layer, for every channel or only some. Consequential: the person approves in a dialog first. */
-export async function approveFriend(id: string, channels: "*" | string[]) {
-  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
-  await live().friendRequests.approve(id, channels)
-  await loadFriendRequests()
-  return { id, channels }
-}
-export async function declineFriend(id: string) {
-  await live().friendRequests.decline(id)
-  await loadFriendRequests()
-  return { id, declined: true }
-}
-
 // Agents: the member's coding agents, and what they wait for the member to approve in ohm.
 export type Agents = { agents: AgentInfo[]; approvals: AgentApproval[] }
 let agentsWaiting = 0
@@ -485,44 +461,9 @@ export async function setAgentState(agent: string, state: AgentAccess) {
   return { agent, state }
 }
 
-// Connections: the people around you. Friends you let in, people who let you in, and who you asked.
-export type People = { friends: Friend[]; sharers: Sharer[]; asks: Ask[] }
-export async function loadPeople(): Promise<People> {
-  const [friends, sharers, asks] = await Promise.all([live().listFriends(), live().people.friendOf(), live().people.asked()])
-  return { friends, sharers, asks }
-}
-/** Asks someone, by their email, to let you see what they share with friends. Nothing says whether the email is on ohm. */
-export async function askFriend(email: string, message?: string) {
-  const typed = email.trim()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed)) throw new DOMException("Give their email address", "DataError")
-  await live().people.askByEmail(typed, message?.trim() || undefined)
-  return { email: typed.toLowerCase(), asked: true }
-}
-/** Changes which channels one friend sees. Only you, signed in to ohm; wider asks first in the page. */
-export async function setFriendChannels(did: string, channels: "*" | string[]) {
-  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
-  await live().friendRequests.setChannels(did, channels)
-  return { did, channels }
-}
-/** Stops a friend reading your friends layer. Consequential: the person approves in a dialog first. */
-export async function removeFriend(did: string) {
-  await live().removeFriend(did)
-  return { did, removed: true }
-}
-/** What one person shares with you, as block heads. */
-export const sharedBy = (owner: string) => live().listShared(owner)
-/** Opens a block a friend shares with you, read-only, in the main panel. */
-export function openShared(owner: string, id: string) {
-  set({ view: { kind: "shared", owner, id }, ...bump() })
-}
-export const readShared = (owner: string, id: string): Promise<BlockFile> => live().readShared(owner, id)
-
-/** When the home opens: who asks to be a friend, what agents asked for, and sealing what they hid. None keeps the home from opening. */
+/** When the home opens: what agents asked for, and sealing what they hid. Neither keeps the home from opening. */
 async function movesOnOpen() {
   moveRequests = []
-  friendRequests = []
-  // Friends are not shown in the first release (features.ts); their requests are read only when they are.
-  if (features.connections) try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
   pendingSeals.clear()
   try {
     await loadMoveRequests()

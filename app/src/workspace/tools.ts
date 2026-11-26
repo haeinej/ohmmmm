@@ -114,7 +114,7 @@ export function useWorkspaceTools() {
       },
       run: withAgent("Reading the feed", async ({ limit = 20 }: { limit?: number }) => {
         showFeed()
-        const units = await readFeed({ audience: "private", limit })
+        const units = await readFeed({ audience: "friends", limit })
         return {
           items: units.map(unit => ({
             id: `${UNIT_ID}${unit.key}`, title: unit.title ?? unit.path, type: unit.type, where: unitPlace(unit),

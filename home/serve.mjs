@@ -18,6 +18,8 @@
 //   /units          GET every unit in the home: blocks, channels, profile, wallet, agents' files, site artifacts;
 //                   ?in=<folder> gives one level of it, for a tree opened a folder at a time
 //   /units/feed     GET the units an audience sees, the latest change first (?audience, ?type, ?limit, ?before)
+//   /feed/live      GET posts from the accounts the person follows on Bluesky, through Jetstream (home/network.mjs)
+//   /feed/discover  GET posts from a Bluesky feed generator, for Discover
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -73,6 +75,7 @@ import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
 import { readFeed, readLevel, readUnits } from './units.mjs';
+import { discover, liveFollowing } from './network.mjs';
 import { findHome } from './home.mjs';
 import { isSiteRoute, siteRoutes } from './site.mjs';
 
@@ -831,7 +834,7 @@ const isLoopbackOrigin = origin => {
  * without a restart, and a key replaced stops working at once.
  * `config` is the site configuration Publish uses; `env` holds ATPROTO_APP_PASSWORD, read when needed.
  */
-export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home) }) {
+export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home), followingAs = layout.handle }) {
   const allowed = origin => origins.includes(origin) || isLoopbackOrigin(origin);
   // Who signed each request: its key's kind, the agent it names, and the key's own hash, which binds
   // an MCP session to the key that opened it.
@@ -855,6 +858,9 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
     return res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), ...headers }).end(text);
   };
   const said = (res, status, message) => send(res, status, { error: message });
+  // The network feed starts on first use, and Discover is read again at most once a minute.
+  let following = null;
+  let discovered = null;
   const withIndex = async work => {
     const db = await openIndex(layout.vault, { DatabaseSync });
     try { return await work(db); } finally { db.close(); }
@@ -1078,6 +1084,17 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         if (folder.split('/').some(part => part === '..' || part.startsWith('.')) || folder.startsWith('/')) return said(res, 400, 'in is a folder from the top of the home');
         return send(res, 200, { home: layout.handle, ...await readLevel(layout, folder.replace(/\/+$/, '')) });
       }
+      // Posts from the network: other people's, read from public Bluesky, never written to.
+      if (url.pathname === '/feed/live' && req.method === 'GET') {
+        following ??= liveFollowing({ handle: followingAs });
+        await following.start();
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 500);
+        return send(res, 200, { ...following.state(), posts: following.posts(limit) });
+      }
+      if (url.pathname === '/feed/discover' && req.method === 'GET') {
+        if (!discovered || Date.now() - discovered.at > 60_000) discovered = { at: Date.now(), posts: discover({ limit: 60 }) };
+        try { return send(res, 200, { posts: await discovered.posts }); } catch (problem) { discovered = null; return said(res, 502, `Discover did not answer: ${problem.message}`); }
+      }
       if (url.pathname === '/units/feed' && req.method === 'GET') {
         const audience = url.searchParams.get('audience') ?? 'private';
         if (!['private', 'friends', 'public'].includes(audience)) return said(res, 400, 'audience is private, friends or public');
@@ -1152,7 +1169,8 @@ export function listenHome(handler, { port = PORT } = {}) {
 }
 
 // ---- The commands ----
-//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--pair] [--new-keys]
+//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--following <handle>] [--pair] [--new-keys]
+//                --following: the Bluesky account whose follows fill the feed's Following (the home's handle by default)
 //   ohmmmm pair  [--port 8766] [--app <origin>]…      one more browser, while the bridge runs
 //   ohmmmm agents [list] | add <name> [--new-key] [--port 8766] | remove <name> | remove --shared
 //   ohmmmm browsers [list] | forget <id>                the paired browsers, and forgetting one
@@ -1177,7 +1195,7 @@ async function printAgents(layout, port) {
 }
 
 const options = {
-  port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' },
+  port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' }, following: { type: 'string' },
   pair: { type: 'boolean' }, 'new-keys': { type: 'boolean' }, 'new-token': { type: 'boolean' }, 'new-key': { type: 'boolean' }, shared: { type: 'boolean' },
 };
 
@@ -1254,7 +1272,7 @@ async function command(args) {
   const shared = renew ? null : await sharedAgentKey(layout.home);
   const paired = renew ? 0 : (await appKeys(layout.home)).length;
   const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
-  const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
+  const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config, ...(values.following ? { followingAs: values.following.replace(/^@/, '') } : {}) }), { port })
     .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
   const at = server.address().port;
   const url = `http://127.0.0.1:${at}`;

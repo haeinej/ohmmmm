@@ -9,13 +9,11 @@ import { onNotice } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/cn"
 import { ago, clearAll, markRead, record, remove, useNotifications, type NotificationKind } from "./notifications"
-import { approveFriend, approveMoveRequest, declineFriend, declineMoveRequest, loadFriendRequests, loadMoveRequests, open as openDoc, previewMove, report, useWorkspace, waitingFriends, waitingRequests } from "./store"
-import { ChannelPicker, chosen, pickedNothing, type Picked } from "./ChannelPicker"
-import { features } from "@/features"
+import { approveMoveRequest, declineMoveRequest, loadMoveRequests, open as openDoc, previewMove, report, useWorkspace, waitingRequests } from "./store"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { notify } from "@/components/ui/notice"
 import { byId, titleOf } from "@/data/workspace-data"
-import type { FriendRequest, MoveRequest } from "@/data/source"
+import type { MoveRequest } from "@/data/source"
 
 const LAYER = { private: "only you", friends: "friends", public: "everyone" } as const
 
@@ -34,10 +32,8 @@ export function NotificationCenter() {
   const [tab, setTab] = useState<NotificationKind>("agent")
   const [answering, setAnswering] = useState<MoveRequest | null>(null)
   const waiting = waitingRequests()
-  const asking = features.connections ? waitingFriends() : []
-  const [letIn, setLetIn] = useState<{ request: FriendRequest } & Picked | null>(null)
   // Requests are read again whenever the panel opens.
-  useEffect(() => { if (open) { report(loadMoveRequests()); if (features.connections) report(loadFriendRequests()) } }, [open])
+  useEffect(() => { if (open) report(loadMoveRequests()) }, [open])
   const nameOf = (request: MoveRequest) => { const doc = byId(request.block); return doc ? titleOf(doc) : "a block locked on this device" }
   const warningOf = (request: MoveRequest) => { try { return previewMove(request.block, request.to).warning } catch (err) { return (err as Error).message } }
 
@@ -47,7 +43,7 @@ export function NotificationCenter() {
   useEffect(() => { if (open) markRead(tab) }, [open, tab, items])
 
   const unread = (k: NotificationKind) => items.filter(i => i.kind === k && !i.read).length
-  const total = unread("agent") + unread("system") + waiting.length + asking.length
+  const total = unread("agent") + unread("system") + waiting.length
   const status = [agent?.state === "working" && `Agent: ${agent.label}`, unread("agent") && `${unread("agent")} from agents`, unread("system") && `${unread("system")} system`]
     .filter(Boolean).join(" · ") || "All caught up"
   const shown = items.filter(i => i.kind === tab)
@@ -82,22 +78,6 @@ export function NotificationCenter() {
           <div role="status" className="mx-2 mb-1 flex items-center rounded-lg bg-muted px-2 py-2">
             <AgentStatus state={agent.state} label={agent.label} />
           </div>
-        )}
-
-        {tab === "agent" && asking.length > 0 && (
-          <section aria-label="Asking to be friends" className="mx-1.5 mb-1 flex flex-col gap-px">
-            {asking.map(request => (
-              <div key={request.id} className="flex flex-col gap-1.5 rounded-lg bg-muted px-2.5 py-2">
-                <span className="text-body">{request.name || request.did} asks to be your friend</span>
-                <span className="truncate text-small text-muted-foreground">{[request.email, request.did].filter(Boolean).join(" · ")}</span>
-                {request.message && <span className="text-small text-muted-foreground">{request.message}</span>}
-                <div className="flex justify-end gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => report(declineFriend(request.id)).then(() => notify({ message: "Declined. They see nothing.", tone: "info" }))}>Decline</Button>
-                  <Button size="sm" onClick={() => setLetIn({ request, every: true, channels: [] })}>Review</Button>
-                </div>
-              </div>
-            ))}
-          </section>
         )}
 
         {tab === "agent" && waiting.length > 0 && (
@@ -143,26 +123,6 @@ export function NotificationCenter() {
           )}
         </ul>
       </PopoverContent>
-      <Dialog open={!!letIn} onOpenChange={o => !o && setLetIn(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Let {letIn && (letIn.request.name || letIn.request.did)} see your friends-only blocks?</DialogTitle>
-            <DialogDescription>
-              {letIn?.request.email} can read what you share with friends in the channels you choose, and so can their agents. It lasts until you remove them.
-            </DialogDescription>
-          </DialogHeader>
-          {letIn && <ChannelPicker value={letIn} onChange={picked => setLetIn({ ...letIn, ...picked })} />}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setLetIn(null)}>Not now</Button>
-            <Button disabled={!!letIn && pickedNothing(letIn)} onClick={() => {
-              if (!letIn) return
-              const { request, every, channels } = letIn
-              setLetIn(null)
-              report(approveFriend(request.id, chosen(letIn))).then(() => notify({ message: `${request.name || "They"} can now see ${every ? "every channel" : channels.join(", ")}.`, tone: "info" }))
-            }}>Approve</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <Dialog open={!!answering} onOpenChange={o => !o && setAnswering(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

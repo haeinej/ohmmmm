@@ -4,8 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { features } from "@/features"
-import { BotIcon, FileTextIcon, MessageSquareIcon, NewspaperIcon, FolderGitIcon, ImageIcon, LinkIcon, FolderPlusIcon, PlusIcon, SparklesIcon, StickyNoteIcon, UsersIcon, WrenchIcon } from "lucide-react"
+import { BotIcon, FileTextIcon, MessageSquareIcon, NewspaperIcon, FolderGitIcon, ImageIcon, LinkIcon, FolderPlusIcon, PlusIcon, SparklesIcon, StickyNoteIcon, WrenchIcon } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { addLink, addSiteFile, NEW_CHANNEL, NEW_NOTE, NEW_PROMPT } from "@/site/source"
 import { notify } from "@/components/ui/notice"
@@ -64,7 +63,6 @@ export function Rack() {
     <nav aria-label="Workspace" className="flex w-[68px] shrink-0 flex-col items-center gap-2.5 pt-4 pb-1">
       {/* The ohm dot, at the size of an icon, in a slot the size of a button. */}
       <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
-      {features.connections && <RackButton label="Connections" active={side === "connections"} onClick={() => toggleSide("connections")}><RackIcon icon={UsersIcon} /></RackButton>}
       <RackButton label={waiting ? `Agents: ${waiting} waiting for you` : "Agents"} active={side === "agents"} dot={waiting > 0} onClick={() => toggleSide("agents")}><RackIcon icon={BotIcon} /></RackButton>
       {/* The feed: everything in your home, newest first, in the main panel (flows/feed.md). */}
       <RackButton label="Feed" active={view.kind === "feed"} onClick={() => (view.kind === "feed" ? showMain() : showFeed())}><RackIcon icon={NewspaperIcon} /></RackButton>

@@ -490,4 +490,6 @@ test('the bridge serves the home as units, and their feed, to the app only', asy
   assert.deepEqual(notes.json.units.map(unit => unit.title), ['Slow walk']);
   assert.equal((await call('GET', '/units?in=../x', { headers: signed })).status, 400);
   assert.equal((await call('GET', '/units', { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
+  // Other people's posts, from the network, are the person's to read in the app, never an agent's.
+  for (const path of ['/feed/live', '/feed/discover']) assert.equal((await call('GET', path, { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
 });

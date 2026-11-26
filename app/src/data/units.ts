@@ -2,7 +2,7 @@
 // time. With a paired bridge the home folder answers (`/units?in=`); without one, the blocks, channels
 // and agents' files already loaded are turned into the same units here, so the tree is the same view
 // either way. The shape and the rules are the contract's (contract/unit.mjs), never redone here.
-import { excerptOf, feed as feedOf, levelOf, sees as unitSees } from "../../../contract/unit.mjs"
+import { excerptOf, feed as feedOf, folderOf as unitFolder, levelOf, sees as unitSees } from "../../../contract/unit.mjs"
 import { bridgeFetch, currentBridge } from "./bridge"
 import { blocks, byId, channelRecords, cortex } from "./workspace-data"
 import { locationOf, type Audience, type Doc } from "./workspace-model"
@@ -19,10 +19,14 @@ export type Unit = {
   excerpt?: string
   /** What its card shows: an address, `site:<path>` in the site, or `collections:<path>` beside the block. */
   cover?: string
+  /** A channel's: how many blocks it holds, in it or in a channel inside it. */
+  count?: number
 }
 export type UnitFolder = { path: string; title: string; count: number; unit?: Unit }
 export type Level = { folder: string; folders: UnitFolder[]; units: Unit[] }
 
+/** The folder a unit is shown in, as the contract says: a channel's own folder, a skill's skills/, any other its file's. */
+export const folderOf = (unit: Unit) => unitFolder(unit) as string
 export const unitSeenBy = (audience: Audience, unit: Unit) => unitSees(audience, unit) as boolean
 
 // ---- Without a bridge: the units of what is loaded ----
@@ -108,13 +112,14 @@ export function unitPlace(unit: Unit) {
  * The feed (app/flows/feed.md): the units `audience` sees, the latest change first. From the bridge when
  * one is paired and has /units/feed; otherwise from what is loaded, by the contract's own feed().
  */
-export async function readFeed({ audience = "private", limit = 100, before }: { audience?: Audience; limit?: number; before?: string } = {}): Promise<Unit[]> {
+export async function readFeed({ audience = "private", limit = 100, before, types }: { audience?: Audience; limit?: number; before?: string; types?: Unit["type"][] } = {}): Promise<Unit[]> {
   if (currentBridge()) {
     const query = new URLSearchParams({ audience, limit: String(limit), ...(before ? { before } : {}) })
+    for (const type of types ?? []) query.append("type", type)
     const answer = await bridgeFetch(`/units/feed?${query}`).catch(() => null)
     if (answer?.ok) return remember(((await answer.json()) as { units: Unit[] }).units)
   }
-  return remember(feedOf(loadedUnits(), { audience, limit, before }) as Unit[])
+  return remember(feedOf(loadedUnits(), { audience, limit, before, types }) as Unit[])
 }
 
 // ---- From a unit to what opens it ----

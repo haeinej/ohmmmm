@@ -12,15 +12,20 @@ This is step 6 of [docs/plans/units.md](../../docs/plans/units.md): the feed of 
 
 | # | Step | Screen (ohm-ui) | Primary action (forest) | Tool | Annotations | Approval |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Read the feed | the whole page: block tiles on a pannable, zoomable plane, `Empty` when there is nothing | none: each card opens what it shows | `feed.read` | `readOnlyHint`, `untrustedContentHint` | none |
-| 2 | Open a post | the post's own view (editor, profile, site file) | the card | `workspace.open` | `readOnlyHint` | none |
+| 1 | Read the feed | one page of block tiles, scrolled like a website, its zoom the number of columns; `Empty` when there is nothing | none: each card opens what it shows | `feed.read` | `readOnlyHint`, `untrustedContentHint` | none |
+| 2 | Open a tile | a popup over the feed: the editor, the reader, the picture, the tool or the page | the tile | `workspace.open` | `readOnlyHint` | none |
 
 ## What the feed holds
 
-- **Your blocks worth seeing**, newest first: a block with words or a picture, your site's pages, photographs and videos, the websites you kept (the Artifacts channel) and the tools built for you. Agents' files, channels, the profile and the wallet are places, not posts; an empty block has nothing to show. Nothing from the network, and nothing on AT Protocol, for now.
-- It comes from `GET /units/feed` on the bridge (without one, the units already loaded), filtered by **View as**: a friend sees public and friends blocks, anyone public ones. Kept websites and tools are yours alone.
-- **It is a canvas, not a page:** it takes the whole screen, with no side panel, on an endless plane like the site's canvas (`site/Board.tsx`). Drag or scroll to move around, ⌘-scroll or pinch to zoom; the next page loads as the bottom of the tiles comes near.
-- **Each tile is a block's card** from `site/Cards.tsx`: a picture as itself (a page's own picture, from the site's checkout when it is on the site's domain), a writing as its first page in miniature, a tool running, a kept website as its picture or its name. Under it: its title, who made it, when, and who sees it.
+Two tabs.
+
+- **Following:** what you share (public and friends-only, never what only you see) with the posts of the accounts you follow on Bluesky. First you, as your identity card, and your shared channels; then your blocks and their posts together, newest first. Whatever your coding agent made for you is yours, so it shows as yours. People are shown by their names, never their handles.
+- **Discover:** tech and AI, for now: posts from four public feed generators (Tech by Flipboard, AI/ML Feed: Blend, Developers, MLSky), blended, newest first.
+- Your units come from `GET /units/feed?audience=friends` (anyone viewing: `public`); posts from `GET /feed/live` (Jetstream, for the account `ohm serve --following` names, the home's handle by default) and `GET /feed/discover`. Posts from the network are other people's words: shown as theirs, opened to read with a way to Bluesky, and never handed to an agent (`feed.read` returns only your own).
+
+- **It is a page, like your website:** it fills the window and scrolls down; the next page loads as you near the bottom. **Zoom is how many columns**, as on haeinjung.com: − for more and smaller, + for fewer and larger (one to eight), and ⌘-scroll or a pinch does the same; it starts at what the window holds. No side panel beside it, and no hover on the tiles.
+- **Each tile is a block's card** from `site/Cards.tsx`: a picture as itself, a writing (a site page) as its text in miniature, a short post as its words, a tool running, a kept website as its picture or its name, a channel as its name and titles. Under it: its title, who made it, when, and who sees it.
+- **A tile opens in a popup over the feed,** as the site's canvas opens a block: a block in the editor, a site page in the reader, a photograph as itself, a tool running, a kept website in a frame, a channel as its blocks, your profile as your profile. The feed stays beneath.
 
 ## Tools
 
