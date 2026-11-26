@@ -15,6 +15,9 @@
 //   /vault/keys        GET the paired browsers and the agents with keys; POST /self names this browser;
 //                      DELETE /<id> forgets one browser
 //   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
+//   /units          GET every unit in the home: blocks, channels, profile, wallet, agents' files, site artifacts;
+//                   ?in=<folder> gives one level of it, for a tree opened a folder at a time
+//   /units/feed     GET the units an audience sees, the latest change first (?audience, ?type, ?limit, ?before)
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -69,6 +72,7 @@ import { createVault } from '../vault/vault/vault.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
+import { readFeed, readLevel, readUnits } from './units.mjs';
 import { findHome } from './home.mjs';
 import { isSiteRoute, siteRoutes } from './site.mjs';
 
@@ -1067,6 +1071,20 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
             vault: layout.vault, path: asked.path, replaces, to: asked.to, config, password: env.ATPROTO_APP_PASSWORD,
           })));
         } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/units' && req.method === 'GET') {
+        const folder = url.searchParams.get('in');
+        if (folder === null) return send(res, 200, { home: layout.handle, units: await readUnits(layout) });
+        if (folder.split('/').some(part => part === '..' || part.startsWith('.')) || folder.startsWith('/')) return said(res, 400, 'in is a folder from the top of the home');
+        return send(res, 200, { home: layout.handle, ...await readLevel(layout, folder.replace(/\/+$/, '')) });
+      }
+      if (url.pathname === '/units/feed' && req.method === 'GET') {
+        const audience = url.searchParams.get('audience') ?? 'private';
+        if (!['private', 'friends', 'public'].includes(audience)) return said(res, 400, 'audience is private, friends or public');
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 500);
+        const types = url.searchParams.getAll('type');
+        const before = url.searchParams.get('before') ?? undefined;
+        return send(res, 200, { home: layout.handle, audience, units: await readFeed(layout, { audience, limit, before, ...(types.length ? { types } : {}) }) });
       }
       if (url.pathname === '/vault/files' && req.method === 'GET') {
         const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });

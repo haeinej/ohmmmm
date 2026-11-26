@@ -1,0 +1,59 @@
+{
+  "lexicon": 1,
+  "id": "com.ohmmmm.unit",
+  "description": "Anything in a person's home, as every part of ohm reads it: a block, a channel, the profile and its wallet, an agent's observation, skill, tool or memory, or a file of the site. The file stays where it is and its own reader keeps its rules; a unit is the envelope they all return. Blocks and channels keep their own records (com.ohmmmm.vault.block, com.ohmmmm.vault.channel), named by nsid. Units are read from the home's folder and never written to a PDS; publishing a block makes a com.ohmmmm.post.",
+  "defs": {
+    "main": {
+      "type": "object",
+      "required": ["key", "type", "nsid", "root", "path", "visibility"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "maxLength": 3000,
+          "description": "Names the unit across the home. A block or a channel keeps its node key (block:<id>, channel:<id or path>); a wallet is wallet:<address>; any other unit is <root>:<path>."
+        },
+        "type": {
+          "type": "string",
+          "knownValues": ["block", "channel", "profile", "wallet", "observation", "skill", "tool", "memory", "artifact"]
+        },
+        "kind": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "What the unit is within its type: a block's kind (text, link, media, …), a channel's kind, or an artifact's (page, image, video, audio, document, data)."
+        },
+        "nsid": {
+          "type": "string",
+          "format": "nsid",
+          "description": "The lexicon of the unit's own record: com.ohmmmm.vault.block, com.ohmmmm.vault.channel, or com.ohmmmm.unit for a unit with no record of its own."
+        },
+        "root": {
+          "type": "string",
+          "knownValues": ["collections", "profile", "agents", "site"],
+          "description": "The part of the home the unit is in, as people see it."
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 3000,
+          "description": "The unit's file, from the top of the home, such as collections/writing/collisions.md. A wallet's is its profile's."
+        },
+        "id": { "type": "string", "maxLength": 300, "description": "The unit's own ID when it has one: a block's or a channel's TID, an observation's ID, a skill's or a tool's name, a wallet's address." },
+        "title": { "type": "string", "maxGraphemes": 300, "maxLength": 3000 },
+        "visibility": {
+          "type": "string",
+          "knownValues": ["public", "friends", "private"],
+          "description": "Who may see it. A block says its own; the profile, the wallet and the site are public; agents' files are private."
+        },
+        "channels": {
+          "type": "array",
+          "maxLength": 64,
+          "description": "The channels the unit is in, home channel first. For a channel, its parent.",
+          "items": { "type": "string", "maxLength": 300 }
+        },
+        "by": { "type": "string", "maxLength": 100, "description": "Who made it: me, or agent:<name>." },
+        "origin": { "type": "string", "maxLength": 2000, "description": "Where the original lives when it is not this file." },
+        "created": { "type": "string", "format": "datetime" },
+        "updated": { "type": "string", "format": "datetime", "description": "When it last changed: the file's own updated property, or else when the file was last written." }
+      }
+    }
+  }
+}

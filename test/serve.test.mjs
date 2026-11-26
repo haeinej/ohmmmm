@@ -473,3 +473,21 @@ test('who sees a block is changed by the person, over the version read; an agent
   const mine = JSON.parse((await vault.send('tools/call', { name: 'vault_requests' })).json.result.content[0].text);
   assert.deepEqual(mine.requests.map(each => each.status), ['declined', 'approved']);
 });
+
+test('the bridge serves the home as units, and their feed, to the app only', async t => {
+  const { call, signed, agent } = await setUp(t);
+  const all = await call('GET', '/units', { headers: signed });
+  assert.equal(all.status, 200);
+  const walk = all.json.units.find(unit => unit.title === 'Slow walk');
+  assert.equal(walk.path, 'collections/notes/walk.md');
+  assert.ok(all.json.units.some(unit => unit.root === 'agents'));
+  const mine = await call('GET', '/units/feed?type=block&limit=5', { headers: signed });
+  assert.deepEqual(mine.json.units.map(unit => unit.title), ['Slow walk']);
+  // The walk says no visibility, so it is private: no one else's feed has it.
+  assert.deepEqual((await call('GET', '/units/feed?audience=public&type=block', { headers: signed })).json.units, []);
+  assert.equal((await call('GET', '/units/feed?audience=everyone', { headers: signed })).status, 400);
+  const notes = await call('GET', '/units?in=collections/notes', { headers: signed });
+  assert.deepEqual(notes.json.units.map(unit => unit.title), ['Slow walk']);
+  assert.equal((await call('GET', '/units?in=../x', { headers: signed })).status, 400);
+  assert.equal((await call('GET', '/units', { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
+});

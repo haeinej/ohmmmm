@@ -14,6 +14,11 @@ People see one product, **ohm** (never "ohmmmm"), and four folders in their ohm:
 - **Handle:** the person's AT Protocol handle, which names the home. The DID is in the cortex's identity, not in folder names.
 - **Bridge:** `ohm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohm pair`) prints, which holds that browser's **app key**. Each agent has its own **agent key** (`ohm agents add <name>`), which reaches only the MCP endpoints and makes every session it opens that agent ([docs/serve.md](serve.md)).
 
+## Units
+
+- **Unit:** anything in a home, as every part of ohm reads it: a block, a channel, the profile and its **wallet**, an agent's observation, skill, tool or memory, or an **artifact** (a content file of the site). Each keeps its file and its own reader; the unit is the envelope they all return, `com.ohmmmm.unit`, with its `path` from the top of the home ([contract/unit.mjs](../contract/unit.mjs), [plans/units.md](plans/units.md)).
+- **Feed:** the units someone sees, the latest change first. You see every unit, a friend public and friends units, everyone public ones.
+
 ## In the vault
 
 - **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post**: a standard.site document (`site.standard.document`) in the member's repository, with the post itself inside as `com.ohmmmm.post` content. The member's website is its **publication** (`site.standard.publication`).
