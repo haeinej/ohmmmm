@@ -17,6 +17,9 @@
 // The bridge (home/serve.mjs) answers these routes only for an app key, after its Host, Origin and
 // key checks; agents' keys never reach them, so no agent pushes or deploys.
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { boardOf, saveBoard } from './site-board.mjs';
+import { toolPage, toolsOf } from './site-tools.mjs';
+import { promptRuns } from './site-runs.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -36,6 +39,8 @@ export const SAVES = '.ohm/saves.jsonl';
 export const KEPT = '.ohm/kept';
 export const DEPLOYS = '.ohm/deploys.jsonl';
 export const CHANNELS = '.ohm/channels.json';
+/** Pages that aren't the person's, kept as links: ohm's own, never tracked by git, never published. */
+export const LINKS = '.ohm/links.json';
 export const MAX_FILE = 5 * 1024 * 1024;
 
 export class SiteProblem extends Error {
@@ -165,6 +170,109 @@ export async function saveFile(dir, path, bytes, { replaces, via = 'editor', fro
   await writeFile(full, bytes);
   const saved = await logSave(dir, { kind: 'save', path, before, after, via, ...(from ? { from } : {}) });
   return { path, etag: etagOf(bytes), save: saved };
+}
+
+/** A new file added from the app (a photograph, a video) is up to 25 MB. */
+export const MAX_MEDIA = 25 * 1024 * 1024;
+const MEDIA = /\.(?:jpe?g|png|gif|webp|avif|heic|mp4|mov|webm)$/i;
+
+/**
+ * Add a new file to the site, as a save: a picture or a video, at a path no file has yet. It is written,
+ * told to git (`git add`, so the site counts it as its own), and logged like any save, with no file
+ * before it. Nothing is committed or published: that is Publish.
+ */
+export async function addFile(dir, path, bytes) {
+  if (!safePath(path)) throw new SiteProblem(400, 'A new file\'s place is a path in the site, with nothing hidden');
+  if (!MEDIA.test(path)) throw new SiteProblem(415, 'Only a picture or a video can be added here');
+  if (bytes.length === 0) throw new SiteProblem(400, 'The file is empty');
+  if (bytes.length > MAX_MEDIA) throw new SiteProblem(413, 'A file added here is up to 25 MB');
+  const full = join(dir, path);
+  if (tracked(dir).has(path) || existsSync(full)) throw new SiteProblem(409, `${path} is already there`);
+  await mkdir(dirname(full), { recursive: true });
+  await writeFile(full, bytes);
+  try { await git(dir, 'add', '--', path); } catch (problem) { await rm(full, { force: true }); throw new SiteProblem(409, told(problem)); }
+  const after = await keep(dir, bytes);
+  return { path, etag: etagOf(bytes), save: await logSave(dir, { kind: 'add', path, before: null, after, via: 'add' }) };
+}
+
+/** The links kept with the site: `[{ id, url, title, description, image, site, saved }]`, newest first. */
+export async function linksOf(dir) {
+  try { return (JSON.parse(await readFile(join(dir, LINKS), 'utf8')).links ?? []).filter(l => typeof l?.url === 'string'); } catch { return []; }
+}
+async function keepLinks(dir, links) {
+  await mkdir(join(dir, OHM), { recursive: true });
+  await writeFile(join(dir, `${LINKS}.tmp`), `${JSON.stringify({ links }, null, 2)}\n`);
+  await rename(join(dir, `${LINKS}.tmp`), join(dir, LINKS));
+}
+const attr = (html, re) => re.exec(html)?.[1]?.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim() || '';
+const meta = (html, key) => attr(html, new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=["']([^"']*)["']`, 'i'))
+  || attr(html, new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${key}["']`, 'i'));
+
+/**
+ * Keep a web page that isn't the person's as a link: its address, and what the page says about itself
+ * (title, description, picture), read once now. Nothing is copied into the site or published; if the
+ * page can't be read, the link is kept with its address alone.
+ */
+export async function addLink(dir, address, { fetch: get = globalThis.fetch } = {}) {
+  let url;
+  try { url = new URL(String(address).trim()); } catch { throw new SiteProblem(400, 'That isn\'t a web address'); }
+  if (!/^https?:$/.test(url.protocol)) throw new SiteProblem(400, 'A link is a web address, starting with http or https');
+  const links = await linksOf(dir);
+  const had = links.find(l => l.url === url.href);
+  if (had) return had;
+  let html = '';
+  let frameable = false;
+  try {
+    const answer = await get(url.href, { signal: AbortSignal.timeout(8000), redirect: 'follow', headers: { Accept: 'text/html' } });
+    if (answer.ok && /html/i.test(answer.headers.get('content-type') ?? '')) html = (await answer.text()).slice(0, 1_000_000);
+    // Whether the page lets itself be shown inside another: no X-Frame-Options, no frame-ancestors that refuse.
+    const xfo = answer.headers.get('x-frame-options'), csp = answer.headers.get('content-security-policy') ?? '';
+    const ancestors = /frame-ancestors([^;]*)/i.exec(csp)?.[1]?.trim();
+    frameable = !xfo && (!ancestors || /\*/.test(ancestors));
+  } catch { /* kept with its address alone */ }
+  const image = meta(html, 'og:image') || meta(html, 'twitter:image');
+  const link = {
+    id: sha(Buffer.from(url.href)).slice(0, 12), url: url.href,
+    title: meta(html, 'og:title') || attr(html, /<title[^>]*>([^<]*)<\/title>/i) || url.hostname,
+    description: meta(html, 'og:description') || meta(html, 'description'),
+    image: image ? new URL(image, url).href : '', site: url.hostname.replace(/^www\./, ''), frameable, saved: new Date().toISOString(),
+  };
+  await keepLinks(dir, [link, ...links]);
+  return link;
+}
+export async function removeLink(dir, id) {
+  const links = await linksOf(dir);
+  await keepLinks(dir, links.filter(l => l.id !== id));
+  return { removed: links.length - (await linksOf(dir)).length };
+}
+
+/**
+ * The site's pull requests, read with the person's own `gh` on this computer: ohm holds no GitHub
+ * token and changes nothing. Their coding agent opens, updates and merges them; this only shows them.
+ */
+const gh = async (dir, ...args) => {
+  try { return (await run('gh', args, { cwd: dir, ...LONG })).stdout; } catch (problem) {
+    if (problem.code === 'ENOENT') throw new SiteProblem(501, 'GitHub\'s gh isn\'t on this computer. Pull requests show here once your coding agent\'s gh is installed and signed in.');
+    throw new SiteProblem(502, String(problem.stderr || problem.message).trim().split('\n')[0] || 'gh could not read the pull requests');
+  }
+};
+export async function pullsOf(dir) {
+  const list = JSON.parse(await gh(dir, 'pr', 'list', '--state', 'all', '--limit', '30', '--json', 'number,title,state,isDraft,headRefName,baseRefName,updatedAt,url,author,body'));
+  // What it is about, in a line: the first words of its description, not the whole of it.
+  const summary = body => String(body ?? '').replace(/<!--[\s\S]*?-->/g, '').replace(/^#{1,6} .*$/gm, '').split(/\n\s*\n/).map(p => p.replace(/^\s*[-*]\s+/gm, '').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim()).find(Boolean)?.slice(0, 200) ?? '';
+  return { pulls: list.map(({ body, ...p }) => ({ ...p, author: p.author?.login ?? '', summary: summary(body) })) };
+}
+export async function pullOf(dir, number) {
+  const n = Number(number);
+  if (!Number.isInteger(n) || n < 1) throw new SiteProblem(400, 'Say which pull request, by its number');
+  const pr = JSON.parse(await gh(dir, 'pr', 'view', String(n), '--json', 'number,title,state,isDraft,headRefName,baseRefName,updatedAt,url,author,body,files,comments,statusCheckRollup'));
+  const diff = await gh(dir, 'pr', 'diff', String(n), '--color', 'never').catch(() => '');
+  return {
+    ...pr, author: pr.author?.login ?? '',
+    comments: (pr.comments ?? []).map(c => ({ author: c.author?.login ?? '', body: c.body, at: c.createdAt })),
+    checks: (pr.statusCheckRollup ?? []).map(c => ({ name: c.name ?? c.context ?? '', state: c.conclusion || c.state || c.status || '' })),
+    diff: diff.slice(0, 400_000),
+  };
 }
 
 /** Move or rename a tracked file, as a save: git is told (`git mv`), nothing is committed. */
@@ -315,11 +423,18 @@ export async function treeOf(dir) {
 
 // ---- Own channels and the profile ----
 
-async function ownChannels(dir) {
+export async function ownChannels(dir) {
   try {
     const kept = JSON.parse(await readFile(join(dir, CHANNELS), 'utf8'));
     return { channels: Array.isArray(kept.channels) ? kept.channels : [], colors: kept.colors ?? {} };
   } catch { return { channels: [], colors: {} }; }
+}
+
+/** Keep the person's own channels and colours (`.ohm/channels.json`). */
+export async function keepOwnChannels(dir, own) {
+  await mkdir(join(dir, OHM), { recursive: true });
+  await writeFile(join(dir, CHANNELS), `${JSON.stringify(own, null, 2)}\n`);
+  return own;
 }
 
 const FIELDS = ['name', 'image', 'handle', 'did', 'wallet', 'color'];
@@ -513,8 +628,10 @@ export const isSiteRoute = pathname => SITE_PATH.test(pathname);
  * The site's routes for the bridge. `send`, `said`, `body` and `json` are the bridge's own helpers.
  * Returns a handler that answers a request under /site and resolves true, or false for none.
  */
-export function siteRoutes({ layout, send, said, body }) {
+export function siteRoutes({ layout, send, said, body, live, runs: given }) {
   const dir = layout.site;
+  // Prompt cards run with Claude Code from the canvas (home/site-runs.mjs).
+  const runs = given ?? promptRuns({ dir, live });
   const connected = () => existsSync(join(dir, '.git'));
   const json = async req => { try { return JSON.parse((await body(req, 1_000_000)).toString('utf8') || '{}'); } catch { return undefined; } };
   const etag = req => req.headers['if-match'] === undefined ? undefined : String(req.headers['if-match']).replace(/^W\//, '');
@@ -641,6 +758,61 @@ export function siteRoutes({ layout, send, said, body }) {
     if (path === '/site/restore' && req.method === 'POST') {
       const sent = (await json(req)) ?? {};
       await answer(res, () => restoreFile(dir, { path: sent.path, hash: sent.hash, commit: sent.commit }));
+      return true;
+    }
+    // Live: every change to the site folder, every agent's focus and the person's pick, as they happen,
+    // one JSON line each, for as long as the app keeps the request open.
+    if (path === '/site/events' && req.method === 'GET' && live) {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      res.write('{"type":"hello"}\n');
+      const stop = live.listen(event => res.write(`${JSON.stringify(event)}\n`));
+      const beat = setInterval(() => res.write('{"type":"beat"}\n'), 25000);
+      req.on('close', () => { clearInterval(beat); stop(); });
+      return true;
+    }
+    // The canvas, kept in the home: read it, save it (from the app), and say what is chosen on it.
+    if (path === '/site/board') {
+      if (req.method === 'GET') return send(res, 200, await boardOf(dir), { 'Cache-Control': 'no-store' }), true;
+      // Each app window says which it is, so the others take its change and it doesn't take its own back.
+      if (req.method === 'PUT') { const sent = await json(req); const window_ = String(sent?.window ?? '').replace(/[^a-z0-9]/gi, '').slice(0, 16); return await answer(res, () => saveBoard(dir, sent?.cards, { by: window_ ? `app:${window_}` : 'app', live, arrows: sent?.arrows })), true; }
+    }
+    // Internal tools: the list, and one tool's page (the app runs it sandboxed).
+    if (path === '/site/tools' && req.method === 'GET') return send(res, 200, { tools: await toolsOf(dir) }, { 'Cache-Control': 'no-store' }), true;
+    if (path === '/site/tool' && req.method === 'GET') {
+      try { return send(res, 200, { html: await toolPage(dir, url.searchParams.get('name')) }, { 'Cache-Control': 'no-store' }), true; }
+      catch (problem) { return said(res, problem.status ?? 500, problem.message), true; }
+    }
+    if (path === '/site/prompt/run' || path === '/site/prompt/stop') {
+      if (req.method !== 'POST') return said(res, 405, 'POST { id }'), true;
+      const id = String((await json(req))?.id ?? '');
+      try {
+        if (path === '/site/prompt/stop') return send(res, 200, runs.stop(id)), true;
+        const { done, ...started } = await runs.run(id); void done;
+        return send(res, 200, started), true;
+      } catch (problem) { if (problem.status) return said(res, problem.status, problem.message), true; throw problem; }
+    }
+    if (path === '/site/agents' && req.method === 'GET' && live) return send(res, 200, { agents: live.agents() }, { 'Cache-Control': 'no-store' }), true;
+    if (path === '/site/selection' && req.method === 'PUT' && live) { const sent = await json(req); return send(res, 200, { selection: live.setSelection(sent?.ids) }), true; }
+    // What the person pointed at in the page, for their agent to read (`site_pointed`).
+    if (path === '/site/pointed' && live) {
+      if (req.method === 'PUT') { const sent = await json(req); return send(res, 200, { pointed: live.setPointed(sent) }), true; }
+      if (req.method === 'GET') return send(res, 200, { pointed: live.pointed() }, { 'Cache-Control': 'no-store' }), true;
+    }
+    // Pull requests, read only, with the person's own gh.
+    if (path === '/site/pulls' && req.method === 'GET') return await answer(res, () => pullsOf(dir)), true;
+    if (path === '/site/pull' && req.method === 'GET') return await answer(res, () => pullOf(dir, url.searchParams.get('number'))), true;
+    // Links: pages that aren't the person's, kept beside the site, never in it.
+    if (path === '/site/links') {
+      if (req.method === 'GET') return send(res, 200, { links: await linksOf(dir) }, { 'Cache-Control': 'no-store' }), true;
+      if (req.method === 'POST') { const sent = await json(req); return await answer(res, () => addLink(dir, sent?.url ?? '')), true; }
+      if (req.method === 'DELETE') return await answer(res, () => removeLink(dir, url.searchParams.get('id') ?? '')), true;
+      return send(res, 405, undefined, { Allow: 'GET, POST, DELETE' }), true;
+    }
+    // A new picture or video, sent as its bytes, to be kept at `?path=` in the site.
+    if (path === '/site/add' && req.method === 'POST') {
+      let bytes;
+      try { bytes = await body(req, MAX_MEDIA); } catch { return said(res, 413, 'A file added here is up to 25 MB'), true; }
+      await answer(res, () => addFile(dir, url.searchParams.get('path') ?? '', bytes));
       return true;
     }
     if (path === '/site/move' && req.method === 'POST') {

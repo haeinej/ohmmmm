@@ -336,3 +336,70 @@ export async function restoreVersion(input: { path: string; hash?: string; commi
   await asked(await bridgeFetch("/site/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }))
   saved()
 }
+
+/** The rack's + asks for a new channel (the home panel names it) or a note on the canvas. */
+export const NEW_CHANNEL = "ohm:new-channel"
+export const NEW_NOTE = "ohm:new-note"
+/** The rack's + asks for a prompt to an agent, on the canvas. */
+export const NEW_PROMPT = "ohm:new-prompt"
+
+/** Add a new picture or video to the site at `path`, as a save (`POST /site/add`): nothing is published. */
+export async function addSiteFile(path: string, file: Blob): Promise<string> {
+  const res = await bridgeFetch(`/site/add?path=${encodeURIComponent(path)}`, { method: "POST", body: file })
+  if (!res.ok) throw new EditProblem(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "The file couldn't be added")
+  saved()
+  return path
+}
+
+/** A page that isn't the person's, kept as a link beside the site (`/site/links`): never in git, never published. */
+export type SiteLink = { id: string; url: string; title: string; description: string; image: string; site: string; saved: string
+  /** Whether its site lets it be shown inside another page: then it is shown live, as your website is. */
+  frameable?: boolean }
+export const LINKS_CHANGED = "ohm:site-links"
+export async function readLinks(): Promise<SiteLink[]> {
+  const res = await bridgeFetch("/site/links", { cache: "no-store" })
+  if (!res.ok) return []
+  return ((await res.json()) as { links: SiteLink[] }).links
+}
+export async function addLink(url: string): Promise<SiteLink> {
+  const res = await bridgeFetch("/site/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) })
+  const out = await res.json().catch(() => null)
+  if (!res.ok) throw new EditProblem((out as { error?: string } | null)?.error ?? "The link couldn't be kept")
+  window.dispatchEvent(new CustomEvent(LINKS_CHANGED))
+  return out as SiteLink
+}
+export async function removeLink(id: string): Promise<void> {
+  await bridgeFetch(`/site/links?id=${encodeURIComponent(id)}`, { method: "DELETE" })
+  window.dispatchEvent(new CustomEvent(LINKS_CHANGED))
+}
+/** The rack's + asks for a link to keep. */
+export const NEW_LINK = "ohm:new-link"
+
+/** The site's pull requests, read with the person's own gh through the bridge: shown, never changed here. */
+export type SitePull = { number: number; title: string; state: string; isDraft: boolean; headRefName: string; baseRefName: string; updatedAt: string; url: string; author: string; summary?: string }
+export type SitePullDetail = SitePull & { body: string; files: { path: string; additions: number; deletions: number }[]; comments: { author: string; body: string; at: string }[]; checks: { name: string; state: string }[]; diff: string }
+export async function readPulls(): Promise<SitePull[]> {
+  const res = await bridgeFetch("/site/pulls", { cache: "no-store" })
+  const out = await res.json().catch(() => null)
+  if (!res.ok) throw new Error((out as { error?: string } | null)?.error ?? "Pull requests couldn't be read")
+  return (out as { pulls: SitePull[] }).pulls
+}
+export async function readPull(number: number): Promise<SitePullDetail> {
+  const res = await bridgeFetch(`/site/pull?number=${number}`, { cache: "no-store" })
+  const out = await res.json().catch(() => null)
+  if (!res.ok) throw new Error((out as { error?: string } | null)?.error ?? "The pull request couldn't be read")
+  return out as SitePullDetail
+}
+
+/** An internal tool an agent built: one HTML page kept in the home, run sandboxed (`/site/tools`). */
+export type SiteTool = { name: string; title: string; description: string; changed: string; /** Where it lives: `<home>/tools/<name>`. */ folder: string }
+export const TOOLS_CHANGED = "ohm:site-tools"
+export async function readTools(): Promise<SiteTool[]> {
+  const res = await bridgeFetch("/site/tools", { cache: "no-store" }).catch(() => null)
+  return res?.ok ? ((await res.json()) as { tools: SiteTool[] }).tools : []
+}
+export async function readToolPage(name: string): Promise<string> {
+  const res = await bridgeFetch(`/site/tool?name=${encodeURIComponent(name)}`, { cache: "no-store" })
+  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "The tool couldn't be read")
+  return ((await res.json()) as { html: string }).html
+}

@@ -26,7 +26,9 @@ import { PlusMenu, SlashMenu } from "@/editor/InsertMenu"
 import { BlockMenu, pill, pillButton, ToolButton, WebImage } from "@/editor/PageEditor"
 import { SelectionToolbar } from "@/editor/SelectionToolbar"
 import { TableControls } from "@/editor/TableControls"
-import { addressOf, plain, readArticle, type Change, type SiteArticle, type SiteItem } from "./source"
+import { resolveFrom } from "@/viewers/MarkdownView"
+import "@/viewers/markdown.css"
+import { addressOf, plain, readArticle, siteUrl, type Change, type SiteArticle, type SiteItem } from "./source"
 
 /** What each top-level block of the editor says, in order. */
 function blocksOf(json: { content?: unknown[] }) {
@@ -48,16 +50,24 @@ export function ArticleView({ item, channel, onSave }: {
   /** Save one change to the block's page. The Site view's own handler, shared with its tools. */
   onSave(page: string, change: Change): Promise<unknown>
 }) {
-  const [article, setArticle] = useState<SiteArticle | null>(null)
+  // The article is kept with the path it was read for, so a block opened next never starts its
+  // editor with the block before's writing.
+  const [read, setRead] = useState<{ path: string; article: SiteArticle } | null>(null)
   const [failed, setFailed] = useState("")
   useEffect(() => {
-    setArticle(null); setFailed("")
+    setFailed("")
     // A photograph has no writing of its own: its block holds the picture.
-    if (item.kind === "image") return setArticle({ title: item.title, details: "", markdown: `![${item.title}](${addressOf(item.path)})` })
-    readArticle(item.path).then(setArticle, e => setFailed((e as Error).message))
+    if (item.kind === "image") return setRead({ path: item.path, article: { title: item.title, details: "", markdown: `![${item.title}](${siteUrl(item.path)})` } })
+    let current = true
+    // Pictures are written at the site's own addresses (`/writings/…` or `../x.jpg`); here they are read from the site folder.
+    const local = (src: string) => siteUrl(src.startsWith("/") ? src.slice(1) : resolveFrom(item.path, src))
+    readArticle(item.path).then(article => { if (current) setRead({ path: item.path, article: { ...article,
+      markdown: article.markdown.replace(/(!\[[^\]]*\]\()<?((?!https?:|data:|\/site\/)[^)\s>]+)>?/g, (_, head, src) => `${head}${local(src)}`) } }) }, e => { if (current) setFailed((e as Error).message) })
+    return () => { current = false }
   }, [item.path, item.kind, item.title])
   if (failed) return <p className="p-8 text-small text-muted-foreground">{failed}</p>
-  if (!article) return <div className="flex-1" aria-busy />
+  if (read?.path !== item.path) return <div className="flex-1" aria-busy />
+  const article = read.article
   return <Writing key={item.path} item={item} channel={channel} article={article} onSave={onSave} />
 }
 
@@ -84,7 +94,8 @@ function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: 
     ],
     content: article.markdown,
     contentType: "markdown",
-    editorProps: { attributes: { class: "ohm-prose", "aria-label": article.title } },
+    // The same Markdown look as the preview (viewers/markdown.css), so what is written here reads as it will be shown.
+    editorProps: { attributes: { class: "ohm-prose ohm-markdown", "aria-label": article.title } },
     // What the block said when it opened, read once the Markdown is in the editor.
     onCreate: ({ editor: e }) => { first.current = blocksOf(e.getJSON()) },
     onUpdate: ({ editor: e }) => setChanged(blocksOf(e.getJSON()).join("\n") !== first.current.join("\n")),
@@ -116,13 +127,7 @@ function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: 
   return (
     <div className="relative flex size-full min-h-0 flex-col bg-card">
       {/* Toolbar: what the block is and where it is filed, then the inserts. */}
-      <div className="flex h-14 shrink-0 items-center gap-1.5 px-3">
-        <div className={cn(pill, "h-9 gap-1.5 ps-3 pe-3 text-small text-muted-foreground")} title={item.path}>
-          <Icon icon={KIND[item.kind].icon} size="sm" />
-          <span className="truncate">{channel}</span>
-          <span aria-hidden>/</span>
-          <span className="max-w-48 truncate font-medium text-foreground">{article.title}</span>
-        </div>
+      <div data-article-toolbar className="flex h-14 shrink-0 items-center gap-1.5 px-3">
         {writing && (
           <div className={pill}>
             <ToolButton label="Text" icon={TypeIcon} onClick={() => insertText(editor)} />
@@ -142,7 +147,7 @@ function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: 
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">
+        <div data-article-page className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">
           <h1 className="text-h2 font-semibold tracking-tight break-words">{article.title}</h1>
           {article.details && <p className="pt-2 text-small text-muted-foreground">{article.details}</p>}
           <div ref={setCanvas} className="relative mt-6">

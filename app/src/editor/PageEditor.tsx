@@ -461,12 +461,6 @@ export function PageEditor({ doc }: { doc: Doc }) {
           )}
         </div>
         <div className="flex flex-none items-center gap-1.5">
-          {isBlock(doc) && (
-            <div className={pill}>
-              <ConnectionsButton doc={doc} editable={editable} variant="toolbar" side="bottom" />
-              <ObserveButton doc={doc} className={pillButton} />
-            </div>
-          )}
           <div className={pill}>
             {/* Cortex items use the same history viewer. */}
             <HistoryButton doc={doc} className={pillButton} />

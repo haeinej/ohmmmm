@@ -3,3 +3,10 @@
 @source "./";
 
 html, body, #root { height: 100%; }
+
+/* A writing open inside its card: the reader itself (ReaderScale scales it), without its toolbar. */
+.card-live [data-article-toolbar] { display: none; }
+
+/* Blocks inside a channel's section are white cards lifted off its grey: the design system's third shade,
+   since the card shade alone is too faint on the wash for a white card to read as one. */
+aside[aria-label="Your home"] section .ohm-card { box-shadow: var(--ohm-lift), var(--ohm-shade-3); }

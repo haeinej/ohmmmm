@@ -5,6 +5,7 @@
 // are fetched from the bridge's `/site/file/<path>`, signed with the key the app gave it.
 //
 // It answers only:
+//   - a link followed inside the site's frame, sent back under /site/;
 //   - requests from a page under /site/ (the canvas's frame), whatever their path, on this origin;
 //   - the app's own requests for /site/<path> (tile pictures).
 // Everything else passes by untouched.
@@ -39,6 +40,16 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url)
   if (url.origin !== self.location.origin || (event.request.method !== "GET" && event.request.method !== "HEAD")) return
   const inSite = url.pathname.startsWith("/site/")
+  // A link followed inside the site's frame (`/writings/`): the frame stays in the site, at the same
+  // page under /site/, so its own styles and pictures keep coming from the site. Only a frame that
+  // was showing the site is moved; the app's own pages are never touched.
+  if (!inSite && event.request.mode === "navigate" && event.request.destination === "iframe") {
+    const from = event.request.referrer ? new URL(event.request.referrer) : null
+    if (from && from.origin === self.location.origin && from.pathname.startsWith("/site/")) {
+      event.respondWith(Response.redirect(`/site${url.pathname}${url.search}${url.hash}`, 302))
+      return
+    }
+  }
   event.respondWith((async () => {
     // A site page's own requests: from a frame showing /site/…
     let fromSite = inSite

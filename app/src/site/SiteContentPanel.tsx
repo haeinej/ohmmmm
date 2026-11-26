@@ -2,7 +2,7 @@
 // channel one row of block tiles. It stays for as long as the Site view is open. A tile opens its block over the canvas;
 // every tile can be picked up and dragged.
 import { useEffect, useState } from "react"
-import { ChevronLeftIcon, ChevronRightIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, LayoutGridIcon, ListTreeIcon, Maximize2Icon, Minimize2Icon, PlusIcon } from "lucide-react"
 import { notify } from "@/components/ui/notice"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Mark, markColor, MARKS, readMark } from "@/components/ui/mark"
@@ -10,43 +10,42 @@ import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { cn } from "@/lib/cn"
 import { ProfileCard } from "./ProfileView"
+import { currentBridge } from "@/data/bridge"
+import { AgentMark, agentName, useLiveStatus } from "./AgentStatus"
+import { connected } from "./live"
+import { CollectionsTree } from "./CollectionsTree"
+import { ToolFrame } from "./ToolFrame"
+import { BlockCard, ChannelCard, LinkCard, PageCard } from "./Cards"
+import { CHANNEL, FILE, ITEM, LINK, TOOL } from "./Board"
+import { goTo } from "./nav"
 import { SiteFiles } from "./SiteFiles"
 import { SidePanelFrame } from "@/workspace/Surface"
-import { askToOpenBlock, channelsIn, readContent, readOwnChannels, saveOwnChannels, type OwnChannel, type OwnChannels, siteUrl as url, type SiteContent, type SiteItem } from "./source"
+import { askToOpenBlock, readTools, TOOLS_CHANGED, type SiteTool, LINKS_CHANGED, NEW_CHANNEL, readLinks, SITE_SAVED, type SiteLink, readProfile, channelsIn, readContent, readOwnChannels, saveOwnChannels, type OwnChannel, type OwnChannels, siteUrl as url, type SiteContent, type SiteItem } from "./source"
 
 
-const ITEM = "application/x-ohm-site-item"
-const tile = "relative block overflow-hidden [contain:paint] rounded-md bg-background text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+/** A card you can press: it settles slightly, as DESIGN.md's motion says, and shows focus as a ring. */
+const press = "block rounded-2xl text-left outline-none transition-transform duration-(--ohm-duration-press) ease-(--ohm-ease-out) active:scale-(--ohm-press-scale) focus-visible:ring-2 focus-visible:ring-ring/40"
 
-/** What a block looks like as a tile: the picture itself, or a small copy of the writing. */
-function Face({ item, fill }: { item: SiteItem; fill: boolean }) {
-  const media = fill ? "block h-full w-auto max-w-none" : "block h-auto w-full"
-  if (item.kind === "image") return <img src={url(item.thumb ?? item.path)} alt="" loading="lazy" draggable={false} className={media} />
-  if (item.kind === "video") return <video src={url(item.thumb ?? item.path)} muted playsInline preload="metadata" draggable={false} className={media} />
-  return (
-    // The sheet is laid out at twice the tile's width and shown at half size: a small copy of the page, not a label.
-    <span aria-hidden className="absolute top-0 left-0 flex h-[200%] w-[200%] origin-top-left scale-50 flex-col gap-2 p-5 text-left">
-      <span className="font-medium leading-tight">{item.title}</span>
-      <span className="min-h-0 flex-1 overflow-hidden whitespace-pre-line text-small text-muted-foreground mask-b-from-70%">{item.excerpt}</span>
-    </span>
-  )
-}
 
 /**
  * One block: as tall as its channel's row, or, in an expanded channel, as wide as its column. An image or a video keeps its own shape, wide or tall. An article or a project is a 3:4 sheet holding the start of its own writing in miniature.
  */
-function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
-  const page = item.kind === "article" || item.kind === "project"
+export function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
+  const picture = item.kind === "image" || item.kind === "video"
   return (
-    <button type="button" draggable title={item.title} aria-label={page ? `Open ${item.title}` : item.title}
+    <button type="button" draggable title={item.title} aria-label={`Open ${item.title}`}
       onClick={() => askToOpenBlock(item.path)}
       onDragStart={e => {
         e.dataTransfer.setData(ITEM, JSON.stringify(item))
         e.dataTransfer.setData("text/plain", item.path)
         e.dataTransfer.effectAllowed = "copy"
       }}
-      className={cn(tile, masonry ? "mb-1.5 w-full break-inside-avoid" : "h-full shrink-0", page && "aspect-[3/4] hover:bg-accent")}>
-      <Face item={item} fill={!masonry} />
+      className={cn(press, picture
+        // A picture keeps its own shape: the row's height at its own width, or the column's width at its own height.
+        ? masonry ? "mb-2 block w-full break-inside-avoid" : "h-full w-auto shrink-0"
+        : masonry ? "mb-2 aspect-[3/4] w-full break-inside-avoid" : "aspect-[3/4] h-full shrink-0")}>
+      <BlockCard item={item} natural={picture} />
+
     </button>
   )
 }
@@ -57,24 +56,98 @@ function Tile({ item, masonry }: { item: SiteItem; masonry?: boolean }) {
  * it. It wears its channel's mark: an edge in that colour and its name written in it; with no
  * mark, a plain line and ink.
  */
-function ChannelTile({ name, items, mark, masonry, onOpen }: { name: string; items: SiteItem[]; mark?: string; masonry?: boolean; onOpen(): void }) {
-  const front = items.find(i => i.kind === "image") ?? items[0]
-  const worn = readMark(mark)
-  const colour = worn ? markColor(worn.key) : undefined
+/**
+ * A web page as a tile, at a computer screen's shape (16:10), the page alone: the live page under a clear button (a drag that holds
+ * a live page is refused by the browser, so the button is what is picked up). Opens in the reader;
+ * drags onto the canvas as a live page.
+ */
+/**
+ * What is seen under the pointer while a page is dragged: a small plain label. A drag whose picture
+ * holds a live page (an iframe) is cancelled by the browser, so the page itself can't be the picture.
+ */
+function dragLabel(e: React.DragEvent, text: string) {
+  const label = document.createElement("div")
+  label.textContent = text
+  label.style.cssText = "position:fixed;top:-100px;left:0;padding:6px 12px;border-radius:999px;background:var(--ohm-paper);color:var(--ohm-ink);font:500 13px var(--ohm-font-sans);box-shadow:var(--ohm-shade-2, 0 2px 8px rgb(0 0 0/.15))"
+  document.body.append(label)
+  e.dataTransfer.setDragImage(label, 16, 14)
+  setTimeout(() => label.remove())
+}
+
+/**
+ * How a coding agent on this computer (Claude Code, Codex, …) reaches the site: its own key from
+ * `ohm agents add`, and the bridge's /site/mcp. It edits files as saves the person can take back;
+ * committing and publishing stay the person's.
+ */
+function ConnectAgent() {
+  const bridge = currentBridge()?.url ?? "http://127.0.0.1:8766"
+  const url = `${bridge}/site/mcp`
+  const s = useLiveStatus()
+  const on = connected(s)
+  const agent = s.agents.at(-1)?.agent
+  const copy = (text: string) => { void navigator.clipboard.writeText(text); notify({ message: "Copied." }) }
   return (
-    <button type="button" aria-label={`Open ${name}`} onClick={onOpen}
-      className={cn(tile, "flex flex-col items-center gap-1.5 bg-background p-1.5 hover:bg-accent", masonry ? "mb-1.5 aspect-[3/4] w-full break-inside-avoid" : "h-full w-28 shrink-0")}>
-      {/* The picture takes all the room the name leaves; the cover itself never changes size. */}
-      <span aria-hidden className="relative min-h-0 w-full flex-1 overflow-hidden rounded-sm bg-muted">
-        {front && (front.kind === "image" || front.kind === "video"
-          ? <img src={url(front.thumb ?? front.path)} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
-          : <Face item={front} fill={false} />)}
-      </span>
-      <span className="flex max-w-full flex-col items-center gap-0.5 text-center" style={{ color: colour }}>
-        <span className="line-clamp-2 font-medium leading-tight break-words">{name}</span>
-        <span className="text-small opacity-80">{items.length === 1 ? "1 block" : `${items.length} blocks`}</span>
-      </span>
-      <span aria-hidden className="absolute inset-0 rounded-md" style={{ boxShadow: `inset 0 0 0 1.5px ${colour ?? "var(--border)"}` }} />
+    <section aria-label="Your coding agent" className="flex flex-col gap-3 rounded-lg bg-muted p-3">
+      <h3 className="flex items-center gap-2 font-medium">
+        <span className="flex-1">Your coding agent</span>
+        <span className="flex items-center gap-1.5 text-small font-normal text-muted-foreground">
+          <AgentMark agent={agent ?? "claude-code"} on={on} size={14} />{!s.online ? "ohm serve isn't running" : on ? `${agentName(agent ?? "claude-code")} connected` : "Not connected"}
+        </span>
+      </h3>
+      {/* Claude Code: the ohm plugin brings the connection, the build-tool skill, and hooks that show what it is doing here. */}
+      <p className="text-small text-muted-foreground">In Claude Code, install the ohm plugin. It connects Claude Code to your canvas, channels, site and tools, and shows here what it is doing. Give it the key from <span className="font-mono text-[11px]">ohm agents add claude-code</span> when it asks.</p>
+      <div className="flex gap-1.5">
+        <span className="min-w-0 flex-1 truncate rounded-md bg-card px-2.5 py-2 font-mono text-[11px] shade-1">/plugin install ohm@ohm</span>
+        <Button size="icon-sm" variant="secondary" aria-label="Copy the plugin command" onClick={() => copy("/plugin install ohm@ohm")}><Icon icon={CopyIcon} size="sm" /></Button>
+      </div>
+      {/* Any other agent (Codex, Cursor…): the MCP server alone. It works, without the live presence hooks give. */}
+      <p className="text-small text-muted-foreground">Codex, Cursor or another agent: add this MCP server with its own key. Only you publish.</p>
+      <div className="flex gap-1.5">
+        <span className="min-w-0 flex-1 truncate rounded-md bg-card px-2.5 py-2 font-mono text-[11px] shade-1">{url}</span>
+        <Button size="icon-sm" variant="secondary" aria-label="Copy the MCP address" onClick={() => copy(url)}><Icon icon={CopyIcon} size="sm" /></Button>
+      </div>
+      <p className="rounded-md bg-card px-2.5 py-2 text-small shade-1">Never share your agent's key: it opens your site and canvas.</p>
+    </section>
+  )
+}
+
+/** A kept link as a tile in Artifacts, a screen's shape: opens the page; drags onto the canvas. */
+function LinkTile({ link }: { link: SiteLink }) {
+  return (
+    <button type="button" draggable title={link.url} aria-label={`Open ${link.title}`}
+      onClick={() => goTo({ kind: "link", url: link.url, title: link.title })}
+      onDragStart={e => { e.dataTransfer.setData(LINK, JSON.stringify(link)); e.dataTransfer.setData("text/uri-list", link.url); e.dataTransfer.effectAllowed = "copy"; dragLabel(e, link.title) }}
+      className={cn(press, "relative aspect-[16/10] h-full shrink-0")}>
+      <LinkCard link={link} />
+      {/* A live page under it takes no clicks here: the tile opens it, or is dragged. */}
+      <span aria-hidden className="absolute inset-0" />
+    </button>
+  )
+}
+
+export function PageTile({ path, title, site }: { path: string; title: string; site?: string }) {
+  return (
+    <div className="relative aspect-[16/10] h-full shrink-0 overflow-hidden rounded-2xl">
+      <PageCard src={url(path)} title={title} address={site} live={false} />
+      <button type="button" draggable aria-label={`Open ${title}`} title="Drag onto the canvas, or open it"
+        onClick={() => goTo({ kind: "page", path })}
+        onDragStart={e => {
+          e.dataTransfer.setData(FILE, path); e.dataTransfer.setData("text/plain", path); e.dataTransfer.effectAllowed = "copy"
+          dragLabel(e, title)
+        }}
+        className={cn(press, "absolute inset-0")} />
+    </div>
+  )
+}
+
+export function ChannelTile({ name, items, mark, masonry, onOpen, path }: { name: string; items: SiteItem[]; mark?: string; masonry?: boolean; onOpen(): void
+  /** Its full name, `Photographs/Berlin`, carried when it is dragged onto the canvas. */
+  path?: string }) {
+  return (
+    <button type="button" aria-label={`Open ${name}`} onClick={onOpen} draggable
+      onDragStart={e => { e.dataTransfer.setData(CHANNEL, path ?? name); e.dataTransfer.setData("text/plain", path ?? name); e.dataTransfer.effectAllowed = "copy" }}
+      className={cn(press, masonry ? "mb-2 aspect-[3/4] w-full break-inside-avoid" : "aspect-[3/4] h-full shrink-0")}>
+      <ChannelCard name={name} items={items} mark={mark} />
     </button>
   )
 }
@@ -92,7 +165,9 @@ function Dot({ color, name, onPick }: { color: string; name: string; onPick(colo
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<button type="button" aria-label={`Mark of ${name}: ${mark ? `${mark.name}${mark.edge ? ", edge" : ""}` : "none"}`} className={cn(swatch, "size-5 shrink-0")} />}>
-        <Mark color={mark?.key} edge={mark?.edge} />
+        {/* On a section in its own colour the dot is white; on paper it is the mark itself. */}
+        <span className="[[data-on-mark]_&]:hidden"><Mark color={mark?.key} edge={mark?.edge} /></span>
+        <span aria-hidden className="hidden size-2.5 rounded-full bg-white [[data-on-mark]_&]:block" />
       </PopoverTrigger>
       <PopoverContent align="start" className="flex w-auto flex-col gap-1 p-2">
         <div className="flex gap-0.5">{MARKS.map(m => <button key={m.key} type="button" aria-label={m.name} title={m.name} className={swatch} onClick={() => pick(m.key)}><Mark color={m.key} /></button>)}</div>
@@ -124,8 +199,10 @@ type Shown = { name: string; items: SiteItem[]; inner: { name: string; items: Si
  * the only channel shown and fills the panel under the profile, as a masonry that scrolls down.
  * A tile dropped on a channel the person made is filed in it.
  */
-function Channel({ shown, dot, markOf, expanded, onExpand, onOpenInner, history, onFile, children }: {
+function Channel({ shown, dot, color, markOf, expanded, onExpand, onOpenInner, history, onFile, children }: {
   shown: Shown; dot: React.ReactNode; history?: React.ReactNode
+  /** Its mark: the section is drawn in that colour, with its words in white. */
+  color?: string
   /** The mark a channel inside this one wears: its own, or else this channel's. */
   markOf(inner: string): string
   expanded: boolean; onExpand(on: boolean): void; onOpenInner(name: string): void
@@ -135,20 +212,23 @@ function Channel({ shown, dot, markOf, expanded, onExpand, onOpenInner, history,
 }) {
   const [over, setOver] = useState(false)
   const tiles = (masonry?: boolean) => <>
-    {shown.inner.map(c => <ChannelTile key={c.name} name={c.name} items={c.items} mark={markOf(c.name)} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
+    {shown.inner.map(c => <ChannelTile key={c.name} name={c.name} path={`${shown.name}/${c.name}`} items={c.items} mark={markOf(c.name)} masonry={masonry} onOpen={() => onOpenInner(c.name)} />)}
     {shown.loose.map(item => <Tile key={item.path} item={item} masonry={masonry} />)}
   </>
   const empty = !shown.inner.length && !shown.loose.length
   return (
-    <section aria-label={shown.name} className={cn("flex flex-col gap-2 rounded-lg bg-muted/60 p-2", over && "ring-2 ring-primary/40")}
+    // A channel, by default: grey, its header its dot in its colour, its name and how many (● Writings 8), its tiles below.
+    <section aria-label={shown.name} className={cn("flex flex-col gap-2 rounded-lg bg-muted p-2", over && "ring-2 ring-primary/40")}
       onDragOver={e => { if (onFile && e.dataTransfer.types.includes(ITEM)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setOver(true) } }}
       onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false) }}
       onDrop={e => { setOver(false); const raw = e.dataTransfer.getData(ITEM); if (onFile && raw) { e.preventDefault(); onFile((JSON.parse(raw) as SiteItem).path) } }}>
       <header className="flex items-center justify-between gap-2">
-        <h3 className="flex min-w-0 flex-1 items-center gap-1 font-medium">{history}{dot}<span className="truncate">{shown.name}</span></h3>
+        {/* The channel's header picks up the whole channel, to drop on the canvas. */}
+        <h3 draggable title="Drag onto the canvas" className="flex min-w-0 flex-1 cursor-grab items-center gap-1 font-medium"
+          onDragStart={e => { e.dataTransfer.setData(CHANNEL, shown.name); e.dataTransfer.setData("text/plain", shown.name); e.dataTransfer.effectAllowed = "copy"; dragLabel(e, shown.name) }}>{history}{dot}
+          <span className="truncate">{shown.name}</span>
+          <span className="shrink-0 ps-1 font-normal text-muted-foreground tabular-nums">{shown.items.length}</span></h3>
         <span className="flex min-w-0 items-center gap-1 text-small text-muted-foreground">
-          {/* In a narrow panel the count gives way before the name does. */}
-          <span className="truncate">{shown.items.length === 1 ? "1 block" : `${shown.items.length} blocks`}</span>
           <Button size="icon-xs" variant="ghost" aria-label={expanded ? `Back to all channels` : `Expand ${shown.name}`} aria-pressed={expanded} onClick={() => onExpand(!expanded)}>
             <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} size="xs" />
           </Button>
@@ -158,16 +238,21 @@ function Channel({ shown, dot, markOf, expanded, onExpand, onOpenInner, history,
         <p className="px-1 pb-1 text-small text-muted-foreground">{onFile ? "Nothing here yet. Drag a block onto this channel to file it here." : "Nothing here yet."}</p>
       ) : expanded ? (
         // Two columns in a narrow panel, more as it widens.
-        <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{tiles(true)}</div>
+        <div className="columns-[8.25rem] gap-2">{tiles(true)}</div>
       ) : (
-        <div className="flex h-36 gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{tiles()}</div>
+        <div className="-mx-1 flex h-[11.5rem] gap-2 overflow-x-auto overscroll-x-contain px-1 pt-0.5 pb-1.5">{tiles()}</div>
       )}
       {children}
     </section>
   )
 }
 
-export function SiteContentPanel() {
+export function SiteContentPanel({ floating }: {
+  /** On the canvas: the profile card floats over it, and opens downward into the rest of the panel. */
+  floating?: { open: boolean; onOpen(open: boolean): void
+    /** The open panel's width in px, and changing it from its right edge. The card inside keeps its size. */
+    width: number; onWidth(width: number): void }
+} = {}) {
   const [content, setContent] = useState<SiteContent | null>(null)
   const [own, setOwn] = useState<OwnChannels>({ channels: [], colors: {} })
   /** Where a new channel's name is being typed: at the top (""), or inside the channel named. */
@@ -176,14 +261,37 @@ export function SiteContentPanel() {
    * Where the panel has been, and where in that it is now: all channels (null), a channel by name,
    * or a channel inside it as `Photographs/Berlin`. Back and forward walk it, as in a browser.
    */
-  const [showing, setShowing] = useState<"content" | "files">("content")
+  const [showing, setShowing] = useState<"collections" | "sources" | "mind">("collections")
+  const [layout, setLayout] = useState<"tiles" | "tree">("tiles")
+  const [links, setLinks] = useState<SiteLink[]>([])
+  const [tools, setTools] = useState<SiteTool[]>([])
+  useEffect(() => {
+    const read = () => { readTools().then(setTools, () => {}) }
+    read(); window.addEventListener(TOOLS_CHANGED, read)
+    return () => window.removeEventListener(TOOLS_CHANGED, read)
+  }, [])
+  useEffect(() => {
+    const read = () => { readLinks().then(setLinks, () => {}) }
+    read()
+    window.addEventListener(LINKS_CHANGED, read)
+    return () => window.removeEventListener(LINKS_CHANGED, read)
+  }, [])
+  useEffect(() => {
+    const onNew = () => { floating?.onOpen(true); setShowing("collections"); setLayout("tiles"); setTrail({ been: [null], at: 0 }); setNaming("") }
+    window.addEventListener(NEW_CHANNEL, onNew)
+    return () => window.removeEventListener(NEW_CHANNEL, onNew)
+  }, [floating])
   const [trail, setTrail] = useState<{ been: (string | null)[]; at: number }>({ been: [null], at: 0 })
   const expanded = trail.been[trail.at]
   const setExpanded = (to: string | null) => setTrail(t => t.been[t.at] === to ? t : { been: [...t.been.slice(0, t.at + 1), to], at: t.at + 1 })
   const step = (by: -1 | 1) => setTrail(t => ({ ...t, at: Math.max(0, Math.min(t.been.length - 1, t.at + by)) }))
   useEffect(() => {
-    readContent().then(setContent, () => setContent({ site: "", collections: [] }))
+    const read = () => { readOwnChannels().then(setOwn, () => {}); return readContent().then(setContent, () => setContent({ site: "", collections: [] })) }
+    void read()
     readOwnChannels().then(setOwn, () => {})
+    // Any save (a picture added, a file changed) is read again, so what was added shows at once.
+    window.addEventListener(SITE_SAVED, read)
+    return () => window.removeEventListener(SITE_SAVED, read)
   }, [])
 
   /** Change the person's own channels: shown at once, then kept in their folder. */
@@ -221,21 +329,98 @@ export function SiteContentPanel() {
   const quiet = "self-start text-small text-muted-foreground"
   const withinOwn = within?.own ? ownOf(within.name, outer) : undefined
 
-  return (
-    // The profile is the panel's heading, so it stays in place while the channels scroll under it.
-    <SidePanelFrame label="Your home" heading={<ProfileCard />}>
-      {/* Content (the site's blocks, by channel) or Files (every file git tracks in it). */}
-      <div role="tablist" aria-label="Show" className="flex gap-1 px-1 pt-1">
-        {(["content", "files"] as const).map(v => (
-          <Button key={v} role="tab" aria-selected={showing === v} size="xs" variant={showing === v ? "secondary" : "ghost"} onClick={() => setShowing(v)}>
-            {v === "content" ? "Content" : "Files"}
-          </Button>
+  const [cardColor, setCardColor] = useState("var(--ohm-mark-navy)")
+  useEffect(() => { readProfile().then(p => { if (p.color) setCardColor(p.color) }, () => {}) }, [])
+  const body = (<>
+      {/* What to show, as pills: your channels (Collections), the places they come from (Sources:
+          the site's git folder and its files), or what your agent knows and thinks (Mind). */}
+      <div role="tablist" aria-label="Show" className="flex flex-wrap gap-2 pt-1 pb-2">
+        {(["collections", "sources", "mind"] as const).map(v => (
+          <button key={v} type="button" role="tab" aria-selected={showing === v} onClick={() => setShowing(v)}
+            className="h-8 rounded-full bg-muted px-3.5 text-small outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/40 aria-selected:bg-primary aria-selected:text-primary-foreground">
+            {v === "collections" ? "Collections" : v === "sources" ? "Sources" : "Mind"}
+          </button>
         ))}
+        {/* Collections as tiles or as a file tree: the same channels and blocks, two ways to read them. */}
+        {showing === "collections" && (
+          <span role="radiogroup" aria-label="Show collections as" className="ms-auto flex items-center gap-0.5 rounded-full bg-muted p-0.5">
+            {([["tiles", LayoutGridIcon, "Tiles"], ["tree", ListTreeIcon, "File tree"]] as const).map(([v, icon, label]) => (
+              <button key={v} type="button" role="radio" aria-checked={layout === v} aria-label={label} title={label} onClick={() => setLayout(v)}
+                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 aria-checked:bg-card aria-checked:text-foreground aria-checked:shade-1">
+                <Icon icon={icon} size="sm" />
+              </button>
+            ))}
+          </span>
+        )}
       </div>
-      {showing === "files" ? <div className="pt-1"><SiteFiles content={content} /></div> : <div className="flex flex-col gap-3 pt-1">
+      {showing === "mind" ? <p className="px-1 pt-2 text-small text-muted-foreground">What your agent knows about you and is thinking will show here, as blocks you can read and correct. It isn't connected yet.</p> :
+      layout === "tree" && showing === "collections" ? <div className="pt-1"><CollectionsTree content={content} /></div> :
+      showing === "sources" ? <div className="flex flex-col gap-3 pt-1">
+        {/* Your site itself, as a block: live, and draggable onto the canvas like any other. */}
+        <section aria-label="Your site" className="flex flex-col gap-2 rounded-lg bg-muted p-2">
+          <h3 className="flex items-center justify-between gap-2 font-medium"><span>Your site</span><span className="text-small font-normal text-muted-foreground">Source · git</span></h3>
+          {/* The live preview sits under a clear button: a drag that holds a live page is refused by the
+              browser, so what is picked up is the button, and the page stays where it is. */}
+          <div className="relative aspect-[4/3] w-full">
+            <PageCard src={url("index.html")} title="Home" address={content?.site} live={false} />
+            <button type="button" draggable aria-label={`Open ${content?.site || "your site"}`} title="Drag onto the canvas, or open it"
+              onClick={() => goTo({ kind: "page", path: "index.html" })}
+              onDragStart={e => {
+                e.dataTransfer.setData(FILE, "index.html"); e.dataTransfer.setData("text/plain", "index.html"); e.dataTransfer.effectAllowed = "copy"
+                dragLabel(e, content?.site || "Home")
+              }}
+              className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40" />
+          </div>
+        </section>
+        <ConnectAgent />
+        <section aria-label="Files" className="rounded-lg bg-muted p-2"><SiteFiles content={content} /></section>
+      </div> : <div className="flex flex-col gap-3 pt-1">
+        {/* Tools: small apps your agent built for you, kept in your home, run sandboxed. A channel like the others. */}
+        {!expanded && tools.length > 0 && (
+          <section aria-label="Tools" className="flex flex-col gap-2 rounded-lg bg-muted p-2">
+            <header className="flex items-center gap-1 font-medium">
+              <span aria-hidden className="size-2.5 rounded-full bg-foreground" /><span className="ps-1">Tools</span>
+              <span className="ps-1 font-normal text-muted-foreground tabular-nums">{tools.length}</span>
+            </header>
+            <div className="-mx-1 flex h-[11.5rem] gap-2 overflow-x-auto px-1 pt-0.5 pb-1.5">
+              {tools.map(t => (
+                <button key={t.name} type="button" draggable title={t.description || t.title} aria-label={`Open ${t.title}`} onClick={() => goTo({ kind: "tool", name: t.name, title: t.title })}
+                  onDragStart={e => { e.dataTransfer.setData(TOOL, t.name); e.dataTransfer.setData("text/plain", t.name); e.dataTransfer.effectAllowed = "copy"; dragLabel(e, t.title) }}
+                  className={cn(press, "relative flex aspect-[16/11] h-full shrink-0 flex-col overflow-hidden rounded-2xl bg-card text-left shade-2")}>
+                  <span className="relative min-h-0 flex-1"><ToolFrame name={t.name} live={false} /></span>
+                  <span className="truncate px-2.5 py-1.5 text-small font-medium">{t.title}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        {/* Artifacts: a channel of the things you have made that live as pages (your website first), each a
+            live page block, drawn as every channel is: its dot, its name, how many it holds, its row of tiles. */}
+        {(!expanded || expanded === "Artifacts") && (
+          <section aria-label="Artifacts" className="flex flex-col gap-2 rounded-lg bg-muted p-2">
+            <header className="flex items-center justify-between gap-2">
+              <h3 draggable title="Drag onto the canvas" className="flex min-w-0 flex-1 cursor-grab items-center gap-1 font-medium"
+                onDragStart={e => { e.dataTransfer.setData(CHANNEL, "Artifacts"); e.dataTransfer.setData("text/plain", "Artifacts"); e.dataTransfer.effectAllowed = "copy"; dragLabel(e, "Artifacts") }}>
+                <Dot name="Artifacts" color={own.colors["Artifacts"] ?? ""} onPick={color => paint("Artifacts", undefined, color)} />
+                <span className="truncate">Artifacts</span>
+                <span className="shrink-0 ps-1 font-normal text-muted-foreground tabular-nums">{1 + links.length}</span>
+              </h3>
+              <span className="flex min-w-0 items-center gap-1 text-small text-muted-foreground">
+                <Button size="icon-xs" variant="ghost" aria-label={expanded === "Artifacts" ? "Back to all channels" : "Expand Artifacts"} aria-pressed={expanded === "Artifacts"}
+                  onClick={() => setExpanded(expanded === "Artifacts" ? null : "Artifacts")}>
+                  <Icon icon={expanded === "Artifacts" ? Minimize2Icon : Maximize2Icon} size="xs" />
+                </Button>
+              </span>
+            </header>
+            <div className={expanded === "Artifacts" ? "grid grid-cols-[repeat(auto-fill,8.25rem)] auto-rows-[11rem] gap-2" : "-mx-1 flex h-[11.5rem] gap-2 overflow-x-auto px-1 pt-0.5 pb-1.5"}>
+              <PageTile path="index.html" title="Home" site={content?.site} />
+              {links.map(l => <LinkTile key={l.id} link={l} />)}
+            </div>
+          </section>
+        )}
         {within ? (
           // A channel inside a channel, open: where it is, then its blocks.
-          <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted/60 p-2"
+          <section aria-label={`${outer} / ${within.name}`} className="flex flex-col gap-2 rounded-lg bg-muted p-2"
             onDragOver={e => { if (withinOwn && e.dataTransfer.types.includes(ITEM)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy" } }}
             onDrop={e => { const raw = e.dataTransfer.getData(ITEM); if (withinOwn && raw) { e.preventDefault(); file(withinOwn, (JSON.parse(raw) as SiteItem).path) } }}>
             <header className="flex items-center justify-between gap-2">
@@ -252,7 +437,7 @@ export function SiteContentPanel() {
               </span>
             </header>
             {within.items.length
-              ? <div className="gap-1.5" style={{ columnWidth: "7.5rem" }}>{within.items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
+              ? <div className="columns-[8.25rem] gap-2">{within.items.map(item => <Tile key={item.path} item={item} masonry />)}</div>
               : <p className="px-1 pb-1 text-small text-muted-foreground">Nothing here yet. Go back, and drag a block onto this channel to file it here.</p>}
             {withinOwn && <Button size="xs" variant="ghost" className={quiet} onClick={() => remove(withinOwn)}>Remove this channel</Button>}
           </section>
@@ -260,6 +445,7 @@ export function SiteContentPanel() {
           const mineHere = c.own ? ownOf(c.name) : undefined
           return (
             <Channel key={c.name} shown={c} history={i === 0 ? history : null} expanded={c.name === expanded}
+              color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""}
               dot={<Dot name={c.name} color={mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? ""} onPick={color => paint(c.name, mineHere, color)} />}
               markOf={inner => ownOf(inner, c.name)?.color || own.colors[`${c.name}/${inner}`] || (mineHere ? mineHere.color ?? "" : own.colors[c.name] ?? "")}
               onExpand={on => setExpanded(on ? c.name : null)} onOpenInner={name => setExpanded(`${c.name}/${name}`)}
@@ -277,6 +463,43 @@ export function SiteContentPanel() {
           ? <NewChannel label="New channel" onMake={name => make(name)} onCancel={() => setNaming(null)} />
           : <Button size="sm" variant="ghost" className={quiet} onClick={() => setNaming("")}><Icon icon={PlusIcon} size="xs" />New channel</Button>)}
       </div>}
-    </SidePanelFrame>
+  </>)
+
+  if (floating) return (
+    // The card is the panel, folded: open, it extends downward into the pills and channels, one surface
+    // floating over the canvas, lifted by a menu's shade. Closed, it is only the card.
+    <aside aria-label="Your home" className={cn("absolute z-20 flex max-h-[calc(100%-1.5rem)] flex-col rounded-3xl transition-[background-color,box-shadow] duration-(--ohm-duration-open) ease-(--ohm-ease-out)",
+      // Open, a white panel grows around the card; the card itself keeps its size.
+      // The panel's padding is taken from its place, so the card sits exactly where it does when folded.
+      floating.open ? "top-1 left-1 bg-card p-2 shade-4" : "top-3 left-3 w-[20rem]")}
+      style={floating.open ? { width: floating.width } : undefined}>
+
+      <div className="relative w-[20rem] shrink-0">
+        <ProfileCard />
+        {/* A dropdown at the card's bottom right corner: your home opens down from the card, and folds back. */}
+        <button type="button" aria-expanded={floating.open} aria-label={floating.open ? "Fold your home into the card" : "Expand your home"}
+          title={floating.open ? "Fold" : "Expand"} onClick={() => floating.onOpen(!floating.open)}
+          className="absolute right-3 bottom-3 z-10 inline-flex size-8 items-center justify-center rounded-full bg-white/15 text-white outline-none transition-[background-color,transform] duration-(--ohm-duration-press) hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white/60 active:scale-(--ohm-press-scale)">
+          <Icon icon={ChevronDownIcon} size="sm" className={cn("transition-transform duration-(--ohm-duration-state) ease-(--ohm-ease-out)", floating.open && "rotate-180")} />
+        </button>
+      </div>
+      {/* The right edge: drag it to make the open panel wider, as wide as half the window. */}
+      {floating.open && (
+        <span role="separator" aria-orientation="vertical" aria-label="Resize your home" title="Drag to widen"
+          onPointerDown={e => {
+            e.preventDefault()
+            const startX = e.clientX, from = floating.width
+            const move = (m: PointerEvent) => floating.onWidth(Math.max(336, Math.min(window.innerWidth * 0.5, from + m.clientX - startX)))
+            const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up) }
+            window.addEventListener("pointermove", move); window.addEventListener("pointerup", up)
+          }}
+          className="absolute inset-y-6 -right-1.5 z-10 w-3 cursor-ew-resize rounded-full after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-transparent hover:after:bg-border" />
+      )}
+      {floating.open && <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain px-2 pt-5 pb-3 animate-in fade-in-0 slide-in-from-top-2">{body}</div>}
+    </aside>
+  )
+  return (
+    // The profile is the panel's heading, so it stays in place while the channels scroll under it.
+    <SidePanelFrame label="Your home" heading={<ProfileCard />}>{body}</SidePanelFrame>
   )
 }

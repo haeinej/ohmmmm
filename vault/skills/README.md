@@ -12,6 +12,10 @@ and agent documentation. Its folder contains:
 - [Usage guide](document-work/README.md): what to expect and how to invoke it.
 - [Agent contract](document-work/contract.md): integration and maintenance of the skill itself.
 
+[build-tool](build-tool/SKILL.md) builds a small app for the person as a plain folder in
+their home (`tools/<name>/index.html`), written with the agent's own file tools; `ohm serve`
+puts it on their canvas and runs it sandboxed.
+
 [lint](lint/SKILL.md) checks a vault for meaning: candidates from `vault_lint`, judged
 by the agent, recorded as cortex observations and fixed only within the person's grant.
 

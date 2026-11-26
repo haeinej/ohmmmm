@@ -74,7 +74,7 @@ export function SiteFiles({ content }: { content: SiteContent | null }) {
     const root = ref.current
     if (!root) return
     const rowOf = (e: Event) => (e.target as HTMLElement).closest<HTMLElement>("[data-slot=file-tree-item]")
-    const onDragStart = (e: DragEvent) => { const id = rowOf(e)?.dataset.id; if (id && byPath.has(id)) { e.dataTransfer?.setData("application/x-ohm-site-file", id); e.dataTransfer!.effectAllowed = "move" } }
+    const onDragStart = (e: DragEvent) => { const id = rowOf(e)?.dataset.id; if (id && byPath.has(id)) { e.dataTransfer?.setData("application/x-ohm-site-file", id); e.dataTransfer!.effectAllowed = "copyMove" } }
     const folderOf = (e: DragEvent) => { const id = rowOf(e)?.dataset.id ?? ""; return id.startsWith(DIR) ? id.slice(DIR.length) : id.includes("/") ? id.slice(0, id.lastIndexOf("/")) : "" }
     const onDragOver = (e: DragEvent) => { if (e.dataTransfer?.types.includes("application/x-ohm-site-file")) { e.preventDefault(); e.dataTransfer.dropEffect = "move" } }
     const onDrop = (e: DragEvent) => {

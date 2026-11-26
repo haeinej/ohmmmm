@@ -100,7 +100,11 @@ function PublishDetail({ commit, live, onLive }: { commit: SiteCommit; live: boo
   )
 }
 
-export function SiteHistory({ onClose }: { onClose(): void }) {
+/**
+ * `path`: the history of one artifact only (a page, or a folder ending in /): its saves, and the commits
+ * that touched it. Without it, the whole site's.
+ */
+export function SiteHistory({ onClose, path }: { onClose(): void; path?: string }) {
   const [records, setRecords] = useState<Records | null>(null)
   const [by, setBy] = useState<"date" | "author">("date")
   const [picked, setPicked] = useState<string | null>(null)
@@ -112,7 +116,12 @@ export function SiteHistory({ onClose }: { onClose(): void }) {
     window.addEventListener(SITE_SAVED, reload)
     return () => window.removeEventListener(SITE_SAVED, reload)
   }, [reload])
-  const entries = useMemo(() => (records ? entriesOf(records) : []), [records])
+  const entries = useMemo(() => {
+    if (!records) return []
+    if (!path) return entriesOf(records)
+    const of = (p?: string) => !!p && (p === path || (path.endsWith("/") && p.startsWith(path)))
+    return entriesOf({ ...records, saves: records.saves.filter(s => of(s.path) || of((s as { from?: string }).from)), commits: records.commits.filter(c => c.files.some(f => of(f))) })
+  }, [records, path])
   const project = records?.deploys.at(-1)?.project ?? ""
   const groups = useMemo(() => {
     const out = new Map<string, Entry[]>()

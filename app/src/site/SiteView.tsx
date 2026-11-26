@@ -2,14 +2,23 @@
 // can be done to it from here: compose its gallery, take a move back or do it again, save, open a
 // block or the profile over it, and keep the folder in step with its git remote.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react"
+import { createPortal } from "react-dom"
+import { MousePointerClickIcon, PanelRightIcon, XIcon, ExternalLinkIcon, GlobeIcon, RotateCwIcon, FileCodeIcon, FileTextIcon, FolderIcon, ImageIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
 import { registerStepTool } from "@/webmcp"
 import { useWorkspace } from "@/workspace/store"
 import { withAgent } from "@/workspace/tools"
-import { BlockView } from "./BlockView"
+import { BlockAbout, BlockView } from "./BlockView"
+import { ArtifactPanel } from "./ArtifactPanel"
+import { ToolFrame } from "./ToolFrame"
+import { LiveLayer } from "./LiveLayer"
+import { followChanges, startLive } from "./live"
+import { PageTile, SiteContentPanel, Tile } from "./SiteContentPanel"
+import { markColor, readMark } from "@/components/ui/mark"
+import { Board, type BoardHandle, type BoardState } from "./Board"
+import { goTo, replaceWith, step as walk, useNav, type Place } from "./nav"
 import { LiveCanvas, type LiveCanvasHandle, type LiveState } from "./LiveCanvas"
 import { FileEditor } from "./FileEditor"
 import { SiteHistory } from "@/history/SiteHistory"
@@ -17,7 +26,7 @@ import { ProfileView } from "./ProfileView"
 import { DeployControl } from "./SiteDeploy"
 import { PublishControl } from "./SitePublish"
 import { SyncControls } from "./SiteSync"
-import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_FILE, OPEN_PAGE, OPEN_PROFILE, readContent, SITE_SAVED, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
+import { addressOf, EditProblem, markupFor, OPEN_BLOCK, OPEN_FILE, OPEN_PAGE, OPEN_PROFILE, readContent, readOwnChannels, siteUrl, SITE_SAVED, readSync, saveChange, syncStep, type Change, type SiteContent, type SiteSync } from "./source"
 
 /** The page the canvas opens on: the gallery, which holds every photograph, writing and project, wherever the site keeps it. */
 const startOf = (content: SiteContent) => `/site/${content.start ?? "archive/index.html"}`
@@ -30,12 +39,25 @@ export function SiteView() {
   const [live, setLive] = useState<LiveState>({ page: "", moves: [], canUndo: false, canRedo: false })
   const [zoom, setZoom] = useState(1)
   const [saving, setSaving] = useState(false)
-  /** The block that is open over the canvas, by its path. */
-  const [block, setBlock] = useState<string | null>(null)
+  const boardRef = useRef<BoardHandle>(null)
+  const [homeOpen, setHomeOpen] = useState(false)
+  const [homeWidth, setHomeWidth] = useState(336)
+  const [board, setBoard] = useState<BoardState>({ canUndo: false, canRedo: false, zoom: 1, count: 0 })
+  const [colors, setColors] = useState<Record<string, string>>({})
+  useEffect(() => { readOwnChannels().then(o => setColors(o.colors), () => {}) }, [])
+  /** Where the main area is (nav.ts): the site, a channel, or a block by its path. */
+  const { place, canBack, canForward } = useNav()
+  const block = place.kind === "block" ? place.path : null
+  const setBlock = (path: string | null) => goTo(path ? { kind: "block", path } : { kind: "home" })
   const [profileOpen, setProfileOpen] = useState(false)
   /** A file open in the text editor, by its path. */
   const [editing, setEditing] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  useEffect(() => startLive(), [])
+  // Details are closed whenever something new is opened: what it is shows first, its details on asking.
+  const opening = JSON.stringify(place)
+  useEffect(() => setDetailsOpen(false), [opening])
   const [sync, setSync] = useState<SiteSync | null>(null)
   const [syncing, setSyncing] = useState(false)
   /** Pull, Commit, Push and Deploy one by one, for people who want them: behind Advanced. */
@@ -124,21 +146,35 @@ export function SiteView() {
   }, [openBlock])
   const opened = useMemo(() => {
     for (const c of content?.collections ?? []) {
-      const at = c.items.findIndex(i => i.path === block)
-      if (at >= 0) return { item: c.items[at], items: c.items, channel: { name: c.name, at, of: c.items.length } }
+      const item = c.items.find(i => i.path === block)
+      if (!item) continue
+      // A block in a channel inside this one steps through that channel only.
+      const items = item.channel ? c.items.filter(i => i.channel === item.channel) : c.items
+      const at = items.indexOf(item)
+      return { item, items, channel: { name: item.channel ?? c.name, at, of: items.length } }
     }
     return null
   }, [content, block])
-  const stepBlock = useCallback((by: -1 | 1) => { const next = opened?.items[opened.channel.at + by]; if (next) setBlock(next.path) }, [opened])
-  const closeBlock = useCallback(() => setBlock(null), [])
+  const stepBlock = useCallback((by: -1 | 1) => { const next = opened?.items[opened.channel.at + by]; if (next) replaceWith({ kind: "block", path: next.path }) }, [opened])
+  const closeBlock = useCallback(() => { if (canBack) walk(-1); else goTo({ kind: "home" }) }, [canBack])
   const closeProfile = useCallback(() => setProfileOpen(false), [])
+  /** Close whatever is open over the canvas. */
+  const closeAll = useCallback(() => {
+    setProfileOpen(false); setEditing(null); setHistoryOpen(false)
+    if (place.kind !== "home") goTo({ kind: "home" })
+  }, [place.kind])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target as HTMLElement).closest?.("[contenteditable], input, textarea")) closeAll() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [closeAll])
 
   // ⌘Z and ⇧⌘Z take a move back and do it again, while nothing is being written in.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || (e.target as HTMLElement).closest?.("[contenteditable], input, textarea")) return
       e.preventDefault()
-      if (e.shiftKey) canvas.current?.redo(); else canvas.current?.undo()
+      if (e.shiftKey) boardRef.current?.redo(); else boardRef.current?.undo()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -218,42 +254,196 @@ export function SiteView() {
   const zoomBy = (by: -1 | 1) => setZoom(z => ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + by))])
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      {profileOpen && <ProfileView onClose={closeProfile} />}
-      {editing && <FileEditor path={editing} onClose={() => setEditing(null)} />}
-      {historyOpen && <SiteHistory onClose={() => setHistoryOpen(false)} />}
-      {opened && (
-        <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
-          titleOf={path => path}
-          onShowPage={path => { setBlock(null); canvas.current?.go(path) }} />
-      )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TitleBar content={content} place={place} title={opened?.item.title} file={editing ?? undefined}
+        onRename={opened && (opened.item.kind === "article" || opened.item.kind === "project") ? async (after: string) => {
+          // The title is the page's own heading: changed in its file, like any words on the page.
+          const page = opened.item.path.split("#")[0]
+          try { await save(page, { type: "text", before: opened.item.title, after }); setContent(await readContent()) }
+          catch (e) { notify({ message: (e as Error).message, tone: "error" }) }
+        } : undefined}>
+        {/* History and Publish belong to what is open, not to the whole canvas: the website (the artifact
+            that is the site) has both; a block has its own history. */}
+      </TitleBar>
+
+      {/* Everything that opens in the main area opens over the canvas, under the title bar. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Home is a white canvas to think on; blocks and channels are dragged onto it from your card. */}
+        <Board ref={boardRef} content={content} colors={colors} onState={setBoard} onSave={save} />
+
+        {/* Whatever is being read (a block, a file, your profile, the history) reads in the middle: beside
+            your card, which stays at the left as the side panel on every screen. */}
+        {(profileOpen || editing || historyOpen || opened || place.kind === "page" || place.kind === "channel" || place.kind === "link" || place.kind === "tool") && (
+          // What is open floats over the canvas as a window of its own; the canvas and your card stay behind,
+          // dimmed. A click outside it, or Escape, closes it.
+          // It opens at the top, in the room beside your card (the side panel), which stays clear of it.
+          <div style={{ paddingInlineStart: (homeOpen ? homeWidth + 4 : 332) + 12 }}
+            className="absolute inset-0 z-10 flex items-start justify-center bg-card/60 py-3 pe-3 animate-in fade-in-0 duration-(--ohm-duration-open)"
+            onPointerDown={e => { if (e.target === e.currentTarget) closeAll() }}>
+            <div role="presentation" className="flex h-full w-full gap-3 animate-in slide-in-from-top-2 fade-in-0 duration-(--ohm-duration-open) ease-(--ohm-ease-out)">
+            <div className="relative h-full min-w-0 flex-1 overflow-hidden rounded-3xl bg-card shade-5">
+            {profileOpen && <ProfileView onClose={closeProfile} />}
+            {editing && <FileEditor path={editing} onClose={() => setEditing(null)} />}
+            {historyOpen && <SiteHistory onClose={() => setHistoryOpen(false)} path={place.kind === "block" && opened ? opened.item.path.split("#")[0] : undefined} />}
+            {place.kind === "tool" && (
+              <div role="dialog" aria-label={place.title} className="absolute inset-0 flex flex-col bg-card">
+                <div className="frost absolute top-3 right-3 z-20 flex items-center gap-0.5 rounded-full p-1 shade-3">
+                  <Button size="icon-sm" variant="ghost" aria-label="Close" onClick={closeAll}><Icon icon={XIcon} /></Button>
+                </div>
+                <ToolFrame name={place.name} />
+              </div>
+            )}
+            {place.kind === "link" && <PageReader src={place.url} path={place.title} onClose={closeAll} external />}
+            {place.kind === "channel" && !editing && !profileOpen && <ChannelReader name={place.name} content={content} colors={colors} onClose={closeAll} />}
+            {place.kind === "page" && !opened && !editing && !profileOpen && (
+              <PageReader path={place.path} site={content?.site} onClose={closeBlock}
+                // The website's own history and its Publish, in its own controls: they are this artifact's.
+                actions={<Button size="icon-sm" variant="ghost" aria-label="Details: history, pull requests, deploys" aria-pressed={detailsOpen} onClick={() => setDetailsOpen(o => !o)}><Icon icon={PanelRightIcon} /></Button>} />
+            )}
+            {opened && (
+              <BlockView item={opened.item} channel={opened.channel} onStep={stepBlock} onClose={closeBlock} onSave={save}
+                onDetails={() => setDetailsOpen(o => !o)} detailsOpen={detailsOpen}
+                titleOf={path => path}
+                onShowPage={path => window.open(siteUrl(path), "_blank", "noopener")} />
+            )}
+          </div>
+            {/* The third column: the open artifact's code, beside it. The website's is the whole site's; a block's is its page's. */}
+            {detailsOpen && (place.kind === "page" || (place.kind === "block" && opened)) && (
+              <ArtifactPanel path={place.kind === "block" && opened ? opened.item.path.split("#")[0] : undefined} onClose={() => setDetailsOpen(false)}
+                about={place.kind === "block" && opened ? <BlockAbout item={opened.item} channel={opened.channel.name} titleOf={p => p} onShowPage={p => window.open(siteUrl(p), "_blank", "noopener")} /> : undefined} />
+            )}
+          </div></div>
+        )}
+        <SiteContentPanel floating={{ open: homeOpen, onOpen: setHomeOpen, width: homeWidth, onWidth: setHomeWidth }} />
+
+        {live.moves.length > 0 && (
+          <div role="status" className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-card py-2 ps-4 pe-2 text-small shade-2">
+            <span>{live.moves.length === 1 ? "1 photograph moved" : `${live.moves.length} moves`} in {live.page}</span>
+            <Button size="sm" variant="ghost" disabled={saving} onClick={() => canvas.current?.discard()}>Discard</Button>
+            <Button size="sm" disabled={saving} onClick={() => void saveOrder()}>Save</Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The title bar of the main area: back and forward through where it has been, then where it is now,
+ * as a trail you can click (site › channel › channel inside › block). Its own controls follow.
+ */
+function TitleBar({ content, place, title, file, onRename, children }: {
+  content: SiteContent | null; place: Place; title?: string; children?: React.ReactNode
+  /** A file of the site open in the file viewer: the trail is its folders. */
+  file?: string
+  /** Rename the open block: only a writing, whose title is words on its page. */
+  onRename?: (title: string) => Promise<void>
+}) {
+  const crumbs: { label: string; to?: Place }[] = [{ label: content?.site || "Site", to: { kind: "home" } }]
+  const channelOf = (path: string) => {
+    for (const c of content?.collections ?? []) { const i = c.items.find(x => x.path === path); if (i) return i.channel ? `${c.name}/${i.channel}` : c.name }
+    return null
+  }
+  const name = place.kind === "block" ? channelOf(place.path) : null
+  if (name) {
+    const [outer, inner] = name.split("/")
+    // Channels are opened in the side panel, not here: they name where the block is.
+    crumbs.push({ label: outer })
+    if (inner) crumbs.push({ label: inner })
+  }
+  if (place.kind === "block" && !file) crumbs.push({ label: title ?? place.path })
+  if (place.kind === "channel" && !file) for (const piece of place.name.split("/")) crumbs.push({ label: piece })
+  if (place.kind === "link" && !file) crumbs.push({ label: place.title })
+  if (place.kind === "tool" && !file) crumbs.push({ label: "Tools" }, { label: place.title })
+  if (place.kind === "page" && !file) for (const piece of place.path.split("/")) crumbs.push({ label: piece })
+  if (file) { crumbs.length = 1; for (const piece of file.split("/")) crumbs.push({ label: piece }) }
+  const last = crumbs.length - 1
+  // The bar is in the page by the time this has mounted; read it then, not while rendering.
+  const [target, setTarget] = useState<HTMLElement | null>(null)
+  const [actions, setActions] = useState<HTMLElement | null>(null)
+  useEffect(() => { setTarget(document.getElementById("ohm-title")); setActions(document.getElementById("ohm-actions")) })
+  return (
+    <>
+      {/* Where you are goes in the bar across the window; this view's own controls stay here. */}
+      {target && createPortal(
+        <nav aria-label="Where you are" className="flex min-w-0 items-center gap-1.5 font-medium">
+          {/* What this is: a folder for the site, the block's own kind for a block. */}
+          <Icon icon={place.kind === "page" && !file ? GlobeIcon : file ? (/\.(?:md|markdown|mdx)$/i.test(file) ? FileTextIcon : FileCodeIcon) : place.kind === "block" ? (title && /\.(jpe?g|png|gif|webp|avif|mp4|mov|webm)$/i.test(place.path) ? ImageIcon : FileTextIcon) : FolderIcon} className="me-1 shrink-0 text-muted-foreground" />
+          {crumbs.map((c, i) => (
+            <span key={i} className="flex min-w-0 items-center gap-1.5">
+              {i > 0 && <span aria-hidden className="text-muted-foreground">›</span>}
+              {i === last && onRename && !file
+                ? <TitleInput key={c.label} value={c.label} onRename={onRename} />
+                : i === last || !c.to
+                ? <span aria-current={i === last ? "page" : undefined} className={i === last ? "truncate" : "shrink-0 text-muted-foreground"}>{c.label}</span>
+                : <button type="button" onClick={() => goTo(c.to!)} className="shrink-0 rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40">{c.label}</button>}
+            </span>
+          ))}
+        </nav>, target)}
+      {/* The view's own controls sit at the right of the same bar: no row of their own above the canvas. */}
+      {actions && children && createPortal(children, actions)}
+    </>
+  )
+}
+
+/** The open block's title, written in place. Enter or leaving keeps it; Escape puts it back. */
+function TitleInput({ value, onRename }: { value: string; onRename(title: string): Promise<void> }) {
+  const [text, setText] = useState(value)
+  const done = () => { const t = text.trim(); if (t && t !== value) void onRename(t); else setText(value) }
+  return (
+    <input aria-label="Title" value={text} onChange={e => setText(e.target.value)} onBlur={done} size={Math.max(4, text.length)}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { setText(value); requestAnimationFrame(() => (e.target as HTMLInputElement).blur()) } }}
+      className="min-w-0 rounded-md bg-transparent px-1 -mx-1 font-medium outline-none hover:bg-muted focus:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40" />
+  )
+}
+
+/** A page of the site in the reader: the whole page, live, at the reader's width, as a browser shows it. */
+function PageReader({ path, site, onClose, actions, src, external }: { path: string; site?: string; onClose(): void; actions?: React.ReactNode
+  /** A page that isn't the site's: its own address, shown as the web serves it. */
+  src?: string; external?: boolean }) {
+  const address = src ?? siteUrl(path)
+  const [pointing, setPointing] = useState(false)
+  // Your site's own page follows its files: a change saved by you or your agent shows at once.
+  useEffect(() => (external ? undefined : followChanges(() => frame.current)), [external])
+  const frame = useRef<HTMLIFrameElement>(null)
+  return (
+    <div role="dialog" aria-label={path} className="absolute inset-0 flex min-h-0 flex-col bg-card">
+      {/* The page fills the window; its controls float over its top right corner, frosted, as floating controls are. */}
+      <div className="frost absolute top-3 right-3 z-20 flex items-center gap-0.5 rounded-full p-1 shade-3">
+        {/* Point at something on the page; your coding agent reads it with site_pointed. */}
+        {!external && <Button size="icon-sm" variant="ghost" aria-label="Point at something for your agent" aria-pressed={pointing} onClick={() => setPointing(p => !p)}><Icon icon={MousePointerClickIcon} /></Button>}
+        {actions}
+        <Button size="icon-sm" variant="ghost" aria-label="Reload" onClick={() => frame.current?.contentWindow?.location.reload()}><Icon icon={RotateCwIcon} /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label={`Open in a new tab${site ? `, as on ${site}` : ""}`} onClick={() => window.open(address, "_blank", "noopener")}><Icon icon={ExternalLinkIcon} /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label="Close" onClick={onClose}><Icon icon={XIcon} /></Button>
+      </div>
+      <iframe ref={frame} src={address} title={path} className="min-h-0 flex-1 border-0 bg-white" />
+      {!external && <LiveLayer frame={frame} pointing={pointing} onPointed={() => setPointing(false)} />}
+      {/* Many sites don't let themselves be shown inside another page; then it opens in a tab of its own. */}
+      {external && <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-small text-muted-foreground">If the page stays blank, its site doesn't allow being shown here: open it in a new tab.</p>}
+    </div>
+  )
+}
+
+/** A channel opened from the canvas: its header (● name count), then everything it holds as a masonry of tiles. */
+function ChannelReader({ name, content, colors, onClose }: { name: string; content: SiteContent | null; colors: Record<string, string>; onClose(): void }) {
+  const [outer, inner] = name.split("/")
+  const c = content?.collections.find(x => x.name === outer)
+  const items = c ? (inner ? c.items.filter(i => i.channel === inner) : c.items) : []
+  const mark = readMark(colors[name] ?? colors[outer])
+  return (
+    <div role="dialog" aria-label={name} className="absolute inset-0 flex min-h-0 flex-col bg-card">
       <header className="flex h-14 shrink-0 items-center gap-2 px-5">
-        <span className="text-small font-medium">Site</span>
-        <span className="min-w-0 flex-1 truncate text-small text-muted-foreground">
-          {live.page || "Opening your site"}{content?.start && live.page === content.start && " · drag a photograph to move it, ⌘-click to open it as a block"}
-        </span>
-        <Button size="icon-sm" variant="ghost" aria-label="Undo (⌘Z)" disabled={!live.canUndo} onClick={() => canvas.current?.undo()}><Icon icon={Undo2Icon} /></Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Redo (⇧⌘Z)" disabled={!live.canRedo} onClick={() => canvas.current?.redo()}><Icon icon={Redo2Icon} /></Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Zoom out" disabled={zoom === ZOOMS[0]} onClick={() => zoomBy(-1)}><Icon icon={MinusIcon} /></Button>
-        <span className="w-10 text-center text-small text-muted-foreground tabular-nums">{Math.round(zoom * 100)}%</span>
-        <Button size="icon-sm" variant="ghost" aria-label="Zoom in" disabled={zoom === 1} onClick={() => zoomBy(1)}><Icon icon={PlusIcon} /></Button>
-        {advanced && <>
-          <SyncControls sync={sync} busy={syncing} onPull={() => stepByHand("pull")} onCommit={message => stepByHand("commit", message)} onPublish={() => stepByHand("push")} />
-          <DeployControl />
-        </>}
-        <Button size="sm" variant="ghost" aria-pressed={historyOpen} onClick={() => setHistoryOpen(o => !o)}>History</Button>
-        <PublishControl advanced={advanced} onAdvanced={() => setAdvanced(a => !a)} />
+        <span aria-hidden className="size-2.5 rounded-full" style={{ backgroundColor: mark ? markColor(mark.key) : "var(--foreground)" }} />
+        <h2 className="text-body font-semibold">{inner ?? outer}</h2>
+        <span className="text-muted-foreground tabular-nums">{items.length + (name === "Artifacts" ? 1 : 0)}</span>
+        <span className="flex-1" />
+        <Button size="icon-sm" variant="ghost" aria-label="Close" onClick={onClose}><Icon icon={XIcon} /></Button>
       </header>
-
-      {content && <LiveCanvas ref={canvas} start={startOf(content)} zoom={zoom} accent={accent} onState={setLive} onOpen={openFromCanvas} />}
-
-      {live.moves.length > 0 && (
-        <div role="status" className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-card py-2 ps-4 pe-2 text-small shade-2">
-          <span>{live.moves.length === 1 ? "1 photograph moved" : `${live.moves.length} moves`} in {live.page}</span>
-          <Button size="sm" variant="ghost" disabled={saving} onClick={() => canvas.current?.discard()}>Discard</Button>
-          <Button size="sm" disabled={saving} onClick={() => void saveOrder()}>Save</Button>
-        </div>
-      )}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+        {name === "Artifacts" && <div className="mb-2 aspect-[16/10] w-72"><PageTile path="index.html" title="Home" site={content?.site} /></div>}
+        <div className="columns-[11rem] gap-3">{items.map(i => <Tile key={i.path} item={i} masonry />)}</div>
+      </div>
     </div>
   )
 }

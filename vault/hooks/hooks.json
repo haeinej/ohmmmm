@@ -1,0 +1,10 @@
+{
+  "description": "Tell ohm what Claude Code is doing: its session opening and closing, and each file it edits, so the person sees it live on their canvas.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ohm-activity.mjs\" start", "timeout": 5 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ohm-activity.mjs\" prompt", "timeout": 5 }] }],
+    "PostToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ohm-activity.mjs\" edit", "timeout": 5 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ohm-activity.mjs\" stop", "timeout": 5 }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ohm-activity.mjs\" end", "timeout": 5 }] }]
+  }
+}

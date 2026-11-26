@@ -52,6 +52,9 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { cortexSessions, httpTransport } from '../cortex/src/http.mjs';
 import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
+import { createSiteTools, SITE_INSTRUCTIONS, SITE_TOOLS } from './site-mcp.mjs';
+import { moveOldTools, watchTools } from './site-tools.mjs';
+import { siteLive } from './site-live.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
 import { pdsConfig, webUrl } from '../vault/feed/pds.mjs';
 import { signIn } from '../vault/scripts/rpc.mjs';
@@ -79,7 +82,7 @@ export const AGENT_KEY = '.ohmmmm/agent-key';
 // The one key the bridge had before agents had keys at all. It becomes the shared agent key.
 export const OLD_TOKEN = '.ohmmmm/serve-token';
 // What an agent's key reaches; every other route is the person's, through the app.
-export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/'];
+export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/site/mcp', '/site/activity', '/'];
 export const SITE_CONFIG = 'ohm.jsonc';
 export const MAX_IMAGE = 20 * 1024 * 1024;
 export const IMAGE_TYPES = { 'image/avif': 'avif', 'image/gif': 'gif', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -309,6 +312,22 @@ const vaultSessions = (vault, DatabaseSync, fixed, callerOf) => req => {
       if (named.refused) return refusal(message, named.refused);
       agent = named.name;
     }
+    return handle(message);
+  };
+};
+
+// Each MCP session on /site/mcp: the website's tools (home/site-mcp.mjs), for the agent the session is.
+const siteSessions = (dir, fixed, callerOf, live) => req => {
+  const caller = callerOf(req);
+  let agent = agentOf(caller?.name ?? fixed);
+  const handle = mcpServer({ tools: () => createSiteTools({ dir, agent, live }), list: SITE_TOOLS, name: 'ohm-site', instructions: SITE_INSTRUCTIONS });
+  return message => {
+    if (message?.method === 'initialize') {
+      const named = sessionName(caller, message, fixed);
+      if (named.refused) return refusal(message, named.refused);
+      agent = named.name;
+    }
+    live?.agentSeen(agent);
     return handle(message);
   };
 };
@@ -817,6 +836,11 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
   const callerOf = req => callers.get(req);
   const owner = req => callers.get(req)?.owner;
   const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent, callerOf), origins, endpoint: '/vault/mcp', owner });
+  const live = layout.site ? siteLive(layout.site) : null;
+  // Tools are folders beside the site, written by the person's agent; new ones go on the canvas.
+  const tools = layout.site ? watchTools(layout.site, live) : null;
+  if (layout.site) void moveOldTools(layout.site).catch(() => {});
+  const siteMcp = layout.site ? httpTransport({ open: siteSessions(layout.site, agent, callerOf, live), origins, endpoint: '/site/mcp', owner }) : null;
   let cortex;
   const cortexReady = async () => (cortex ??= (await stat(join(layout.cortex, 'agents', 'AGENTS.md')).catch(() => null))
     ? httpTransport({ open: cortexSessionsFor(layout.cortex, agent, callerOf), origins, endpoint: '/cortex/mcp', owner }) : undefined);
@@ -845,7 +869,7 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
 
   const cortexRoute = cortexRoutes({ dir: layout.cortex, send, said, body });
   // The person's website, `site/` in their ohm (home/site.mjs). An app key's alone, like every route outside AGENT_ROUTES.
-  const siteRoute = layout.site ? siteRoutes({ layout, send, said, body }) : null;
+  const siteRoute = layout.site ? siteRoutes({ layout, send, said, body, live }) : null;
   const json = async (req, limit) => {
     try { return JSON.parse((await body(req, limit)).toString('utf8')); } catch { return undefined; }
   };
@@ -908,14 +932,24 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
       if (!who) return send(res, 401, undefined, { 'WWW-Authenticate': 'Bearer' });
       callers.set(req, { ...who, reserved: known.reserved, owner: createHash('sha256').update(signed).digest('hex') });
       const url = new URL(req.url, 'http://home');
-      if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
+      if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp, /cortex/mcp and /site/mcp; the rest is the person\'s, through the app.');
       const mine = callers.get(req).owner;
       // When a browser was last used, noted at most once an hour, so the person can tell which are still in use.
       if (who.kind === 'app' && Date.now() - (seenAt.get(mine) ?? 0) > 3_600_000) {
         seenAt.set(mine, Date.now());
         await browserSeen(layout.home, mine).catch(() => {});
       }
-      if (siteRoute && isSiteRoute(url.pathname)) {
+      // What an agent's own hooks say it is doing (the ohm plugin): its presence, and the files it edits.
+      if (url.pathname === '/site/activity') {
+        if (req.method !== 'POST') return said(res, 405, 'POST what you are doing');
+        if (!live) return said(res, 404, 'No site');
+        if (who.kind !== 'agent') return said(res, 403, 'Only an agent says what it is doing');
+        const said_ = await json(req, 16_384);
+        if (!said_ || typeof said_ !== 'object') return said(res, 400, 'Send { event, tool, path }');
+        return send(res, 200, live.activity(agentOf(who.name ?? agent), said_));
+      }
+      // The site's MCP is the agents' own door, not one of the site's routes for the app.
+      if (siteRoute && isSiteRoute(url.pathname) && url.pathname !== '/site/mcp') {
         if (await siteRoute(req, res, url)) return;
         return said(res, 404, 'Not a step of the site');
       }
@@ -939,6 +973,7 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         return send(res, 200, { forgotten: forgetting[1], you: forgetting[1] === browserId(mine) });
       }
       if (url.pathname === '/vault/mcp') return await vault(req, res);
+      if (url.pathname === '/site/mcp') return siteMcp ? await siteMcp(req, res) : said(res, 404, 'This ohm has no site yet. Connect one with: ohm site connect <your repository>');
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
@@ -1119,7 +1154,7 @@ async function printAgents(layout, port) {
   const own = await agentKeys(layout.home);
   const shared = await readText(join(layout.home, AGENT_KEY));
   const url = `http://127.0.0.1:${port}`;
-  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohm agents add <name>`);
+  console.log(`Agents: ${url}/vault/mcp, ${url}/cortex/mcp and ${url}/site/mcp (your website), each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohm agents add <name>`);
   if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohm agents remove --shared`);
 }
 

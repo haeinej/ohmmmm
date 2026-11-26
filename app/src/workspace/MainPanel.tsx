@@ -9,7 +9,7 @@ import { SiteView } from "@/site/SiteView"
 import { useSite } from "@/site/connect"
 import { surface } from "./Surface"
 import { openDropped, opensOnDrop } from "./drop"
-import { closeSettings, createDraft, readShared, report, setAudience, setSearchOpen, useWorkspace } from "./store"
+import { closeSettings, createDraft, showMain, readShared, report, setAudience, setSearchOpen, useWorkspace } from "./store"
 import { useEffect, useState } from "react"
 import { readNode } from "../../../vault/vault/node.mjs"
 
@@ -45,10 +45,20 @@ export function MainPanel() {
       )}
       {agent && <AgentStatus state={agent.state} label={agent.label} className="absolute top-16 right-4 z-10 animate-in fade-in-0 slide-in-from-top-1" />}
 
-      {site && view.kind === "empty" ? (
-        // With nothing else open, the main panel is the person's site as an editor view. It is their
-        // own folder on this computer, so it opens without the home.
-        <SiteView />
+      {site && (view.kind === "empty" || view.kind === "doc") ? (
+        // With a site, the main panel is always its canvas. A block of the home (a new writing from the +)
+        // opens in the editor over it, in the window beside the card, as everything opened from it does.
+        <>
+          <SiteView />
+          {doc && (
+            <div className="absolute inset-0 z-30 flex items-start bg-black/15 py-3 ps-[356px] pe-3 animate-in fade-in-0"
+              onPointerDown={e => { if (e.target === e.currentTarget) showMain() }}>
+              <div className="relative flex h-full w-full flex-col overflow-hidden rounded-3xl bg-card shade-5">
+                <PageEditor key={`${doc.id}:${restored?.id === doc.id ? restored.n : 0}`} doc={doc} />
+              </div>
+            </div>
+          )}
+        </>
       ) : status === "signed-out" ? (
         <SignIn />
       ) : status === "loading" ? (

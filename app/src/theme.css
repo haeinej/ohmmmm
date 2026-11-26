@@ -178,3 +178,11 @@
   background-color: var(--primary);
   color: var(--primary-foreground);
 }
+
+/* Highlighted controls in charcoal, not forest (Publish, the chosen pill, a chosen card's ring, focus):
+   a quieter, more minimal app. ohm-ui's tokens stay as they are; this is the app's own choice. */
+:root {
+  --ohm-accent-fill: light-dark(#222222, #ededed);
+  --ohm-on-accent: light-dark(#ffffff, #111111);
+  --ring: light-dark(#222222, #ededed);
+}

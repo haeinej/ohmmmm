@@ -1,6 +1,7 @@
 // The person's profile (flows/site.md): who they are, kept as one Markdown file in their folder.
 // The card sits fixed at the top of the side panel; opening it shows the profile over the canvas,
 // identity in fields on the right and what they say about themselves in the editor on the left.
+import { cn } from "@/lib/cn"
 import { useEffect, useState } from "react"
 import { EditorContent, useEditor } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
@@ -37,7 +38,8 @@ function Picture({ profile, className }: { profile: SiteProfile; className: stri
  * the person's own colour. The card opens the profile; the address on it opens the home itself.
  * One size whatever the panel's width: the panel grows beside it, the card does not.
  */
-export function ProfileCard() {
+/** `flat`: part of a larger surface in its own colour (the open home card), so no shadow and no tilt of its own. */
+export function ProfileCard({ flat }: { flat?: boolean } = {}) {
   const [profile, setProfile] = useState<SiteProfile | null>(null)
   useEffect(() => {
     readProfile().then(setProfile, () => {})
@@ -47,7 +49,9 @@ export function ProfileCard() {
   }, [])
   if (!profile) return <div className="aspect-[4/3] w-[17.25rem] max-w-full" aria-busy />
   return (
-    <IdentityCard className="w-[17.25rem]" finish="matt" color={profile.color || null}
+    <IdentityCard className={cn("w-full [--ohm-identity-ratio:16/9]",
+      // Flat: the card's face runs on into the surface below, with no shadow, tilt or bottom corners of its own.
+      flat && "[&>section]:!shadow-none [&>section]:![transform:none] [&>section]:!rounded-b-none [&>section>div:first-child]:![clip-path:none] [&>section>div:first-child]:!rounded-b-none")} finish="matt" color={profile.color || null}
       name={profile.name || "Your name"} address={profile.handle || null} did={profile.did || null} wallet={profile.wallet || null}
       avatarSrc={pictureUrl(profile.image) || null}
       onOpen={askToOpenProfile}
