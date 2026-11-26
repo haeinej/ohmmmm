@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FileTree, type FileTreeNode } from "@/components/ui/file-tree"
 import { channelRowId, type Audience } from "@/data/workspace-model"
-import { inOrder } from "@/data/workspace-data"
+import { inOrder, titleOf } from "@/data/workspace-data"
 import { docOfUnit, folderRowId, readLevel, unitSeenBy, type Level, type Unit } from "@/data/units"
 import { kept, marks, openUnit, report } from "./store"
 
@@ -76,7 +76,8 @@ function inChannelOrder(folder: string, units: Unit[]) {
 /** A unit's row: its document's id when it is one, placed in the channel the folder is. */
 function rowOf(unit: Unit, folder: string): FileTreeNode {
   const doc = docOfUnit(unit)
-  const name = `${doc?.icon ? `${doc.icon} ` : ""}${unit.title || doc?.title || "Untitled block"}`
+  // A block or an agent's file is named as everywhere else in the app; any other unit by its own title.
+  const name = doc ? `${doc.icon ? `${doc.icon} ` : ""}${titleOf(doc)}` : unit.title || unit.path.split("/").at(-1)!
   if (!doc) return { id: `unit:${unit.key}`, name }
   const channel = folder.split("/").slice(1).join("/")
   const home = unit.channels?.[0]
