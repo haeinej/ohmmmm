@@ -2,7 +2,7 @@
 // time. With a paired bridge the home folder answers (`/units?in=`); without one, the blocks, channels
 // and agents' files already loaded are turned into the same units here, so the tree is the same view
 // either way. The shape and the rules are the contract's (contract/unit.mjs), never redone here.
-import { levelOf, sees as unitSees } from "../../../contract/unit.mjs"
+import { excerptOf, feed as feedOf, levelOf, sees as unitSees } from "../../../contract/unit.mjs"
 import { bridgeFetch, currentBridge } from "./bridge"
 import { blocks, byId, channelRecords, cortex } from "./workspace-data"
 import { locationOf, type Audience, type Doc } from "./workspace-model"
@@ -11,9 +11,14 @@ export type UnitType = "block" | "channel" | "profile" | "wallet" | "observation
 export type Unit = {
   key: string; type: UnitType; kind?: string
   /** The lexicon of its record: com.ohmmmm.vault.block or .channel. A unit with no record of its own has none. */
-  nsid?: string; root: "collections" | "profile" | "agents" | "site"
+  nsid?: string; root: "collections" | "profile" | "agents" | "site" | "tools"
   path: string; id?: string; title?: string; visibility: Audience; channels?: string[]
+  /** For a kept website, its address. */
   by?: string; origin?: string; created?: string; updated?: string
+  /** A block's opening words, for its post card. */
+  excerpt?: string
+  /** What its card shows: an address, `site:<path>` in the site, or `collections:<path>` beside the block. */
+  cover?: string
 }
 export type UnitFolder = { path: string; title: string; count: number; unit?: Unit }
 export type Level = { folder: string; folders: UnitFolder[]; units: Unit[] }
@@ -33,7 +38,7 @@ function loadedUnits(): Unit[] {
     if (!doc.homeChannel) continue
     units.push({ key: `block:${doc.vaultId ?? doc.id}`, type: "block", kind: doc.kind, nsid: "com.ohmmmm.vault.block", root: "collections",
       path: `collections/${doc.homeChannel}/${doc.slug}.md`, id: doc.vaultId ?? doc.id, title: doc.title, visibility: doc.visibility,
-      channels: [...new Set([doc.homeChannel, ...(doc.channels ?? [])])], updated: doc.updated })
+      channels: [...new Set([doc.homeChannel, ...(doc.channels ?? [])])], updated: doc.updated, excerpt: (doc.kind === "short" ? doc.body.trim() : excerptOf(doc.body)) || undefined, by: doc.by === "you" ? "me" : doc.by })
   }
   for (const doc of cortex) {
     const name = doc.id.replace(/^(observation|skill|tool)-/, "")
@@ -92,9 +97,24 @@ export function readUnits(): Promise<Unit[]> {
 
 /** Where a unit is, as people name the home's parts: `Site / src / content`. */
 export function unitPlace(unit: Unit) {
+  // A kept website is in the Artifacts channel, as the Site view shows it, not in the file that keeps it.
+  if (unit.kind === "link") return "Artifacts"
   const [top, ...rest] = unit.path.split("/")
-  const part = ({ collections: "Collections", vault: "Collections", agents: "Agents", cortex: "Agents", profile: "Profile", site: "Site" } as Record<string, string>)[top] ?? top
+  const part = ({ collections: "Collections", vault: "Collections", agents: "Agents", cortex: "Agents", profile: "Profile", site: "Site", tools: "Tools" } as Record<string, string>)[top] ?? top
   return [part, ...rest.slice(0, -1)].join(" / ")
+}
+
+/**
+ * The feed (app/flows/feed.md): the units `audience` sees, the latest change first. From the bridge when
+ * one is paired and has /units/feed; otherwise from what is loaded, by the contract's own feed().
+ */
+export async function readFeed({ audience = "private", limit = 100, before }: { audience?: Audience; limit?: number; before?: string } = {}): Promise<Unit[]> {
+  if (currentBridge()) {
+    const query = new URLSearchParams({ audience, limit: String(limit), ...(before ? { before } : {}) })
+    const answer = await bridgeFetch(`/units/feed?${query}`).catch(() => null)
+    if (answer?.ok) return remember(((await answer.json()) as { units: Unit[] }).units)
+  }
+  return remember(feedOf(loadedUnits(), { audience, limit, before }) as Unit[])
 }
 
 // ---- From a unit to what opens it ----

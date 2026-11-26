@@ -14,7 +14,7 @@ import { docOfUnit, folderRowId, readLevel, unitSeenBy, type Level, type Unit } 
 import { kept, marks, openUnit, report } from "./store"
 
 /** The home's parts by the names people see; Agents and Collections have rows of their own. */
-const PART_NAME: Record<string, string> = { profile: "Profile", site: "Site" }
+const PART_NAME: Record<string, string> = { profile: "Profile", site: "Site", tools: "Tools" }
 type Loaded = Level | "loading" | "failed"
 const LOADING = (path: string): FileTreeNode => ({ id: `loading:${path}`, name: "…" })
 

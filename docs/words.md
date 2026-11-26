@@ -22,6 +22,7 @@ People see one product, **ohm** (never "ohmmmm"), and four folders in their ohm:
 ## In the vault
 
 - **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post**: a standard.site document (`site.standard.document`) in the member's repository, with the post itself inside as `com.ohmmmm.post` content. The member's website is its **publication** (`site.standard.publication`).
+- **Short post** (kind `short`): a block of at most 300 characters, as on Bluesky. Published, it is an `app.bsky.feed.post` in the member's repository, not a `site.standard.document`, and it shows on their site too.
 - **Media block:** a block of kind `media` that holds one image: its file sits beside it in the home folder, and its `hash` is the bytes' CID. Another block shows it with an **embed**, `![[slug]]`. Outside the home folder its bytes are in the **media cache** (the browser's `ohm-media` today), with **sizes**: smaller copies made on the device ([vault/plans/media.md](../vault/plans/media.md)).
 - **Channel:** an ordered collection of blocks; a block can be in many. Named by its path, such as `essays` or `notes/reading`.
 - **Former name:** a path, slug or title a block or channel had before it was renamed or moved. Old names keep working: the journal records them (`renamed`, `moved`), and a reference that uses one is listed to tidy, never broken ([vault/plans/renames.md](../vault/plans/renames.md)).

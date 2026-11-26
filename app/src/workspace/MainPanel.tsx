@@ -13,20 +13,24 @@ import { closeSettings, createDraft, showMain, readShared, report, setAudience, 
 import { useEffect, useState } from "react"
 import { readNode } from "../../../vault/vault/node.mjs"
 import { FileEditor } from "@/site/FileEditor"
+import { ToolFrame } from "@/site/ToolFrame"
+import { FeedView } from "./FeedView"
 import { ProfileView } from "@/site/ProfileView"
 import type { Unit } from "@/data/units"
 
-/** Signed out: the home lives on the vault service, so the way in is ohm's sign-in. */
-export function SignIn() {
+/**
+ * No home open: the home is the folder on this computer, opened through its bridge. Run `ohm serve` in
+ * it, and open the pairing link it prints in this browser, once.
+ */
+export function OpenHome() {
   return (
     <Empty className="flex-1">
       <EmptyHeader>
-        <EmptyTitle>Sign in to open your home</EmptyTitle>
-        <EmptyDescription>Your Collections and Agents are kept by ohm's service. Sign in with your ohm account to see them here.</EmptyDescription>
+        <EmptyTitle>Open your home</EmptyTitle>
+        <EmptyDescription>
+          Your home is the folder <code>ohm.&lt;your handle&gt;</code> on this computer. In it, run <code>ohm serve</code>, then open the pairing link it prints in this browser. Already paired? Run <code>ohm serve</code>, then reload.
+        </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent className="flex-row justify-center">
-        <Button nativeButton={false} render={<a href="/vault/" />}>Sign in</Button>
-      </EmptyContent>
     </Empty>
   )
 }
@@ -63,7 +67,7 @@ export function MainPanel() {
           )}
         </>
       ) : status === "signed-out" ? (
-        <SignIn />
+        <OpenHome />
       ) : status === "loading" ? (
         // A page loading is blank (AGENTS.md rule 14).
         <div className="flex-1" aria-busy />
@@ -83,6 +87,8 @@ export function MainPanel() {
         <PageEditor key={`${doc.id}:${restored?.id === doc.id ? restored.n : 0}`} doc={doc} />
       ) : view.kind === "shared" ? (
         <SharedView key={`${view.owner}:${view.id}`} owner={view.owner} id={view.id} />
+      ) : view.kind === "feed" ? (
+        <FeedView />
       ) : view.kind === "unit" ? (
         <UnitView key={view.unit.key} unit={view.unit} />
       ) : view.kind === "settings" ? (
@@ -117,6 +123,18 @@ export function MainPanel() {
  */
 function UnitView({ unit }: { unit: Unit }) {
   if (unit.type === "profile" || unit.type === "wallet") return <ProfileView onClose={showMain} />
+  // A tool built for you runs here; a kept website shows as the page itself, in a frame that can't reach ohm.
+  if (unit.kind === "tool" && unit.id) return <ToolFrame name={unit.id} className="relative flex-1" />
+  if (unit.kind === "link" && unit.origin) return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-2 px-4">
+        <span className="min-w-0 flex-1 truncate text-body font-medium">{unit.title}</span>
+        <Button size="sm" variant="ghost" onClick={() => window.open(unit.origin, "_blank", "noopener")}>Open</Button>
+        <Button size="sm" variant="ghost" onClick={showMain}>Close</Button>
+      </header>
+      <iframe title={unit.title ?? unit.origin} src={unit.origin} sandbox="allow-scripts allow-same-origin allow-forms" referrerPolicy="no-referrer" className="min-h-0 flex-1 border-0 bg-white" />
+    </div>
+  )
   if (unit.type === "artifact" && unit.path.startsWith("site/")) return <FileEditor path={unit.path.slice(5)} onClose={showMain} />
   return (
     <Empty className="flex-1">

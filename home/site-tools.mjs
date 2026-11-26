@@ -30,6 +30,7 @@ export async function toolsOf(dir) {
       name,
       title: String(meta.title || tag(html, /<title[^>]*>([^<]*)<\/title>/i) || name).slice(0, 120),
       description: String(meta.description || tag(html, /<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i)).slice(0, 400),
+      ...(typeof meta.by === 'string' ? { by: meta.by } : {}),
       changed: s.mtime.toISOString(),
       folder: join(root, name),
     });

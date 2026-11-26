@@ -12,7 +12,7 @@ How to read each path:
 - **Agent:** the WebMCP tool that runs the same step, or *UI only*.
 - **Asks first:** for anything other people would see, or anything that can't be undone, the block confirms before acting.
 
-**Production first.** The workspace shows the signed-in member's home from their vault service and nothing else: no sample data is in the app. Signed out, it shows sign-in. Every change is sent to the service first and shows once the service has answered; it lasts across reloads and devices. The private layer and the cortex open only on a device that has unlocked the account's keys; until then they show as locked. Places with nothing in them show ohm-ui's `Empty`.
+**Your home, on this computer.** The workspace shows the home folder `ohm.<handle>` through its bridge (`ohm serve`), once this browser is paired from the link the bridge prints, and nothing else: no sample data, no online home. Unpaired, or with the bridge not answering, it shows **Open your home**, which says how. Every change is written to the home folder first and shows once the bridge has answered. Places with nothing in them show ohm-ui's `Empty`.
 
 ---
 
@@ -169,7 +169,7 @@ Settings › **Friends** lists each friend you let in, with their name, email an
 | G6a | Accept a profile line | Settings → Cortex → Accept (or Decline) | The line is under its heading in your profile, as your change; declined, it is never proposed again | Decide what agents may take as true about you | *UI only* |
 | G6b | Approve a skill | Settings → Cortex → Approve (or Decline) | The skill is in force, as your change naming the agent; declined, it is moved aside, kept | Decide how agents do things for you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
-| G8 | Sign out | Settings → Sign out | Ends the ohm session (`POST /api/auth/sign-out`); the workspace then shows sign-in | Leave | *UI only* |
+| G8 | Unpair this browser | You → Unpair this browser | This browser forgets the bridge it was paired with; the workspace shows Open your home until it is paired again | Leave this computer's home | *UI only* |
 
 ## H. History ([flows/history.md](history.md))
 

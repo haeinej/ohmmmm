@@ -10,7 +10,7 @@ An agent that clicks through pixels is slow and fragile. It can also do things t
 
 ## The workspace
 
-A light, Obsidian-like workspace over the signed-in member's own home, the first flow ([flows/workspace.md](flows/workspace.md)). **Production first:** it reads and writes the member's vault service and nothing else. There is no sample data in the app; synthetic fixtures live only in `test/fixtures/` for tests. Signed out, it shows sign-in.
+A light, Obsidian-like workspace over the signed-in member's own home, the first flow ([flows/workspace.md](flows/workspace.md)). It reads and writes the member's home folder on this computer, through its bridge (`ohm serve`), and nothing else. There is no sample data in the app; synthetic fixtures live only in `test/fixtures/` for tests. Unpaired, it shows Open your home.
 
 - A **rack** on the page: search, new block, **home** (a pill with your picture and name; All, Cortex, Vault; visibility inside it), notifications, and you.
 - A **side panel** card that becomes what the rack chose. The home has cortex and vault as checkable top-level rows, and a **graph** inside it. In the graph a node is a block and an edge is a connect ([words](../docs/words.md#in-the-graph)): you are in the middle, blocks are coloured by their label and sized by their backlinks, and a connection an agent only observed is dashed and drawn apart. The cortex is a toggle, off by default. It behaves like Obsidian's: springy, with hover highlighting and drag.
@@ -30,7 +30,7 @@ Out of the box the data is synthetic: a sample vault and cortex, restored on eve
 
 New blocks start private: sealed on this device and sent as ciphertext, so writing needs a device that has unlocked the account's keys. Shared blocks (friends) and published posts are read and kept by the service. The cortex is sealed too, under its own context, and opens only on an unlocked device.
 
-To try it, run the app on the same address as a vault service (`/vault/xrpc/…`) and sign in there. With no service, the workspace shows sign-in.
+To try it, run `ohm serve --app http://localhost:5190` in your home and open the pairing link it prints. Unpaired, the workspace shows Open your home.
 
 The editor saves pending typing when you switch blocks. Restoring a version or reverting a change loads the resulting text. Links to a draft keep working after you rename it.
 

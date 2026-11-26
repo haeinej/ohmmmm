@@ -30,7 +30,7 @@ import { startChannel } from "./PageActions"
 import { SETTINGS_TABS } from "./settings-tabs"
 import { SidePanelFrame } from "./Surface"
 import {
-  createDraft, kept, marks, me, moveBlock, moveChannel, open, openSettings, report, signOut, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
+  createDraft, kept, marks, me, moveBlock, moveChannel, open, openSettings, report, unpair, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
 } from "./store"
 
 
@@ -393,7 +393,7 @@ function RepoPanel() {
               </Empty>
             )}
           </>}
-          {showVault && <UnitTree root="" only={["site"]} label="Site" {...treeProps} />}
+          {showVault && <UnitTree root="" only={["site", "tools"]} label="Site and tools" {...treeProps} />}
           {archived.length > 0 && <>
             <button type="button" onClick={() => setShowArchived(v => !v)} aria-expanded={showArchived}
               className="ux-row mt-2 flex w-full items-center gap-1.5 px-1.5 text-left text-small text-muted-foreground">
@@ -447,9 +447,9 @@ function ProfilePanel() {
           </Button>
         ))}
         <div className="mt-9 flex flex-col">
-          {/* Signing out ends the ohm session, which lives with ohm's sign-in on this address. */}
-          <Button variant="ghost" className={row} onClick={() => void report(signOut())}>
-            <Icon icon={LogOutIcon} size="sm" /><span>Sign out</span>
+          {/* The home is open here because this browser is paired with its bridge; unpairing closes it here. */}
+          <Button variant="ghost" className={row} onClick={() => void report(unpair())}>
+            <Icon icon={LogOutIcon} size="sm" /><span>Unpair this browser</span>
           </Button>
         </div>
       </nav>
@@ -460,6 +460,8 @@ function ProfilePanel() {
 export function SidePanel() {
   const { side, view } = useWorkspace()
   const site = useSite().connected
+  // The feed is a canvas of its own: it takes the whole page, as the site's canvas does.
+  if (view.kind === "feed") return null
   // Beside the site, the home's panel is its content as tiles, and it stays: closing it is not offered.
   // Beside the site, the home panel lives on the canvas itself, as the profile card (SiteView).
   if (site && (view.kind === "empty" || view.kind === "doc") && (side === "repo" || side === null)) return null

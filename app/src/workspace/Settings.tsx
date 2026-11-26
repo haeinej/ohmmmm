@@ -131,6 +131,8 @@ const copy = (text: string) => {
 const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] = [
   { name: "workspace.search", title: "Search", does: "Searches your Collections and Agents", reads: true },
   { name: "workspace.open", title: "Open", does: "Opens a block or cortex file", reads: true },
+  { name: "short.write", title: "Save", does: "Saves a short post as private; nothing is published", reads: false },
+  { name: "feed.read", title: "Feed", does: "Shows your feed and reads what changed in your home, newest first", reads: true },
   { name: "workspace.graph", title: "Show graph", does: "Shows the graph of your blocks, or of those mentioning a person", reads: true },
   { name: "workspace.create", title: "New block", does: "Starts a private draft", reads: false },
   { name: "workspace.save-draft", title: "Save draft", does: "Saves the open draft as private", reads: false },

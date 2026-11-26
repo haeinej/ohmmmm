@@ -2,6 +2,7 @@
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
 import { docOfUnit, unitById, UNIT_ID, type Unit } from "@/data/units"
+import { forgetBridge } from "@/data/bridge"
 import { useSyncExternalStore } from "react"
 import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
   inOrder, isBlock, isCortexKind, journalOf, landBlock, landChannel, landCortex, heldCortex, dropCortex, owner, blocks, selectSource,
@@ -27,7 +28,7 @@ import { keep, makeSizes, measure } from "@/media/cache"
 
 const live = () => {
   const source = getSource()
-  if (!source) throw new DOMException("Sign in to change your home.", "InvalidStateError")
+  if (!source) throw new DOMException("No home is open here. Run ohm serve in your home, then open the pairing link it prints.", "InvalidStateError")
   return source
 }
 const draftOf = (id: string) => {
@@ -108,6 +109,8 @@ export type View =
   | { kind: "settings"; tab: SettingsTab }
   /** A unit that is not a block or an agent's file: the profile, the wallet, or a file of the site. */
   | { kind: "unit"; unit: Unit }
+  /** The feed of the home's units, newest first (flows/feed.md). */
+  | { kind: "feed" }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
 export type Density = "compact" | "comfortable" | "rounded"
@@ -124,6 +127,7 @@ export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph"
   | "visibility.preview" | "visibility.move"
   | "cortex.observe"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
+  | "feed.read" | "short.write"
 
 type State = {
   side: Side
@@ -179,6 +183,7 @@ let state: State = {
     "visibility.preview": true, "visibility.move": true,
     "cortex.observe": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
+    "feed.read": true, "short.write": true,
   },
 }
 const listeners = new Set<() => void>()
@@ -220,12 +225,9 @@ export async function setSource<Master, Sealed>(
     reveal: null, returnTo: null, restored: null, historyFocus: null, searchOpen: false })
 }
 
-/** Ends the ohm session (ohm's sign-in, Better Auth, on this address) and shows sign-in. */
-export async function signOut() {
-  const response = await fetch(new URL("/api/auth/sign-out", location.origin), {
-    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}",
-  })
-  if (!response.ok) throw new DOMException("Signing out failed. Try again.", "OperationError")
+/** Forgets the bridge this browser was paired with: the home closes here until it is paired again. */
+export async function unpair() {
+  forgetBridge()
   await setSource(null)
 }
 
@@ -235,25 +237,9 @@ export const reload = () => serial(async () => {
   if (source) await setSource(source, { keepView: true })
 })
 
-/**
- * Finds who is signed in on this origin and opens their vault service. Signed out, or with no
- * service here, the workspace shows sign-in. The private layer and the cortex open once this device
- * has unlocked the account's keys (`privateSession`, from the account app's packages/keys).
- */
 /** The source changed what it holds by itself (the home's bridge answered): read it again, keeping the view. */
 export const sourceChanged = () => { const source = getSource(); return source ? report(setSource(source, { keepView: true })) : Promise.resolve() }
 
-export async function connectHome<Master, Sealed>(options: Pick<ServiceOptions<Master, Sealed>, "privateSession" | "fetch"> = {}) {
-  const send = options.fetch ?? fetch
-  try {
-    const response = await send(new URL("/vault/xrpc/com.ohmmmm.account.get", location.origin), { credentials: "same-origin", redirect: "error" })
-    const account = response.ok ? await response.json() as { did?: string | null } : null
-    if (!account?.did) return setSource(null)
-    await setSource({ service: { origin: location.origin, did: account.did, ...options } })
-  } catch {
-    await setSource(null)
-  }
-}
 
 export const useWorkspace = () =>
   useSyncExternalStore(cb => (listeners.add(cb), () => listeners.delete(cb)), () => state)
@@ -648,6 +634,11 @@ export function openUnit(unit: Unit): Opened {
   return { id: `${UNIT_ID}${unit.key}`, title: unit.title ?? unit.path, view: "read", next: "workspace.open" }
 }
 
+/** Shows the feed in the main panel (flows/feed.md); the Feed button and `feed.read` both call this. */
+export function showFeed() {
+  set({ view: { kind: "feed" }, searchOpen: false, ...sideAfterOpen() })
+}
+
 /** The graph lives in the side panel, in the home. */
 export const setGraphCortex = (graphCortex: boolean) => set({ graphCortex })
 export function showGraph(center?: string) {
@@ -682,6 +673,28 @@ export async function createDraft(input: { homeChannel?: string; channels?: stri
   try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
   set({ view: { kind: "doc", id: doc.id, mode: "edit" }, ...bump(), searchOpen: false, ...sideAfterOpen() })
   return { id: doc.id, slug, view: "edit", next: "workspace.save-draft" }
+}
+
+/** A short post's length, as Bluesky counts it: graphemes (app/flows/short-post.md). */
+export const SHORT_LENGTH = 300
+export const shortLength = (text: string) => [...new Intl.Segmenter().segment(text)].length
+/**
+ * Saves a short post: a private block of kind `short` in Collections › posts, with no title, its text its
+ * body. Nothing is published. The composer's Save and `short.write` both call this.
+ */
+export async function writeShort(input: { text: string }) {
+  const text = String(input.text ?? "").trim()
+  if (!text) throw new DOMException("Write something first", "DataError")
+  if (shortLength(text) > SHORT_LENGTH) throw new DOMException(`A short post is at most ${SHORT_LENGTH} characters`, "DataError")
+  const slug = freeSlug(text.split(/\s+/).slice(0, 6).join(" "), "post")
+  const doc: Doc = {
+    id: newOpaqueId(), vaultId: newNodeId(), kind: "short", slug, title: "", homeChannel: "posts", visibility: "private",
+    updated: today(), body: text,
+  }
+  usedSlugs.add(slug)
+  try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
+  set({ ...bump() })
+  return { id: doc.id, next: "feed.read" }
 }
 
 /** Saves the open block as private. Never publishes. */

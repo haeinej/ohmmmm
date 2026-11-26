@@ -12,8 +12,8 @@
         "properties": {
           "kind": {
             "type": "string",
-            "description": "What the block is. Read from the content when not given: one fenced code block is code, one embedded file is file or media, one address is link, otherwise text. A post file (see visibility) is a post. A wallet is an address the member's identity holds (its body is the address); an artifact is a content file of the member's site (its origin is the file). Treat a kind you do not know as text.",
-            "knownValues": ["text", "excerpt", "link", "media", "file", "code", "post", "wallet", "artifact"]
+            "description": "What the block is. Read from the content when not given: one fenced code block is code, one embedded file is file or media, one address is link, otherwise text. A post file (see visibility) is a post. A wallet is an address the member's identity holds (its body is the address); an artifact is a content file of the member's site (its origin is the file). A short is a short post, as on Bluesky: at most 300 characters of text, published as an app.bsky.feed.post rather than as a document. Treat a kind you do not know as text.",
+            "knownValues": ["text", "excerpt", "link", "media", "file", "code", "post", "wallet", "artifact", "short"]
           },
           "title": { "type": "string", "maxGraphemes": 300, "maxLength": 3000 },
           "body": {

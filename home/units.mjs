@@ -4,7 +4,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import { artifactKind, feed, levelOf, unitsOf } from '../contract/unit.mjs';
-import { tracked } from './site.mjs';
+import { LINKS, linksOf, tracked } from './site.mjs';
+import { toolsOf, toolsDir } from './site-tools.mjs';
 
 // A site can be a large checkout. Past this many artifacts the rest are left out, not read.
 export const MAX_SITE_FILES = 5000;
@@ -50,7 +51,9 @@ async function sitePart(dir) {
   let paths;
   try { paths = [...tracked(dir)].filter(path => artifactKind(path) !== null).sort().slice(0, MAX_SITE_FILES); } catch { paths = []; }
   const present = (await Promise.all(paths.map(async path => (await stat(join(dir, path)).then(() => true, () => false)) && path))).filter(Boolean);
-  return { folder: basename(dir), files: await filesOf(dir, present, path => artifactKind(path) === 'page') };
+  // The site's own domain (its CNAME, as the site routes read it), so its own addresses are its files.
+  const domain = await readFile(join(dir, 'CNAME'), 'utf8').then(text => text.trim().split(/\s+/)[0], () => undefined);
+  return { folder: basename(dir), domain, files: await filesOf(dir, present, path => artifactKind(path) === 'page') };
 }
 
 /** Every unit in the home `layout` (home/home.mjs's layoutOf), each with its path from the top of the home. */
@@ -62,7 +65,13 @@ export async function readUnits(layout) {
     part(layout.cortex, markdown),
     sitePart(layout.site),
   ]);
-  return unitsOf({ collections, profile, agents, site });
+  // Kept websites and built tools sit beside the site: its .ohm/links.json, and tools/ in the home.
+  const [links, tools] = await Promise.all([linksOf(layout.site), toolsOf(layout.site)]);
+  return unitsOf({
+    collections, profile, agents, site,
+    links: { path: join(basename(layout.site), LINKS), links },
+    tools: { folder: basename(toolsDir(layout.site)), tools },
+  });
 }
 
 /** The home's feed for an audience: see feed() in ../contract/unit.mjs. */

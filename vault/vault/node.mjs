@@ -15,7 +15,10 @@ import { FILE_TYPES, graphemes, isSlug, kindOf as mediaKind, VaultProblem, VISIB
 import { filePost, isPostId, newPostId, postFile, postProblems, readProperties, slugOf, splitFile, writeNoteFile } from './file.mjs';
 
 // wallet and artifact: the profile's wallet and the site's content files, read as blocks (docs/plans/units.md).
-export const BLOCK_KINDS = ['text', 'excerpt', 'link', 'media', 'file', 'code', 'post', 'wallet', 'artifact'];
+// short: a short post, as on Bluesky, published as an app.bsky.feed.post (app/flows/short-post.md).
+export const BLOCK_KINDS = ['text', 'excerpt', 'link', 'media', 'file', 'code', 'post', 'wallet', 'artifact', 'short'];
+// A short post's length, as Bluesky counts it: graphemes.
+export const SHORT_LENGTH = 300;
 export const CHANNEL_KINDS = ['collection', 'concept', 'import'];
 export const ENTITY_KINDS = ['person', 'work', 'place', 'org'];
 export const SOURCE_KINDS = ['page', 'post', 'file', 'image', 'video', 'audio', 'thread', 'book', 'other'];
