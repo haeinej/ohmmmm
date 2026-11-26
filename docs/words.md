@@ -16,7 +16,7 @@ People see one product, **ohm** (never "ohmmmm"), and four folders in their ohm:
 
 ## Units
 
-- **Unit:** anything in a home, as every part of ohm reads it: a block, a channel, the profile and its **wallet**, an agent's observation, skill, tool or memory, or an **artifact** (a content file of the site). Each keeps its file and its own reader; the unit is the envelope they all return, `com.ohmmmm.unit`, with its `path` from the top of the home ([contract/unit.mjs](../contract/unit.mjs), [plans/units.md](plans/units.md)).
+- **Unit:** anything in a home, as every part of ohm reads it: a block, a channel, the profile and its **wallet**, an agent's observation, skill, tool or memory, or an **artifact** (a content file of the site). Each keeps its file and its own reader; the unit is the shape they all return, a contract in code and not a lexicon, with its `path` from the top of the home ([contract/unit.mjs](../contract/unit.mjs), [plans/units.md](plans/units.md)).
 - **Feed:** the units someone sees, the latest change first. You see every unit, a friend public and friends units, everyone public ones.
 
 ## In the vault

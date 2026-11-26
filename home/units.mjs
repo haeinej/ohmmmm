@@ -4,6 +4,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 import { artifactKind, feed, levelOf, unitsOf } from '../contract/unit.mjs';
+import { tracked } from './site.mjs';
 
 // A site can be a large checkout. Past this many artifacts the rest are left out, not read.
 export const MAX_SITE_FILES = 5000;
@@ -43,6 +44,15 @@ async function part(dir, keep, withText, limit) {
   return { folder: basename(dir), files: await filesOf(dir, paths, withText) };
 }
 
+// The site's artifacts are its tracked content files: what the site's own routes open, save and publish.
+// A site/ that is not a git checkout yet has none.
+async function sitePart(dir) {
+  let paths;
+  try { paths = [...tracked(dir)].filter(path => artifactKind(path) !== null).sort().slice(0, MAX_SITE_FILES); } catch { paths = []; }
+  const present = (await Promise.all(paths.map(async path => (await stat(join(dir, path)).then(() => true, () => false)) && path))).filter(Boolean);
+  return { folder: basename(dir), files: await filesOf(dir, present, path => artifactKind(path) === 'page') };
+}
+
 /** Every unit in the home `layout` (home/home.mjs's layoutOf), each with its path from the top of the home. */
 export async function readUnits(layout) {
   const markdown = path => path.endsWith('.md');
@@ -50,7 +60,7 @@ export async function readUnits(layout) {
     part(layout.vault, markdown),
     part(layout.profile, path => path === 'profile.md'),
     part(layout.cortex, markdown),
-    part(layout.site, path => artifactKind(path) !== null, path => artifactKind(path) === 'page', MAX_SITE_FILES),
+    sitePart(layout.site),
   ]);
   return unitsOf({ collections, profile, agents, site });
 }

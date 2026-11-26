@@ -5,11 +5,13 @@
 import { levelOf, sees as unitSees } from "../../../contract/unit.mjs"
 import { bridgeFetch, currentBridge } from "./bridge"
 import { blocks, byId, channelRecords, cortex } from "./workspace-data"
-import type { Audience, Doc } from "./workspace-model"
+import { locationOf, type Audience, type Doc } from "./workspace-model"
 
 export type UnitType = "block" | "channel" | "profile" | "wallet" | "observation" | "skill" | "tool" | "memory" | "artifact"
 export type Unit = {
-  key: string; type: UnitType; kind?: string; nsid: string; root: "collections" | "profile" | "agents" | "site"
+  key: string; type: UnitType; kind?: string
+  /** The lexicon of its record: com.ohmmmm.vault.block or .channel. A unit with no record of its own has none. */
+  nsid?: string; root: "collections" | "profile" | "agents" | "site"
   path: string; id?: string; title?: string; visibility: Audience; channels?: string[]
   by?: string; origin?: string; created?: string; updated?: string
 }
@@ -20,7 +22,6 @@ export const unitSeenBy = (audience: Audience, unit: Unit) => unitSees(audience,
 
 // ---- Without a bridge: the units of what is loaded ----
 
-const UNIT = "com.ohmmmm.unit"
 function loadedUnits(): Unit[] {
   const units: Unit[] = []
   for (const channel of channelRecords) {
@@ -38,7 +39,7 @@ function loadedUnits(): Unit[] {
     const name = doc.id.replace(/^(observation|skill|tool)-/, "")
     const path = doc.kind === "profile" ? "agents/profile.md" : doc.kind === "observation" ? `agents/observations/${name}.md`
       : doc.kind === "skill" ? `agents/skills/${name}/SKILL.md` : `agents/tools/${name}.md`
-    units.push({ key: `agents:${path.slice(7)}`, type: doc.kind === "profile" ? "memory" : doc.kind as UnitType, nsid: UNIT, root: "agents",
+    units.push({ key: `agents:${path.slice(7)}`, type: doc.kind === "profile" ? "memory" : doc.kind as UnitType, root: "agents",
       path, id: name, title: doc.title, visibility: "private", channels: [], updated: doc.updated })
   }
   // A channel is as open as the most open block in it, as the contract reads it from the folder.
@@ -51,14 +52,49 @@ function loadedUnits(): Unit[] {
   return units
 }
 
+// Every unit the app has read, by key, so `unit:<key>` opens the same way from a row, a search hit or a tool.
+const known = new Map<string, Unit>()
+const remember = <T extends Unit[]>(units: T) => { for (const unit of units) known.set(unit.key, unit); return units }
+export const UNIT_ID = "unit:"
+export const unitById = (id: string) => (id.startsWith(UNIT_ID) ? known.get(id.slice(UNIT_ID.length)) : undefined)
+
 /** One folder of the home ('' for the top), from the bridge when one is paired. */
 export async function readLevel(folder: string): Promise<Level> {
+  const level = await fetchLevel(folder)
+  remember(level.units)
+  remember(level.folders.flatMap(f => (f.unit ? [f.unit] : [])))
+  return level
+}
+async function fetchLevel(folder: string): Promise<Level> {
   if (currentBridge()) {
     const answer = await bridgeFetch(`/units?in=${encodeURIComponent(folder)}`)
     if (answer.ok) return (await answer.json()) as Level
     if (answer.status !== 404) throw new DOMException(((await answer.json().catch(() => ({}))) as { error?: string }).error ?? "The home did not answer.", "OperationError")
   }
   return levelOf(loadedUnits(), folder) as Level
+}
+
+/** Every unit of the home: the bridge's list, read again at most every few seconds; or what is loaded. */
+let every: { at: number; units: Promise<Unit[]> } | null = null
+export function readUnits(): Promise<Unit[]> {
+  if (every && Date.now() - every.at < 5000) return every.units
+  const units = (async () => {
+    if (currentBridge()) {
+      const answer = await bridgeFetch("/units").catch(() => null)
+      if (answer?.ok) return remember(((await answer.json()) as { units: Unit[] }).units)
+    }
+    return remember(loadedUnits())
+  })()
+  every = { at: Date.now(), units }
+  units.catch(() => { every = null })
+  return units
+}
+
+/** Where a unit is, as people name the home's parts: `Site / src / content`. */
+export function unitPlace(unit: Unit) {
+  const [top, ...rest] = unit.path.split("/")
+  const part = ({ collections: "Collections", vault: "Collections", agents: "Agents", cortex: "Agents", profile: "Profile", site: "Site" } as Record<string, string>)[top] ?? top
+  return [part, ...rest.slice(0, -1)].join(" / ")
 }
 
 // ---- From a unit to what opens it ----
@@ -86,3 +122,19 @@ export function folderRowId(path: string) {
   if (top === "agents" || top === "cortex") return `cortex:${rest.join("/")}`
   return `dir:${path}`
 }
+
+// ---- Where a document is, as people name it ----
+
+/** The home's parts by the names people see; the code keeps vault and cortex (docs/words.md). */
+export const PART_NAMES = { vault: "Collections", cortex: "Agents" } as const
+/**
+ * Where a block or an agent's file is, as the tree shows it: its part, then its folders. A block's are its
+ * home channel's; an agent's file is in its folder (observations, skills, tools), and the memory of you
+ * sits right in Agents.
+ */
+export function placeOfDoc(doc: Doc): { prime: "vault" | "cortex"; folders: string[] } {
+  if (doc.homeChannel !== undefined) return { prime: "vault", folders: doc.homeChannel.split("/").filter(Boolean) }
+  return { prime: "cortex", folders: doc.kind === "profile" ? [] : [locationOf(doc)] }
+}
+/** The same place as one line: `Collections / essays`. */
+export const placeLine = (doc: Doc) => { const { prime, folders } = placeOfDoc(doc); return [PART_NAMES[prime], ...folders].join(" / ") }

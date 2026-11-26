@@ -1,7 +1,7 @@
 // Workspace state, and the handlers both the UI and the WebMCP tools call (AGENTS.md rule 2).
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
-import { docOfUnit, type Unit } from "@/data/units"
+import { docOfUnit, unitById, UNIT_ID, type Unit } from "@/data/units"
 import { useSyncExternalStore } from "react"
 import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
   inOrder, isBlock, isCortexKind, journalOf, landBlock, landChannel, landCortex, heldCortex, dropCortex, owner, blocks, selectSource,
@@ -623,7 +623,12 @@ export const setAgentsAllowed = (agentsAllowed: boolean) => set({ agentsAllowed 
 export const setOffered = (name: ToolName, on: boolean) => set({ offered: { ...state.offered, [name]: on } })
 
 // Handlers shared by the UI and the tools.
-export function open(id: string, mode: "read" | "edit" = "read") {
+/** What opening returns to a tool: what is open now, and the step that follows. */
+export type Opened = { id: string; title: string; view: string; next: string }
+export function open(id: string, mode: "read" | "edit" = "read"): Opened {
+  // Any other unit (the profile, the wallet, a site file) opens by its unit id, from a row, a hit or a tool.
+  const unit = unitById(id)
+  if (unit) return openUnit(unit)
   const doc = byId(id)
   if (!doc) throw new DOMException(`Nothing with id ${id}`, "NotFoundError")
   if (mode === "edit") live()
@@ -636,11 +641,11 @@ export function open(id: string, mode: "read" | "edit" = "read") {
  * Opens any unit of the home (docs/plans/units.md): a block or an agent's file in the editor, as open()
  * does, and anything else (the profile, the wallet, a file of the site) in its own view.
  */
-export function openUnit(unit: Unit) {
+export function openUnit(unit: Unit): Opened {
   const doc = docOfUnit(unit)
   if (doc) return open(doc.id)
   set({ view: { kind: "unit", unit }, searchOpen: false, ...sideAfterOpen() })
-  return { id: unit.key, title: unit.title ?? unit.path, view: "read", next: "workspace.open" }
+  return { id: `${UNIT_ID}${unit.key}`, title: unit.title ?? unit.path, view: "read", next: "workspace.open" }
 }
 
 /** The graph lives in the side panel, in the home. */

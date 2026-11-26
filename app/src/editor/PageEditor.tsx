@@ -3,6 +3,7 @@
 // commands, a floating toolbar on selected text, a handle on each block with its menu, tables with
 // row and column handles, and images by dropping or pasting files. Private blocks save as you type;
 // others are read-only here, because changing what other people see asks first (AGENTS.md rule 11).
+import { PART_NAMES, placeOfDoc } from "@/data/units"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { EditorContent, useEditor, type Editor } from "@tiptap/react"
 import DragHandle from "@tiptap/extension-drag-handle-react"
@@ -95,8 +96,8 @@ function useAutoHeight(ref: React.RefObject<HTMLTextAreaElement | null>, value: 
   }, [ref, value])
 }
 
-/** Where a block lives: vault › home channel › title, or cortex › category › title. */
-const pathOf = (d: Doc) => [isBlock(d) ? "vault" : "cortex", ...locationOf(d).split("/"), titleOf(d)].filter(Boolean) as string[]
+/** Where a block lives, as people name it: Collections › home channel › title, or Agents › folder › title. */
+const pathOf = (d: Doc) => { const { prime, folders } = placeOfDoc(d); return [PART_NAMES[prime], ...folders, titleOf(d)] }
 
 /**
  * The block's path, in a pill. Click the block's name to rename it in place. Drag the pill out to save
@@ -133,8 +134,8 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
       <Icon icon={FileTextIcon} size="sm" className="flex-none" />
       <span className="flex min-w-0 items-center gap-1">
         {path.slice(0, -1).map((seg, i) => {
-          // Reveal the channel or cortex category in the tree.
-          const prime = path[0] as "vault" | "cortex"
+          // Reveal the channel or the agents' folder in the tree.
+          const { prime } = placeOfDoc(doc)
           const pathToReveal = path.slice(1, i + 1).join("/")
           return (
             <span key={i} className="flex min-w-0 flex-shrink items-center gap-1">

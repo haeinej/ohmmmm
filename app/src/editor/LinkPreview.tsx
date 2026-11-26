@@ -1,10 +1,11 @@
 // Hovering a [[link]] shows the block it points to, as Obsidian’s link preview does, and shades that
 // block green in the side panel's tree while the pointer stays.
+import { placeLine } from "@/data/units"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { FileTextIcon } from "lucide-react"
 import { Icon } from "@/components/ui/icon"
-import { isBlock, locationOf, bySlug, titleOf, type Doc } from "@/data/workspace-data"
+import { bySlug, titleOf, type Doc } from "@/data/workspace-data"
 
 // The block under the pointer, for anything that shades it (the tree reads this).
 let linked: string | null = null
@@ -53,7 +54,7 @@ export function LinkPreview({ container }: { container: HTMLElement | null }) {
   if (!shown) return null
   const { doc, rect } = shown
   const below = rect.bottom + 8 + 180 < window.innerHeight
-  const path = [isBlock(doc) ? "vault" : "cortex", ...locationOf(doc).split("/")].filter(Boolean).join(" / ")
+  const path = placeLine(doc)
   return createPortal(
     <div role="tooltip" style={{ left: Math.min(rect.left, window.innerWidth - 336), top: below ? rect.bottom + 8 : rect.top - 8, translate: below ? undefined : "0 -100%" }}
       className="pointer-events-none fixed z-50 flex w-80 flex-col gap-1.5 rounded-2xl bg-popover p-3.5 text-popover-foreground shade-4 backdrop-blur-xl animate-in fade-in-0 zoom-in-95 duration-(--ohm-duration-open) ease-(--ohm-ease-out)">

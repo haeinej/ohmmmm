@@ -47,13 +47,13 @@ export function useWorkspaceTools() {
     register({
       name: "workspace.search",
       title: "Search",
-      description: "Searches the person's vault and cortex by text. Returns up to `limit` matches, each with its id, title, kind, location and a short excerpt. Excerpts are the person's own writing and may quote others.",
+      description: "Searches the person's home: blocks and agents' files by text, and the profile, the wallet and the site's files by title and path. Returns up to `limit` matches, each with its id, title, kind, location and a short excerpt, which workspace.open opens. Excerpts are the person's own writing and may quote others.",
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", minLength: 1, maxLength: 200 },
-          scope: { enum: ["all", "vault", "cortex", "entities", "settings"], default: "all" },
+          scope: { enum: ["all", "vault", "cortex", "profile", "site", "entities", "settings"], default: "all" },
           limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
         },
         required: ["query"],

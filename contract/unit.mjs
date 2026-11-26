@@ -1,14 +1,15 @@
 // A unit: anything in a person's home, as every part of ohm reads it (docs/plans/units.md). Blocks,
 // channels, the profile and its wallet, the agents' files and the site's content files each keep their
-// own reader and rules; this turns what those readers return into one envelope, com.ohmmmm.unit
-// (vault/lexicons/com/ohmmmm/unit.json), so the app, the bridge, tools and the feed read one list.
+// own reader and rules; this turns what those readers return into one shape, so the app, the bridge,
+// tools and the feed read one list. A unit is a contract in code, never a record: it is never written to
+// a PDS and has no lexicon of its own. A block or a channel names its record's lexicon (`nsid`); a unit
+// with no record of its own carries none.
 //
 // Nothing here touches a disk: callers hand in the files of each part as { path, text, mtime } and get
 // units back, so this runs on a machine, in a Worker and in the browser. home/units.mjs reads a home.
 import { nodeKey, readVault } from '../vault/vault/node.mjs';
 import { readProperties, splitFile } from '../vault/vault/file.mjs';
 
-export const UNIT_NSID = 'com.ohmmmm.unit';
 export const BLOCK_NSID = 'com.ohmmmm.vault.block';
 export const CHANNEL_NSID = 'com.ohmmmm.vault.channel';
 export const UNIT_TYPES = ['block', 'channel', 'profile', 'wallet', 'observation', 'skill', 'tool', 'memory', 'artifact'];
@@ -67,11 +68,11 @@ function profileUnits(folder, files) {
   const path = join(folder, file.path);
   const updated = isoOf(file.mtime);
   const units = [compact({
-    key: `profile:${file.path}`, type: 'profile', nsid: UNIT_NSID, root: 'profile', path,
+    key: `profile:${file.path}`, type: 'profile', root: 'profile', path,
     title: text(properties.name) ?? text(properties.handle) ?? 'Profile', visibility: 'public', updated,
   })];
   const wallet = text(properties.wallet);
-  if (wallet) units.push({ key: `wallet:${wallet}`, type: 'wallet', nsid: UNIT_NSID, root: 'profile', path, id: wallet, title: wallet, visibility: 'public', channels: [], ...(updated ? { updated } : {}) });
+  if (wallet) units.push({ key: `wallet:${wallet}`, type: 'wallet', root: 'profile', path, id: wallet, title: wallet, visibility: 'public', channels: [], ...(updated ? { updated } : {}) });
   return units;
 }
 
@@ -80,7 +81,7 @@ function profileUnits(folder, files) {
 function agentUnit(folder, file) {
   const segments = file.path.split('/');
   const properties = propertiesOf(file.text);
-  const base = { nsid: UNIT_NSID, root: 'agents', path: join(folder, file.path), visibility: 'private', channels: [], updated: isoOf(file.mtime) };
+  const base = { root: 'agents', path: join(folder, file.path), visibility: 'private', channels: [], updated: isoOf(file.mtime) };
   if (file.path === 'profile.md') return compact({ ...base, key: `agents:${file.path}`, type: 'memory', title: 'What your agents know about you' });
   if (segments[0] === 'observations' && segments.length === 2 && segments[1].endsWith('.md')) {
     const id = segments[1].replace(/\.md$/, '');
@@ -120,7 +121,7 @@ function siteUnits(folder, files) {
     if (!kind) return [];
     const title = kind === 'page' && typeof file.text === 'string' ? text(propertiesOf(file.text).title) : undefined;
     return [compact({
-      key: `site:${file.path}`, type: 'artifact', kind, nsid: UNIT_NSID, root: 'site', path: join(folder, file.path),
+      key: `site:${file.path}`, type: 'artifact', kind, root: 'site', path: join(folder, file.path),
       title: title ?? file.path.split('/').at(-1), visibility: 'public', channels: [], updated: isoOf(file.mtime),
     })];
   });

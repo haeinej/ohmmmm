@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { initHome } from '../bin/ohmmmm.mjs';
 import { artifactKind, feed, sees, UNIT_TYPES } from '../contract/unit.mjs';
 import { readFeed, readLevel, readUnits } from '../home/units.mjs';
@@ -29,6 +30,10 @@ async function home(t) {
   await put(join(layout.site, 'public', 'photo.jpg'), 'not really a jpeg');
   await put(join(layout.site, 'src', 'styles', 'site.css'), 'body{}');
   await put(join(layout.site, '.ohm', 'saves.jsonl'), '');
+  // The site is a git checkout: its tracked files are what it holds. An untracked file is not an artifact.
+  execFileSync('git', ['-C', layout.site, 'init', '-q']);
+  execFileSync('git', ['-C', layout.site, 'add', 'src', 'public']);
+  await put(join(layout.site, 'src', 'content', 'scratch.md'), 'not tracked');
   return layout;
 }
 
@@ -37,7 +42,9 @@ test('every part of a home is read as units, each with its path from the top of 
   const units = await readUnits(layout);
   for (const unit of units) {
     assert.ok(UNIT_TYPES.includes(unit.type), unit.type);
-    assert.ok(unit.key && unit.nsid && unit.root && unit.path && unit.visibility, JSON.stringify(unit));
+    assert.ok(unit.key && unit.root && unit.path && unit.visibility, JSON.stringify(unit));
+    // Only a unit with a record of its own names a lexicon; a unit is never a record (no com.ohmmmm.unit).
+    assert.equal(unit.nsid, { block: 'com.ohmmmm.vault.block', channel: 'com.ohmmmm.vault.channel' }[unit.type], JSON.stringify(unit));
     await stat(join(layout.home, unit.path));
   }
   const by = key => units.find(unit => unit.key === key);
@@ -54,6 +61,7 @@ test('every part of a home is read as units, each with its path from the top of 
   assert.equal(by('site:src/content/post.md').title, 'A post on the site');
   assert.equal(by('site:public/photo.jpg').kind, 'image');
   assert.equal(by('site:src/styles/site.css'), undefined);
+  assert.equal(by('site:src/content/scratch.md'), undefined);
   assert.equal(by('site:src/pages/index.astro'), undefined);
   assert.ok(!units.some(unit => unit.path.includes('/.ohm/')));
   // A channel is as open as the most open block in it; a folder with no _channel.md is still one.

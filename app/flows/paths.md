@@ -20,8 +20,8 @@ How to read each path:
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| A1 | **Search** | Rack Search or ⌘K → type → arrows or hover → Enter or click | The chosen block, setting or person is open | Get to anything without knowing where it lives | `workspace.search`, then `workspace.open` |
-| A2 | Narrow a search | In search, choose All, Vault, Cortex, People or Settings | Only that kind of match shows | Cut noise when you know what you want | `workspace.search` with `scope` |
+| A1 | **Search** | Rack Search or ⌘K → type → arrows or hover → Enter or click | The chosen block, agent's file, profile, wallet, site file, setting or person is open. The profile, the wallet and the site's files are found by title and path ([docs/plans/units.md](../../docs/plans/units.md)) | Get to anything without knowing where it lives | `workspace.search`, then `workspace.open` |
+| A2 | Narrow a search | In search, choose All, Collections, Agents, Profile, Site, Entities or Settings | Only that kind of match shows | Cut noise when you know what you want | `workspace.search` with `scope` |
 | A3 | Search finds a setting | Type a setting's word (e.g. "dark") → choose it | That settings screen is open | Reach a setting without browsing | `workspace.search` (`scope: settings`) |
 | A4 | Search finds a person | Type a name or handle → choose them | The graph is centred on that person | See everything that touches someone | `workspace.search`, then `workspace.graph` |
 | A5 | Ask an agent from search | Type a question → Send with no match chosen | A notice: asking arrives once an agent is connected | Reserved: ask instead of look up | *Not yet* |

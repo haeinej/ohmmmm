@@ -14,7 +14,8 @@
 import { FILE_TYPES, graphemes, isSlug, kindOf as mediaKind, VaultProblem, VISIBILITIES } from './core.mjs';
 import { filePost, isPostId, newPostId, postFile, postProblems, readProperties, slugOf, splitFile, writeNoteFile } from './file.mjs';
 
-export const BLOCK_KINDS = ['text', 'excerpt', 'link', 'media', 'file', 'code', 'post'];
+// wallet and artifact: the profile's wallet and the site's content files, read as blocks (docs/plans/units.md).
+export const BLOCK_KINDS = ['text', 'excerpt', 'link', 'media', 'file', 'code', 'post', 'wallet', 'artifact'];
 export const CHANNEL_KINDS = ['collection', 'concept', 'import'];
 export const ENTITY_KINDS = ['person', 'work', 'place', 'org'];
 export const SOURCE_KINDS = ['page', 'post', 'file', 'image', 'video', 'audio', 'thread', 'book', 'other'];
