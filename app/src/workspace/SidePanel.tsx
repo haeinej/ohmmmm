@@ -7,10 +7,9 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import type { FileTreeNode } from "@/components/ui/file-tree"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
-import { isBlock, locationOf, channelRowId, byId, channelRecords, channelsOf, cortex, docIdOf, inOrder, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience, type Doc } from "@/data/workspace-data"
+import { isBlock, locationOf, byId, cortex, docIdOf, placedIn, blocks, sees, titleOf, cortexState, homeStatus, privateLayer, type Audience } from "@/data/workspace-data"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/cn"
 import { DOC_DRAG } from "./drop"
@@ -18,7 +17,8 @@ import { GraphView } from "./GraphView"
 import { RepoHistory } from "@/history/History"
 import { PrimeIcon } from "./PrimeIcon"
 import { RowMenu } from "./RowMenu"
-import { UnitTree, useUnitLevels } from "./UnitTree"
+import { loadedFolderIds, UnitTree, useUnitLevels } from "./UnitTree"
+import { folderRowId } from "@/data/units"
 import { FilterMenu } from "./FilterMenu"
 import { activeCount, NO_FILTERS } from "./filters"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -28,59 +28,11 @@ import { AgentsPanel } from "./AgentsPanel"
 import { VisibilityMarks } from "./VisibilityMarks"
 import { startChannel } from "./PageActions"
 import { SETTINGS_TABS } from "./settings-tabs"
-import { panelTitle, SidePanelFrame } from "./Surface"
+import { SidePanelFrame } from "./Surface"
 import {
   createDraft, kept, marks, me, moveBlock, moveChannel, open, openSettings, report, signOut, setAudience, setFilters, setRepoMode, setScope, setShowVisibility, useWorkspace,
 } from "./store"
 
-/**
- * Folders › folders inside them › items. In the vault the folders are channels, and a block is in
- * every channel it was collected into: its row in its home channel has its own id, and each other
- * row `<id>/<channel path>`. In the cortex the folders are fixed categories. Folder ids are prefixed so they
- * never collide with docs.
- */
-type Placement = { path: string; id: string }
-const inSection = (d: Doc): Placement[] => [{ path: locationOf(d), id: d.id }]
-const inChannels = (d: Doc): Placement[] => channelsOf(d).map((path, i) => ({ path, id: i === 0 ? d.id : channelRowId(d.id, path) }))
-function toTree(prime: string, docs: Doc[], order?: string[], placements = inSection, empty: string[] = []): FileTreeNode[] {
-  const labels = new Map<string, Map<string | undefined, { doc: Doc; id: string }[]>>()
-  // Channels are records: an empty one is still a folder.
-  for (const path of empty) {
-    const [top, inner] = path.split("/")
-    const subs = labels.get(top) ?? new Map()
-    if (inner && !subs.has(inner)) subs.set(inner, [])
-    labels.set(top, subs)
-  }
-  for (const d of docs) for (const { path, id } of placements(d)) {
-    const [top, inner] = path.split("/")
-    const subs = labels.get(top) ?? new Map()
-    subs.set(inner, [...(subs.get(inner) ?? []), { doc: d, id }])
-    labels.set(top, subs)
-  }
-  // Blocks in each channel's own order (its _channel.md, through workspace-data inOrder).
-  const leaves = (path: string, list: { doc: Doc; id: string }[] = []): FileTreeNode[] => {
-    const ordered = inOrder(path, list.map(l => l.doc))
-    return ordered.map(d => list.find(l => l.doc === d)!).map(({ doc: d, id }) => ({ id, name: `${d.icon ? `${d.icon} ` : ""}${titleOf(d)}` }))
-  }
-  const names = [...labels.keys()].sort((a, b) => {
-    if (a === "other") return 1
-    if (b === "other") return -1
-    const ia = order?.indexOf(a) ?? -1, ib = order?.indexOf(b) ?? -1
-    return ia === -1 || ib === -1 ? a.localeCompare(b) : ia - ib
-  })
-  return names.map(label => {
-    const subs = labels.get(label)!
-    return {
-      id: `${prime}:${label}`, name: label,
-      children: [
-        ...[...subs].filter(([s]) => s).map(([s, list]) => ({ id: `${prime}:${label}/${s}`, name: s!, children: leaves(`${label}/${s}`, list) })),
-        ...leaves(label, subs.get(undefined)),
-      ],
-    }
-  })
-}
-const folderIds = (nodes: FileTreeNode[]): string[] =>
-  nodes.flatMap(n => (n.children ? [n.id, ...folderIds(n.children)] : []))
 
 const toggle = "text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
 
@@ -261,25 +213,35 @@ function RepoPanel() {
   const { view, rev, repoMode, scope, audience, showVisibility } = useWorkspace()
   const { filters } = useWorkspace()
   const filtering = activeCount(filters) > 0
-  const cortexTree = useMemo(() => toTree("cortex", cortex.filter(kept), ["profile", "observations", "skills", "tools"]), [rev, filters]) // eslint-disable-line react-hooks/exhaustive-deps
   const vaultDocs = useMemo(() => blocks.filter(p => sees(audience, p) && !marks.archived.has(p.id) && kept(p)), [rev, audience, filters]) // eslint-disable-line react-hooks/exhaustive-deps
   const pinned = blocks.concat(cortex).filter(d => marks.pinned.has(d.id) && (!isBlock(d) || sees(audience, d)) && kept(d))
   const archived = blocks.filter(d => marks.archived.has(d.id) && kept(d))
   const [showArchived, setShowArchived] = useState(false)
   const [rows, setRows] = useState<HTMLDivElement | null>(null)
-  // Empty channels show to you, unfiltered; seen as someone else, a channel shows only what they can see in it.
-  const vaultTree = useMemo(() => toTree("vault", vaultDocs, undefined, inChannels,
-    audience === "private" && !filtering ? channelRecords.map(c => c.path) : []), [vaultDocs, audience, filtering, rev]) // eslint-disable-line react-hooks/exhaustive-deps
   const showCortex = scope.cortex, showVault = scope.vault
   const treeRef = useRef<HTMLDivElement | null>(null)
   useTreeDragDrop(treeRef, [repoMode])
+  const selected = view.kind === "doc" ? view.id : null
   // The cortex is yours alone, and opens only on a device that unlocked your keys.
   const cortexLocked = audience !== "private" || cortexState !== "open"
-  const allFolders = useMemo(() => [
-    ...(showCortex ? ["prime:cortex", ...folderIds(cortexTree)] : []),
-    ...(showVault ? ["prime:vault", ...folderIds(vaultTree)] : []),
-  ], [cortexTree, vaultTree, showCortex, showVault])
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["prime:cortex", "prime:vault", ...folderIds(vaultTree)]))
+  // The tree reads the home a folder at a time (docs/plans/units.md); the top tells it the parts' folders.
+  const { levels, load } = useUnitLevels(rev)
+  const top = levels.get("")
+  const partFolder = (names: string[], fallback: string) => (typeof top === "object" ? top.folders.find(f => names.includes(f.path))?.path : undefined) ?? fallback
+  const collectionsFolder = partFolder(["collections", "vault"], "collections")
+  const agentsFolder = partFolder(["agents", "cortex"], "agents")
+  // A part's own row and every folder of it read so far.
+  const primeFolders = (p: "cortex" | "vault") => [`prime:${p}`, ...loadedFolderIds(levels, p === "cortex" ? agentsFolder : collectionsFolder)]
+  const allFolders = [...(showCortex ? primeFolders("cortex") : []), ...(showVault ? primeFolders("vault") : [])]
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["prime:cortex", "prime:vault"]))
+  // Collections' channels open the first time they are read, as they always have.
+  const channelsOpened = useRef(false)
+  const collectionsLevel = levels.get(collectionsFolder)
+  useEffect(() => {
+    if (channelsOpened.current || typeof collectionsLevel !== "object") return
+    channelsOpened.current = true
+    setExpanded(s => new Set([...s, ...collectionsLevel.folders.map(f => folderRowId(f.path))]))
+  }, [collectionsLevel])
   // The tree follows the open block: when something asks to be revealed (a block opened from anywhere,
   // or a folder from the path pill), the way to it opens, it scrolls into view and flashes once.
   const { reveal } = useWorkspace()
@@ -315,21 +277,13 @@ function RepoPanel() {
     return () => window.removeEventListener("ohm:channel-renamed", moved)
   }, [])
   // One prime folder's own expand-all, from its ⋯.
-  const primeFolders = (p: "cortex" | "vault") => [`prime:${p}`, ...folderIds(p === "cortex" ? cortexTree : vaultTree)]
   const primeAllOpen = (p: "cortex" | "vault") => primeFolders(p).every(id => expanded.has(id))
   const expandPrime = (p: "cortex" | "vault") => {
     const ids = primeFolders(p), open = !primeAllOpen(p)
     setExpanded(s => { const n = new Set(s); for (const id of ids) open ? n.add(id) : n.delete(id); return n })
   }
   const flip = (id: string) => setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const selected = view.kind === "doc" ? view.id : null
-  // The tree reads the home a folder at a time (docs/plans/units.md); the top tells it the parts' folders.
-  const { levels, load } = useUnitLevels(rev)
-  const top = levels.get("")
-  const partFolder = (names: string[], fallback: string) => (typeof top === "object" ? top.folders.find(f => names.includes(f.path))?.path : undefined) ?? fallback
-  const collectionsFolder = partFolder(["collections", "vault"], "collections")
-  const agentsFolder = partFolder(["agents", "cortex"], "agents")
-  const treeProps = { levels, load, audience, expanded, onExpandedChange: setExpanded, selected }
+    const treeProps = { levels, load, audience, expanded, onExpandedChange: setExpanded, selected }
   const treeClass = "ms-4 [--tree-inset:1rem] animate-in fade-in-0 slide-in-from-top-1 duration-(--ohm-duration-open)"
 
   return (
@@ -404,7 +358,7 @@ function RepoPanel() {
             ))}
             <div className="h-2" />
           </>}
-          {filtering && vaultDocs.length + cortexTree.length === 0 && (
+          {filtering && vaultDocs.length + cortex.filter(kept).length === 0 && (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-small text-muted-foreground">
               Nothing matches the filter.
               <Button size="xs" variant="ghost" onClick={() => setFilters(NO_FILTERS)}>Clear filter</Button>

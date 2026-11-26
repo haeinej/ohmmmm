@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FileTree, type FileTreeNode } from "@/components/ui/file-tree"
 import { channelRowId, type Audience } from "@/data/workspace-model"
+import { inOrder } from "@/data/workspace-data"
 import { docOfUnit, folderRowId, readLevel, unitSeenBy, type Level, type Unit } from "@/data/units"
 import { kept, marks, openUnit, report } from "./store"
 
@@ -60,6 +61,18 @@ function visible(level: Level, audience: Audience) {
   }
 }
 
+/**
+ * A channel's blocks in the channel's own order (its _channel.md, through inOrder, as everywhere in the
+ * app); anything that is not a loaded block follows, by title.
+ */
+function inChannelOrder(folder: string, units: Unit[]) {
+  const [top, ...rest] = folder.split("/")
+  if (!rest.length || (top !== "collections" && top !== "vault")) return units
+  const docs = new Map(units.flatMap(unit => { const doc = unit.type === "block" ? docOfUnit(unit) : undefined; return doc ? [[doc, unit] as const] : [] }))
+  const ordered = inOrder(rest.join("/"), [...docs.keys()]).map(doc => docs.get(doc)!)
+  return [...ordered, ...units.filter(unit => !ordered.includes(unit))]
+}
+
 /** A unit's row: its document's id when it is one, placed in the channel the folder is. */
 function rowOf(unit: Unit, folder: string): FileTreeNode {
   const doc = docOfUnit(unit)
@@ -95,7 +108,7 @@ export function UnitTree({ root, only, label, levels, load, audience, expanded, 
           folders.current.set(id, each.path)
           return { id, name: PART_NAME[each.path] ?? each.title, children: expanded.has(id) ? build(each.path) : [] }
         }),
-        ...shown.units.map(unit => {
+        ...inChannelOrder(folder, shown.units).map(unit => {
           const row = rowOf(unit, folder)
           units.current.set(row.id, unit)
           return row
@@ -116,4 +129,11 @@ export function UnitTree({ root, only, label, levels, load, audience, expanded, 
       expanded={expanded} onExpandedChange={onExpandedChange} selected={selected}
       onSelect={id => { const unit = units.current.get(id); if (unit) void report(Promise.resolve().then(() => openUnit(unit))) }} />
   )
+}
+
+/** The rows of every folder read so far under `folder`, for "Expand all" and for a filter that opens what matches. */
+export function loadedFolderIds(levels: Map<string, Loaded>, folder: string): string[] {
+  const level = levels.get(folder)
+  if (!level || typeof level !== "object") return []
+  return level.folders.flatMap(each => [folderRowId(each.path), ...loadedFolderIds(levels, each.path)])
 }
