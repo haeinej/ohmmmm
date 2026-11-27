@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// The one command `npx github:haeinej/ohmmmm <command>` runs (npx picks the command named after
-// the package). It keeps a person's home itself and hands everything else on:
+// The one command people type, `ohm` (also `ohmmmm`, and what `npx github:haeinej/ohmmmm <command>`
+// runs). It keeps a person's home itself and hands everything else on:
 //
-//   init <handle> [parent]   make ohmmmm.<handle> in parent (default: your home folder), with vault/
-//                            set up as a vault and cortex/ started for that handle
+//   init <handle> [parent]   make ohm.<handle> in parent (default: your home folder), with collections/
+//                            set up as a vault, agents/ started as a cortex for that handle, and profile/
+//   site connect <repo>      clone the person's website into <home>/site (home/site.mjs)
 //   where [folder]           the home a folder is in, and its vault and cortex
 //   serve [--port 8766] [--app <origin>]   the home's bridge on this machine, for the app and agents:
 //                            the vault's and the cortex's tools over MCP, and images by CID
@@ -41,11 +42,14 @@ export async function initHome(parent, handle) {
 const VAULT_COMMAND = fileURLToPath(new URL('../vault/bin/ohm.mjs', import.meta.url));
 const CORTEX_COMMAND = fileURLToPath(new URL('../cortex/bin/cortex.mjs', import.meta.url));
 const SERVE_COMMAND = fileURLToPath(new URL('../home/serve.mjs', import.meta.url));
+const SITE_COMMAND = fileURLToPath(new URL('../home/site.mjs', import.meta.url));
 
 // Which program runs a command line, and with what.
 export function route(args) {
   const [command, ...rest] = args;
   if (command === 'init' || command === 'where') return { home: command, rest };
+  // The site folder is the home's: `site connect` keeps it (home/site.mjs); the rest of `site` is the vault's.
+  if (command === 'site' && rest[0] === 'connect') return { program: SITE_COMMAND, args: rest };
   if (command === 'cortex') return { program: CORTEX_COMMAND, args: rest };
   if (['serve', 'pair', 'agents', 'browsers'].includes(command)) return { program: SERVE_COMMAND, args: [command, ...rest], flags: ['--no-warnings=ExperimentalWarning'] };
   return { program: VAULT_COMMAND, args };

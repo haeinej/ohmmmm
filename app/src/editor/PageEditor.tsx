@@ -3,6 +3,7 @@
 // commands, a floating toolbar on selected text, a handle on each block with its menu, tables with
 // row and column handles, and images by dropping or pasting files. Private blocks save as you type;
 // others are read-only here, because changing what other people see asks first (AGENTS.md rule 11).
+import { PART_NAMES, placeOfDoc } from "@/data/units"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { EditorContent, useEditor, type Editor } from "@tiptap/react"
 import DragHandle from "@tiptap/extension-drag-handle-react"
@@ -55,7 +56,7 @@ import "./editor.css"
  * Images at web addresses still show. One at a temporary browser address (`blob:` or `data:`) is
  * never taken in from pasted HTML: an image is added as a media block instead (vault/plans/media.md).
  */
-const WebImage = Image.extend({
+export const WebImage = Image.extend({
   parseHTML() {
     return [{ tag: "img[src]", getAttrs: el => /^(?:https?:)?\/\//i.test((el as HTMLElement).getAttribute("src") ?? "") ? null : false }]
   },
@@ -71,11 +72,11 @@ const unescapeLinks = (md: string) =>
     (_, slug: string, words?: string) => (words ? `[[${slug}|${words.replace(/\\(.)/g, "$1")}]]` : `[[${slug}]]`))
 const toMarkdown = (e: Editor) => unescapeLinks(unescapeEmbeds(e.getMarkdown()))
 
-const pill = "flex items-center gap-0.5 rounded-full bg-muted p-0.5"
-const pillButton = "size-8 rounded-full text-muted-foreground hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground"
+export const pill = "flex items-center gap-0.5 rounded-full bg-muted p-0.5"
+export const pillButton = "size-8 rounded-full text-muted-foreground hover:bg-background hover:text-foreground aria-expanded:bg-background aria-expanded:text-foreground"
 const lastEdited = (d: Doc) => new Date(`${d.updated}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 
-function ToolButton({ label, icon, onClick, ...props }: { label: string; icon: typeof TypeIcon; onClick?: () => void } & React.ComponentProps<typeof Button>) {
+export function ToolButton({ label, icon, onClick, ...props }: { label: string; icon: typeof TypeIcon; onClick?: () => void } & React.ComponentProps<typeof Button>) {
   return (
     <Tooltip>
       <TooltipTrigger render={<Button size="icon-sm" variant="ghost" aria-label={label} className={pillButton} onClick={onClick} {...props} />}>
@@ -95,8 +96,8 @@ function useAutoHeight(ref: React.RefObject<HTMLTextAreaElement | null>, value: 
   }, [ref, value])
 }
 
-/** Where a block lives: vault › home channel › title, or cortex › category › title. */
-const pathOf = (d: Doc) => [isBlock(d) ? "vault" : "cortex", ...locationOf(d).split("/"), titleOf(d)].filter(Boolean) as string[]
+/** Where a block lives, as people name it: Collections › home channel › title, or Agents › folder › title. */
+const pathOf = (d: Doc) => { const { prime, folders } = placeOfDoc(d); return [PART_NAMES[prime], ...folders, titleOf(d)] }
 
 /**
  * The block's path, in a pill. Click the block's name to rename it in place. Drag the pill out to save
@@ -133,8 +134,8 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
       <Icon icon={FileTextIcon} size="sm" className="flex-none" />
       <span className="flex min-w-0 items-center gap-1">
         {path.slice(0, -1).map((seg, i) => {
-          // Reveal the channel or cortex category in the tree.
-          const prime = path[0] as "vault" | "cortex"
+          // Reveal the channel or the agents' folder in the tree.
+          const { prime } = placeOfDoc(doc)
           const pathToReveal = path.slice(1, i + 1).join("/")
           return (
             <span key={i} className="flex min-w-0 flex-shrink items-center gap-1">
@@ -202,7 +203,7 @@ function PathPill({ doc, markdown, onPickFile }: { doc: Doc; markdown: () => str
 }
 
 /** The block handle's menu: for a table, its own options; for any block, insert, duplicate, copy, delete. */
-function BlockMenu({ editor, block, updated, onClose }: { editor: Editor; block: { node: PMNode; pos: number }; updated: string; onClose: () => void }) {
+export function BlockMenu({ editor, block, updated, onClose }: { editor: Editor; block: { node: PMNode; pos: number }; updated: string; onClose: () => void }) {
   const { node, pos } = block
   const isTable = node.type.name === "table"
   const end = pos + node.nodeSize
@@ -453,20 +454,14 @@ export function PageEditor({ doc }: { doc: Doc }) {
           {cortexPart && <CortexActions doc={doc} />}
           {!editable && (
             <span className="flex min-w-0 items-center gap-1.5 ps-1 text-small whitespace-nowrap text-muted-foreground"
-              title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}>
+              title={isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From Agents"}>
               <Icon icon={LockIcon} size="xs" className="flex-none" />
               {/* The note gives way first when the toolbar is narrow; the lock and its tooltip stay. */}
-              <span className="truncate">{isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From your cortex"}</span>
+              <span className="truncate">{isBlock(doc) ? `For ${doc.visibility === "public" ? "everyone" : "friends"}: changing it asks first` : "From Agents"}</span>
             </span>
           )}
         </div>
         <div className="flex flex-none items-center gap-1.5">
-          {isBlock(doc) && (
-            <div className={pill}>
-              <ConnectionsButton doc={doc} editable={editable} variant="toolbar" side="bottom" />
-              <ObserveButton doc={doc} className={pillButton} />
-            </div>
-          )}
           <div className={pill}>
             {/* Cortex items use the same history viewer. */}
             <HistoryButton doc={doc} className={pillButton} />

@@ -12,9 +12,15 @@
 //   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
 //   /vault/publish     POST /plan shows what publishing a block would write; POST publishes it, as the person
 //   /vault/unpublish   POST takes a published block's post down, then moves the block back, as the person
+//   /vault/short       POST /plan previews a short post as Bluesky will show it; POST /publish posts it, as the person
 //   /vault/keys        GET the paired browsers and the agents with keys; POST /self names this browser;
 //                      DELETE /<id> forgets one browser
 //   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
+//   /units          GET every unit in the home: blocks, channels, profile, wallet, agents' files, site artifacts;
+//                   ?in=<folder> gives one level of it, for a tree opened a folder at a time
+//   /units/feed     GET the units an audience sees, the latest change first (?audience, ?type, ?limit, ?before)
+//   /feed/live      GET posts from the accounts the person follows on Bluesky, through Jetstream (home/network.mjs)
+//   /feed/discover  GET posts from a Bluesky feed generator, for Discover
 //   /               what this bridge serves
 //
 // It answers only this machine (it listens on 127.0.0.1, and a Host header naming anything else is
@@ -52,9 +58,13 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { cortexSessions, httpTransport } from '../cortex/src/http.mjs';
 import { createServer as mcpServer } from '../vault/mcp/protocol.mjs';
+import { createSiteTools, SITE_INSTRUCTIONS, SITE_TOOLS } from './site-mcp.mjs';
+import { moveOldTools, watchTools } from './site-tools.mjs';
+import { siteLive } from './site-live.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
 import { pdsConfig, webUrl } from '../vault/feed/pds.mjs';
-import { signIn } from '../vault/scripts/rpc.mjs';
+import { rpc, signIn } from '../vault/scripts/rpc.mjs';
+import { graphemes } from '../vault/vault/core.mjs';
 import { blobCid, FILE_TYPES, isSlug, recordVersion, VaultProblem } from '../vault/vault/core.mjs';
 import { isPostId, setProperty, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
@@ -66,7 +76,10 @@ import { createVault } from '../vault/vault/vault.mjs';
 import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.mjs';
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
+import { readFeed, readLevel, readUnits } from './units.mjs';
+import { discover, liveFollowing, resolveHandle } from './network.mjs';
 import { findHome } from './home.mjs';
+import { isSiteRoute, siteRoutes } from './site.mjs';
 
 export const PORT = 8766;
 export const APP = 'https://app.ohmmmm.com';
@@ -78,7 +91,7 @@ export const AGENT_KEY = '.ohmmmm/agent-key';
 // The one key the bridge had before agents had keys at all. It becomes the shared agent key.
 export const OLD_TOKEN = '.ohmmmm/serve-token';
 // What an agent's key reaches; every other route is the person's, through the app.
-export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/'];
+export const AGENT_ROUTES = ['/vault/mcp', '/cortex/mcp', '/site/mcp', '/site/activity', '/'];
 export const SITE_CONFIG = 'ohm.jsonc';
 export const MAX_IMAGE = 20 * 1024 * 1024;
 export const IMAGE_TYPES = { 'image/avif': 'avif', 'image/gif': 'gif', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -141,7 +154,7 @@ export async function withKeysLock(home, work) {
 }
 
 /** The paired browsers' keys, as kept: `[{ hash, made, app?, name?, seen? }]`, each `hash` the key's SHA-256 in hex. */
-export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohmmmm pair');
+export const appKeys = home => readHashes(home, APP_KEYS, 'keys', 'ohm pair');
 
 /**
  * A key for one more browser: kept only as its SHA-256, and answered once, for the pairing link.
@@ -202,7 +215,7 @@ export async function browserSeen(home, hash, now = new Date()) {
 }
 
 /** The agents with keys of their own, as kept: `[{ name, hash, made }]`. */
-export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agents', 'ohmmmm agents add <name>')).filter(each => AGENT_NAME.test(each.name ?? ''));
+export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agents', 'ohm agents add <name>')).filter(each => AGENT_NAME.test(each.name ?? ''));
 
 /**
  * A key of its own for the agent named, answered once: the person gives it to that agent, and the
@@ -213,7 +226,7 @@ export const agentKeys = async home => (await readHashes(home, AGENT_KEYS, 'agen
 export async function addAgent(home, name, { replace = false } = {}) {
   if (!AGENT_NAME.test(name ?? '')) throw new VaultProblem('An agent\'s name is 1 to 64 letters, digits, dots, hyphens or underscores, such as claude-code.');
   const kept = await agentKeys(home);
-  if (!replace && kept.some(each => each.name === name)) throw new VaultProblem(`${name} has a key already. To give it a new one, which shuts the old one out: ohmmmm agents add ${name} --new-key`);
+  if (!replace && kept.some(each => each.name === name)) throw new VaultProblem(`${name} has a key already. To give it a new one, which shuts the old one out: ohm agents add ${name} --new-key`);
   const near = kept.find(each => each.name !== name && each.name.toLowerCase() === name.toLowerCase());
   if (near) throw new VaultProblem(`${name} would be too easily taken for ${near.name}, which has a key. Use ${near.name}, or another name.`);
   const key = newKey('agent');
@@ -308,6 +321,22 @@ const vaultSessions = (vault, DatabaseSync, fixed, callerOf) => req => {
       if (named.refused) return refusal(message, named.refused);
       agent = named.name;
     }
+    return handle(message);
+  };
+};
+
+// Each MCP session on /site/mcp: the website's tools (home/site-mcp.mjs), for the agent the session is.
+const siteSessions = (dir, fixed, callerOf, live) => req => {
+  const caller = callerOf(req);
+  let agent = agentOf(caller?.name ?? fixed);
+  const handle = mcpServer({ tools: () => createSiteTools({ dir, agent, live }), list: SITE_TOOLS, name: 'ohm-site', instructions: SITE_INSTRUCTIONS });
+  return message => {
+    if (message?.method === 'initialize') {
+      const named = sessionName(caller, message, fixed);
+      if (named.refused) return refusal(message, named.refused);
+      agent = named.name;
+    }
+    live?.agentSeen(agent);
     return handle(message);
   };
 };
@@ -579,7 +608,7 @@ export async function siteSettings(file) {
 function needsOf({ settings, config, password }) {
   const needs = [];
   if (!settings) needs.push({ what: 'site', say: `Publishing needs your site's configuration in your home. Make it with: ohm configure --site https://… --handle … > ${config}` });
-  if (!password) needs.push({ what: 'password', say: 'Start ohmmmm serve with ATPROTO_APP_PASSWORD set to an app password for your account. It stays on this computer.' });
+  if (!password) needs.push({ what: 'password', say: 'Start ohm serve with ATPROTO_APP_PASSWORD set to an app password for your account. It stays on this computer.' });
   return needs;
 }
 
@@ -790,6 +819,116 @@ export async function unpublishAsPerson({ vault, path, replaces, to, config, pas
   return { ...done.file, layer: to, removed: Boolean(read.published), ...(read.published ? { address: read.published.record.canonicalUrl } : {}) };
 }
 
+// ---- Short posts, to Bluesky (app/flows/short-post.md) ----
+//
+// A block of kind short is published as an app.bsky.feed.post in the person's own repository, under the
+// block's own ID, so it shows on Bluesky; long posts stay site.standard.document. Only the person
+// publishes, after the plan: the bridge writes with the app password from its own environment, and no
+// agent has a tool for it.
+
+export const SHORT_COLLECTION = 'app.bsky.feed.post';
+const utf8 = new TextEncoder();
+const byteAt = (text, index) => utf8.encode(text.slice(0, index)).length;
+
+/**
+ * Bluesky's facets for a text: its links, #tags and @mentions, by UTF-8 byte ranges. A mention is kept
+ * only when its handle resolves to a DID (`resolve`), as Bluesky does.
+ */
+export async function shortFacets(text, resolve = async () => null) {
+  const facets = [];
+  const span = (start, end) => ({ byteStart: byteAt(text, start), byteEnd: byteAt(text, end) });
+  for (const found of text.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+    const uri = found[0].replace(/[.,;:!?)\]]+$/, '');
+    facets.push({ index: span(found.index, found.index + uri.length), features: [{ $type: 'app.bsky.richtext.facet#link', uri }] });
+  }
+  for (const found of text.matchAll(/(^|\s)#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu)) {
+    const start = found.index + found[1].length;
+    facets.push({ index: span(start, start + 1 + found[2].length), features: [{ $type: 'app.bsky.richtext.facet#tag', tag: found[2] }] });
+  }
+  for (const found of text.matchAll(/(^|\s)@([a-z0-9][a-z0-9.-]*\.[a-z]{2,})/gi)) {
+    const did = await resolve(found[2].toLowerCase()).catch(() => null);
+    if (!did) continue;
+    const start = found.index + found[1].length;
+    facets.push({ index: span(start, start + 1 + found[2].length), features: [{ $type: 'app.bsky.richtext.facet#mention', did }] });
+  }
+  return facets.sort((a, b) => a.index.byteStart - b.index.byteStart);
+}
+
+// The short post's file, read: its text, its version, and whether it was posted already.
+async function readShort(vault, path) {
+  if (!editablePath(path)) throw fail('Give the post as its file\'s path in the vault', 400);
+  let text;
+  try { text = await readFile(await inVault(vault, path), 'utf8'); } catch { throw fail('There is no such file any more', 412); }
+  const node = readNode(path, text)?.node;
+  if (node?.type !== 'block' || node.kind !== 'short') throw new VaultProblem('Only a short post is published to Bluesky.');
+  const words = String(node.body ?? '').trim();
+  if (!words) throw new VaultProblem('A short post needs words.');
+  if (graphemes(words) > 300) throw new VaultProblem('A short post is at most 300 characters, as Bluesky counts them.');
+  const posted = typeof node.properties?.posted === 'string' ? node.properties.posted : null;
+  return { text, version: await versionOf(text), node, words, posted };
+}
+
+// What the person approves: the words and their facets, as Bluesky will show them. Not the date.
+const shortConfirm = (words, facets) => createHash('sha256').update(JSON.stringify({ words, facets })).digest('hex').slice(0, 16);
+
+/**
+ * What publishing a short post would write, for the preview the person approves: the app.bsky.feed.post
+ * (its words and facets), where it goes, whether it was posted before, and what this computer still
+ * needs (`needs`). Writes nothing.
+ */
+export async function planShort({ vault, path, config, password = process.env.ATPROTO_APP_PASSWORD, resolve }) {
+  const settings = await siteSettings(config);
+  const read = await readShort(vault, path);
+  const facets = await shortFacets(read.words, resolve);
+  const needs = needsOf({ settings, config, password });
+  return {
+    path, version: read.version, text: read.words, facets, collection: SHORT_COLLECTION,
+    ...(settings ? { repository: settings.did, pds: settings.origin } : {}),
+    ...(read.posted ? { posted: read.posted } : {}),
+    needs: needs.map(need => need.say), ready: !needs.length, confirm: shortConfirm(read.words, facets),
+  };
+}
+
+/**
+ * Publishes a short post as the person, over the version read (`replaces`) and only as the plan they
+ * saw (`confirm`). The post goes to their repository under the block's ID (given one first, if it has
+ * none), so a publish tried again replaces it rather than posting twice. Then the block is marked public
+ * and keeps the post's address (`posted`); both are journaled (`via: publish`).
+ */
+export async function publishShort({ vault, path, replaces, confirm, config, password = process.env.ATPROTO_APP_PASSWORD, resolve, token, call = rpc, now = () => new Date() }) {
+  const settings = await siteSettings(config);
+  const needs = needsOf({ settings, config, password });
+  if (needs.length) throw new VaultProblem(needs.map(need => need.say).join(' '));
+  let read = await readShort(vault, path);
+  if (read.version !== replaces) throw Object.assign(fail('The post changed since it was read', 412), { version: read.version });
+  const facets = await shortFacets(read.words, resolve);
+  if (shortConfirm(read.words, facets) !== confirm) throw new VaultProblem('It changed since you saw the preview. Look at it again before publishing.');
+  const at = now().toISOString();
+  const events = [];
+  // The ID first, so the post's key is kept whatever happens next.
+  if (!read.node.id) {
+    const done = await writePublished(vault, path, read.text, setProperty(read.text, 'id', newNodeId()), {});
+    events.push({ at, ...done.event });
+    read = { ...read, text: done.file.text, node: readNode(path, done.file.text).node };
+  }
+  const rkey = read.node.id;
+  const record = { $type: SHORT_COLLECTION, text: read.words, createdAt: read.node.created ?? at, ...(facets.length ? { facets } : {}) };
+  const access = token ?? await signIn(settings.origin, settings.did, password).catch(problem => { throw new VaultProblem(problem.message); });
+  const put = await call(settings.origin, 'com.atproto.repo.putRecord', { body: { repo: settings.did, collection: SHORT_COLLECTION, rkey, record }, token: access });
+  if (!put.response.ok || typeof put.data?.uri !== 'string') throw new VaultProblem(`Bluesky did not take the post (HTTP ${put.response.status}${put.data?.message ? `: ${put.data.message}` : ''}).`);
+  // The block, marked public, keeps where the post is.
+  const text = setProperty(publishedLayer(path, read.text, 'public'), 'posted', put.data.uri);
+  if (text !== read.text) {
+    const done = await writePublished(vault, path, read.text, text, { layer: 'public', was: layerOf(path, read.text) });
+    events.push({ at, ...done.event });
+    read = { ...read, text };
+  }
+  events.push({ at, op: 'published', root: 'vault', path, by: 'me', via: 'publish', key: rkey, address: put.data.uri });
+  await appendEvents(vault, events);
+  return { path, uri: put.data.uri, cid: put.data.cid ?? null, version: await versionOf(read.text) };
+}
+
+
 // ---- The bridge ----
 
 const hostOf = header => {
@@ -807,7 +946,7 @@ const isLoopbackOrigin = origin => {
  * without a restart, and a key replaced stops working at once.
  * `config` is the site configuration Publish uses; `env` holds ATPROTO_APP_PASSWORD, read when needed.
  */
-export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home) }) {
+export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, config = join(layout.home, SITE_CONFIG), env = process.env, keys = () => homeKeys(layout.home), followingAs = layout.handle }) {
   const allowed = origin => origins.includes(origin) || isLoopbackOrigin(origin);
   // Who signed each request: its key's kind, the agent it names, and the key's own hash, which binds
   // an MCP session to the key that opened it.
@@ -816,6 +955,11 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
   const callerOf = req => callers.get(req);
   const owner = req => callers.get(req)?.owner;
   const vault = httpTransport({ open: vaultSessions(layout.vault, DatabaseSync, agent, callerOf), origins, endpoint: '/vault/mcp', owner });
+  const live = layout.site ? siteLive(layout.site) : null;
+  // Tools are folders beside the site, written by the person's agent; new ones go on the canvas.
+  const tools = layout.site ? watchTools(layout.site, live) : null;
+  if (layout.site) void moveOldTools(layout.site).catch(() => {});
+  const siteMcp = layout.site ? httpTransport({ open: siteSessions(layout.site, agent, callerOf, live), origins, endpoint: '/site/mcp', owner }) : null;
   let cortex;
   const cortexReady = async () => (cortex ??= (await stat(join(layout.cortex, 'agents', 'AGENTS.md')).catch(() => null))
     ? httpTransport({ open: cortexSessionsFor(layout.cortex, agent, callerOf), origins, endpoint: '/cortex/mcp', owner }) : undefined);
@@ -826,6 +970,9 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
     return res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), ...headers }).end(text);
   };
   const said = (res, status, message) => send(res, status, { error: message });
+  // The network feed starts on first use, and Discover is read again at most once a minute.
+  let following = null;
+  let discovered = null;
   const withIndex = async work => {
     const db = await openIndex(layout.vault, { DatabaseSync });
     try { return await work(db); } finally { db.close(); }
@@ -843,6 +990,8 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
   });
 
   const cortexRoute = cortexRoutes({ dir: layout.cortex, send, said, body });
+  // The person's website, `site/` in their ohm (home/site.mjs). An app key's alone, like every route outside AGENT_ROUTES.
+  const siteRoute = layout.site ? siteRoutes({ layout, send, said, body, live }) : null;
   const json = async (req, limit) => {
     try { return JSON.parse((await body(req, limit)).toString('utf8')); } catch { return undefined; }
   };
@@ -905,12 +1054,26 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
       if (!who) return send(res, 401, undefined, { 'WWW-Authenticate': 'Bearer' });
       callers.set(req, { ...who, reserved: known.reserved, owner: createHash('sha256').update(signed).digest('hex') });
       const url = new URL(req.url, 'http://home');
-      if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp and /cortex/mcp; the rest is the person\'s, through the app.');
+      if (who.kind === 'agent' && !AGENT_ROUTES.includes(url.pathname)) return said(res, 403, 'This key is an agent\'s. It reaches /vault/mcp, /cortex/mcp and /site/mcp; the rest is the person\'s, through the app.');
       const mine = callers.get(req).owner;
       // When a browser was last used, noted at most once an hour, so the person can tell which are still in use.
       if (who.kind === 'app' && Date.now() - (seenAt.get(mine) ?? 0) > 3_600_000) {
         seenAt.set(mine, Date.now());
         await browserSeen(layout.home, mine).catch(() => {});
+      }
+      // What an agent's own hooks say it is doing (the ohm plugin): its presence, and the files it edits.
+      if (url.pathname === '/site/activity') {
+        if (req.method !== 'POST') return said(res, 405, 'POST what you are doing');
+        if (!live) return said(res, 404, 'No site');
+        if (who.kind !== 'agent') return said(res, 403, 'Only an agent says what it is doing');
+        const said_ = await json(req, 16_384);
+        if (!said_ || typeof said_ !== 'object') return said(res, 400, 'Send { event, tool, path }');
+        return send(res, 200, live.activity(agentOf(who.name ?? agent), said_));
+      }
+      // The site's MCP is the agents' own door, not one of the site's routes for the app.
+      if (siteRoute && isSiteRoute(url.pathname) && url.pathname !== '/site/mcp') {
+        if (await siteRoute(req, res, url)) return;
+        return said(res, 404, 'Not a step of the site');
       }
       if (url.pathname === '/vault/keys' && req.method === 'GET') {
         const shared = await readText(join(layout.home, AGENT_KEY));
@@ -932,6 +1095,7 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         return send(res, 200, { forgotten: forgetting[1], you: forgetting[1] === browserId(mine) });
       }
       if (url.pathname === '/vault/mcp') return await vault(req, res);
+      if (url.pathname === '/site/mcp') return siteMcp ? await siteMcp(req, res) : said(res, 404, 'This ohm has no site yet. Connect one with: ohm site connect <your repository>');
       if (url.pathname === '/cortex/mcp') {
         const serve = await cortexReady();
         return serve ? await serve(req, res) : said(res, 404, 'This home has no cortex yet. Start one with: ohmmmm init <handle>');
@@ -1026,6 +1190,49 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
           })));
         } catch (problem) { return answered(res, problem); }
       }
+      // A short post, to Bluesky: the preview, then the publish the person approved. Never an agent's.
+      if (url.pathname === '/vault/short/plan' && req.method === 'POST') {
+        const asked = await json(req, 4 * 1024);
+        if (!asked || typeof asked.path !== 'string') return said(res, 400, 'A plan is { path }');
+        try { return send(res, 200, await planShort({ vault: layout.vault, path: asked.path, config, password: env.ATPROTO_APP_PASSWORD, resolve: resolveHandle })); } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/vault/short/publish' && req.method === 'POST') {
+        const replaces = versionAsked(req);
+        if (replaces === undefined) return said(res, 428, 'Say which version you read: If-Match: "<version>"');
+        const asked = await json(req, 4 * 1024);
+        if (!asked || typeof asked.path !== 'string' || typeof asked.confirm !== 'string') return said(res, 400, 'A publish is { path, confirm }, confirm from the preview the person approved');
+        try {
+          return send(res, 200, await withCollectLock(layout.vault, DatabaseSync, () => publishShort({
+            vault: layout.vault, path: asked.path, replaces, confirm: asked.confirm, config, password: env.ATPROTO_APP_PASSWORD, resolve: resolveHandle,
+          })));
+        } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/units' && req.method === 'GET') {
+        const folder = url.searchParams.get('in');
+        if (folder === null) return send(res, 200, { home: layout.handle, units: await readUnits(layout) });
+        if (folder.split('/').some(part => part === '..' || part.startsWith('.')) || folder.startsWith('/')) return said(res, 400, 'in is a folder from the top of the home');
+        return send(res, 200, { home: layout.handle, ...await readLevel(layout, folder.replace(/\/+$/, '')) });
+      }
+      // Posts from the network: other people's, read from public Bluesky, never written to.
+      if (url.pathname === '/feed/live' && req.method === 'GET') {
+        following ??= liveFollowing({ handle: followingAs });
+        await following.start();
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 500);
+        return send(res, 200, { ...following.state(), posts: following.posts(limit) });
+      }
+      if (url.pathname === '/feed/discover' && req.method === 'GET') {
+        // Read again at most once a minute, or at once when the person refreshes (?fresh).
+        if (!discovered || Date.now() - discovered.at > 60_000 || url.searchParams.has('fresh')) discovered = { at: Date.now(), posts: discover({ limit: 60 }) };
+        try { return send(res, 200, { posts: await discovered.posts }); } catch (problem) { discovered = null; return said(res, 502, `Discover did not answer: ${problem.message}`); }
+      }
+      if (url.pathname === '/units/feed' && req.method === 'GET') {
+        const audience = url.searchParams.get('audience') ?? 'private';
+        if (!['private', 'friends', 'public'].includes(audience)) return said(res, 400, 'audience is private, friends or public');
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100) || 100, 1), 500);
+        const types = url.searchParams.getAll('type');
+        const before = url.searchParams.get('before') ?? undefined;
+        return send(res, 200, { home: layout.handle, audience, units: await readFeed(layout, { audience, limit, before, ...(types.length ? { types } : {}) }) });
+      }
       if (url.pathname === '/vault/files' && req.method === 'GET') {
         const { files } = await readVaultFolder(layout.vault, { open: path => inVault(layout.vault, path) });
         return send(res, 200, { home: layout.handle, files: await Promise.all(files.map(async file => ({ ...file, version: await versionOf(file.text) }))) });
@@ -1092,7 +1299,8 @@ export function listenHome(handler, { port = PORT } = {}) {
 }
 
 // ---- The commands ----
-//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--pair] [--new-keys]
+//   ohmmmm serve [--port 8766] [--app <origin>]… [--agent <name>] [--config <site configuration>] [--following <handle>] [--pair] [--new-keys]
+//                --following: the Bluesky account whose follows fill the feed's Following (the home's handle by default)
 //   ohmmmm pair  [--port 8766] [--app <origin>]…      one more browser, while the bridge runs
 //   ohmmmm agents [list] | add <name> [--new-key] [--port 8766] | remove <name> | remove --shared
 //   ohmmmm browsers [list] | forget <id>                the paired browsers, and forgetting one
@@ -1112,12 +1320,12 @@ async function printAgents(layout, port) {
   const own = await agentKeys(layout.home);
   const shared = await readText(join(layout.home, AGENT_KEY));
   const url = `http://127.0.0.1:${port}`;
-  console.log(`Agents: ${url}/vault/mcp and ${url}/cortex/mcp, each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohmmmm agents add <name>`);
-  if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohmmmm agents remove --shared`);
+  console.log(`Agents: ${url}/vault/mcp, ${url}/cortex/mcp and ${url}/site/mcp (your website), each with its own key, which reaches only those. ${own.length ? `With keys: ${own.map(each => each.name).join(', ')}.` : 'No agent has a key yet.'} To give one: ohm agents add <name>`);
+  if (shared !== undefined) console.log(`The shared agent key (${join(layout.home, AGENT_KEY)}) still opens agents' tools, and agents using it name themselves. Give each its own key, then: ohm agents remove --shared`);
 }
 
 const options = {
-  port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' },
+  port: { type: 'string' }, app: { type: 'string', multiple: true }, agent: { type: 'string' }, config: { type: 'string' }, following: { type: 'string' },
   pair: { type: 'boolean' }, 'new-keys': { type: 'boolean' }, 'new-token': { type: 'boolean' }, 'new-key': { type: 'boolean' }, shared: { type: 'boolean' },
 };
 
@@ -1125,7 +1333,7 @@ async function command(args) {
   const [name, ...rest] = COMMANDS.includes(args[0]) ? args : ['serve', ...args];
   const { values, positionals } = parseArgs({ args: rest, options, allowPositionals: name === 'agents' || name === 'browsers' });
   const layout = findHome();
-  if (!layout) throw new Error(`Run ohmmmm ${name} inside a home (ohmmmm.<handle>), or set OHMMMM_HOME.`);
+  if (!layout) throw new Error(`Run ohm ${name} inside your ohm (a folder named ohm.<handle>), or set OHMMMM_HOME.`);
   const port = values.port === undefined ? PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port is a port number');
   const apps = values.app?.length ? values.app.map(app => new URL(app).origin) : [APP];
@@ -1135,7 +1343,7 @@ async function command(args) {
     const url = `http://127.0.0.1:${port}`;
     await printPairing(layout, apps, url);
     const answering = await fetch(`${url}/`, { signal: AbortSignal.timeout(1500) }).then(() => true, () => false);
-    if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohmmmm serve${port === PORT ? '' : ` --port ${port}`}`);
+    if (!answering) console.log(`Nothing answers at ${url} yet. Start the bridge with: ohm serve${port === PORT ? '' : ` --port ${port}`}`);
     return;
   }
 
@@ -1144,15 +1352,15 @@ async function command(args) {
     if (action === 'list') {
       const browsers = await pairedBrowsers(layout.home);
       for (const each of browsers) console.log([each.id, each.name ?? 'a browser not named yet', `paired ${day(each.made)}`, each.seen ? `last used ${day(each.seen)}` : 'not used since it was paired', each.app ?? ''].filter(Boolean).join('\t'));
-      if (!browsers.length) console.log('No browser is paired. Pair one with: ohmmmm pair');
+      if (!browsers.length) console.log('No browser is paired. Pair one with: ohm pair');
       return;
     }
     if (action === 'forget') {
-      if (!id) throw new Error('Say which browser, by the ID ohmmmm browsers shows: ohmmmm browsers forget <id>');
-      console.log(await forgetBrowser(layout.home, id) ? `Forgotten: that browser can no longer open your home. To use it again, pair it with: ohmmmm pair` : `No paired browser has the ID ${id}. See them with: ohmmmm browsers`);
+      if (!id) throw new Error('Say which browser, by the ID ohm browsers shows: ohm browsers forget <id>');
+      console.log(await forgetBrowser(layout.home, id) ? `Forgotten: that browser can no longer open your home. To use it again, pair it with: ohm pair` : `No paired browser has the ID ${id}. See them with: ohm browsers`);
       return;
     }
-    throw new Error('ohmmmm browsers [list] | forget <id>');
+    throw new Error('ohm browsers [list] | forget <id>');
   }
 
   if (name === 'agents') {
@@ -1160,8 +1368,8 @@ async function command(args) {
     if (action === 'list') {
       const own = await agentKeys(layout.home);
       for (const each of own) console.log(`${each.name}\tkey made ${each.made}`);
-      if (!own.length) console.log('No agent has a key of its own yet. Give one: ohmmmm agents add <name>');
-      if (await readText(join(layout.home, AGENT_KEY)) !== undefined) console.log('(the shared agent key)\tagents using it name themselves; remove it with: ohmmmm agents remove --shared');
+      if (!own.length) console.log('No agent has a key of its own yet. Give one: ohm agents add <name>');
+      if (await readText(join(layout.home, AGENT_KEY)) !== undefined) console.log('(the shared agent key)\tagents using it name themselves; remove it with: ohm agents remove --shared');
       return;
     }
     if (action === 'add') {
@@ -1175,14 +1383,14 @@ async function command(args) {
     if (action === 'remove') {
       if (values.shared) {
         await removeSharedAgentKey(layout.home);
-        console.log('The shared agent key is gone. Agents still using it are shut out; each needs its own: ohmmmm agents add <name>');
+        console.log('The shared agent key is gone. Agents still using it are shut out; each needs its own: ohm agents add <name>');
         return;
       }
-      if (!agent) throw new Error('Say which agent: ohmmmm agents remove <name>, or --shared for the shared agent key');
+      if (!agent) throw new Error('Say which agent: ohm agents remove <name>, or --shared for the shared agent key');
       console.log(await removeAgent(layout.home, agent) ? `${agent}'s key no longer works.` : `${agent} has no key of its own.`);
       return;
     }
-    throw new Error('ohmmmm agents [list] | add <name> [--new-key] | remove <name> | remove --shared');
+    throw new Error('ohm agents [list] | add <name> [--new-key] | remove <name> | remove --shared');
   }
 
   const sqlite = await import('node:sqlite');
@@ -1194,19 +1402,19 @@ async function command(args) {
   const shared = renew ? null : await sharedAgentKey(layout.home);
   const paired = renew ? 0 : (await appKeys(layout.home)).length;
   const config = values.config ? resolve(values.config) : join(layout.home, SITE_CONFIG);
-  const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config }), { port })
+  const server = await listenHome(homeBridge({ layout, origins: apps, DatabaseSync: sqlite.DatabaseSync, agent: values.agent, config, ...(values.following ? { followingAs: values.following.replace(/^@/, '') } : {}) }), { port })
     .catch(problem => { throw new Error(problem.code === 'EADDRINUSE' ? `Port ${port} is in use. Choose another with --port.` : problem.message); });
   const at = server.address().port;
   const url = `http://127.0.0.1:${at}`;
   console.log(`Serving ${layout.home} at ${url}, to this machine only.`);
   if (shared?.fromOldToken) console.log('The key this home used for everything now opens only agents\' tools: it is the shared agent key. Pair the app again with the link below.');
-  if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohmmmm agents add <name>');
+  if (renew) console.log('New keys: every browser paired before, and every agent\'s key, is shut out. Give agents new keys with: ohm agents add <name>');
   if (renew || values.pair || paired === 0) await printPairing(layout, apps, url, { replace: renew });
-  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohmmmm pair${at === PORT ? '' : ` --port ${at}`}. To see or forget them: ohmmmm browsers, or Settings › Vault in the app.`);
+  else console.log(`The app is paired with ${paired === 1 ? 'one browser' : `${paired} browsers`}. To pair another, run: ohm pair${at === PORT ? '' : ` --port ${at}`}. To see or forget them: ohm browsers, or Settings › Collections in the app.`);
   await printAgents(layout, at);
-  const settings = await siteSettings(config).catch(problem => { console.log(`Publishing is off: ${problem.message}`); return undefined; });
-  if (settings === null) console.log(`Publishing is off until there is a site configuration at ${config} (ohm configure).`);
-  else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Publishing is off until ohmmmm serve is started with ATPROTO_APP_PASSWORD set.');
+  const settings = await siteSettings(config).catch(problem => { console.log(`Posting blocks to your PDS is off: ${problem.message}`); return undefined; });
+  if (settings === null) console.log(`Posting blocks to your PDS is off until there is a site configuration at ${config} (ohm configure). Publishing your website from the Site view does not need it.`);
+  else if (settings && !process.env.ATPROTO_APP_PASSWORD) console.log('Posting blocks to your PDS is off until ohm serve is started with ATPROTO_APP_PASSWORD set. Publishing your website from the Site view does not need it.');
   else if (settings) console.log(`Publishing to ${settings.site}, as ${settings.did}, when you approve it in the app.`);
 }
 

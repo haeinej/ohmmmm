@@ -1,6 +1,8 @@
 // Workspace state, and the handlers both the UI and the WebMCP tools call (AGENTS.md rule 2).
 // Every change goes to the home's source (the vault service) first, one at a time, and the
 // workspace shows it once the source has answered.
+import { docOfUnit, unitById, UNIT_ID, type Unit } from "@/data/units"
+import { forgetBridge } from "@/data/bridge"
 import { useSyncExternalStore } from "react"
 import { blockVersion, byId, heldBlock, privateLayer, channelByPath, channelRecords, channelsOf, cortex, dropBlock, dropChannel, getSource, heldChannel,
   inOrder, isBlock, isCortexKind, journalOf, landBlock, landChannel, landCortex, heldCortex, dropCortex, owner, blocks, selectSource,
@@ -11,8 +13,8 @@ import { cortexFileOf } from "@/data/cortex-document"
 import { docOf } from "@/data/block-document"
 import { postFile, setProperty, slugOf, writeNoteFile } from "../../../vault/vault/file.mjs"
 import { inferKind, isChannelPath, newNodeId, readNode } from "../../../vault/vault/node.mjs"
-import { createServiceSource, newOpaqueId, type ServiceOptions } from "@/data/service-source"
-import { type Ask, type BlockFile, type Friend, type Sharer, type BlockRef, type FriendRequest, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
+import { newOpaqueId } from "@/data/ids"
+import { type BlockRef, type HomeSource, type MoveRecord, type MoveRequest, type MoveTarget, type AgentInfo, type AgentApproval, type AgentAccess } from "@/data/source"
 import { blockAsPost, planMove } from "../../../vault/vault/visibility.mjs"
 import { buildGraph } from "@/graph/model"
 import type { AgentState } from "@/components/agent-status"
@@ -20,13 +22,12 @@ import type { SettingsTab } from "./settings-tabs"
 import { NO_FILTERS, passes, type Filters } from "./filters"
 import { applySnapshot, snap, versionOf, type DeadEnd, type Snapshot } from "@/data/journal"
 import type { CortexWaiting } from "@/data/workspace-model"
-import { features } from "@/features"
 import { assertDurable, embedsIn, mediaFile, resolveEmbed } from "@/media/embeds"
 import { keep, makeSizes, measure } from "@/media/cache"
 
 const live = () => {
   const source = getSource()
-  if (!source) throw new DOMException("Sign in to change your home.", "InvalidStateError")
+  if (!source) throw new DOMException("No home is open here. Run ohm serve in your home, then open the pairing link it prints.", "InvalidStateError")
   return source
 }
 const draftOf = (id: string) => {
@@ -98,13 +99,15 @@ async function saveChannelProperty(path: string, key: string, value: unknown) {
 }
 
 /** What the side panel shows. The rack chooses it. */
-export type Side = "repo" | "visibility" | "connections" | "agents" | "profile" | null
+export type Side = "repo" | "agents" | "profile" | null
 export type View =
   | { kind: "empty" }
   | { kind: "doc"; id: string; mode: "read" | "edit" }
-  /** A block a friend shares with you, read-only. */
-  | { kind: "shared"; owner: string; id: string }
   | { kind: "settings"; tab: SettingsTab }
+  /** A unit that is not a block or an agent's file: the profile, the wallet, or a file of the site. */
+  | { kind: "unit"; unit: Unit }
+  /** The feed of the home's units, newest first (flows/feed.md). */
+  | { kind: "feed" }
 export type Appearance = "system" | "light" | "dark"
 /** How tight corners and menus are; src/theme.css holds the values. */
 export type Density = "compact" | "comfortable" | "rounded"
@@ -121,6 +124,7 @@ export type ToolName = "workspace.search" | "workspace.open" | "workspace.graph"
   | "visibility.preview" | "visibility.move"
   | "cortex.observe"
   | "history.list" | "history.save" | "history.session" | "history.revert" | "history.versions" | "history.restore"
+  | "feed.read" | "short.write"
 
 type State = {
   side: Side
@@ -176,6 +180,7 @@ let state: State = {
     "visibility.preview": true, "visibility.move": true,
     "cortex.observe": true,
     "history.list": true, "history.save": true, "history.session": true, "history.revert": true, "history.versions": true, "history.restore": true,
+    "feed.read": true, "short.write": true,
   },
 }
 const listeners = new Set<() => void>()
@@ -197,15 +202,15 @@ const set = (patch: Partial<State>) => {
 const bump = () => ({ rev: state.rev + 1 })
 
 /**
- * Chooses the home: the vault service (the default, once signed in), a source given directly (tests
- * give a fixture), or null for signed out.
+ * Chooses the home: the folder on this computer through its bridge (main.tsx), a source given directly
+ * (tests give a fixture), or null when no home is open.
  */
-export async function setSource<Master, Sealed>(
-  next: HomeSource | HomeSource<"sync"> | { service: ServiceOptions<Master, Sealed> } | null = null,
+export async function setSource(
+  next: HomeSource | HomeSource<"sync"> | null = null,
   { keepView = false } = {},
 ) {
   set(bump())
-  if (!await selectSource(next && "service" in next ? createServiceSource(next.service) : next)) return
+  if (!await selectSource(next)) return
   usedSlugs.clear()
   for (const doc of [...blocks, ...cortex]) usedSlugs.add(doc.slug)
   await movesOnOpen()
@@ -217,12 +222,9 @@ export async function setSource<Master, Sealed>(
     reveal: null, returnTo: null, restored: null, historyFocus: null, searchOpen: false })
 }
 
-/** Ends the ohm session (ohm's sign-in, Better Auth, on this address) and shows sign-in. */
-export async function signOut() {
-  const response = await fetch(new URL("/api/auth/sign-out", location.origin), {
-    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}",
-  })
-  if (!response.ok) throw new DOMException("Signing out failed. Try again.", "OperationError")
+/** Forgets the bridge this browser was paired with: the home closes here until it is paired again. */
+export async function unpair() {
+  forgetBridge()
   await setSource(null)
 }
 
@@ -232,25 +234,9 @@ export const reload = () => serial(async () => {
   if (source) await setSource(source, { keepView: true })
 })
 
-/**
- * Finds who is signed in on this origin and opens their vault service. Signed out, or with no
- * service here, the workspace shows sign-in. The private layer and the cortex open once this device
- * has unlocked the account's keys (`privateSession`, from the account app's packages/keys).
- */
 /** The source changed what it holds by itself (the home's bridge answered): read it again, keeping the view. */
 export const sourceChanged = () => { const source = getSource(); return source ? report(setSource(source, { keepView: true })) : Promise.resolve() }
 
-export async function connectHome<Master, Sealed>(options: Pick<ServiceOptions<Master, Sealed>, "privateSession" | "fetch"> = {}) {
-  const send = options.fetch ?? fetch
-  try {
-    const response = await send(new URL("/vault/xrpc/com.ohmmmm.account.get", location.origin), { credentials: "same-origin", redirect: "error" })
-    const account = response.ok ? await response.json() as { did?: string | null } : null
-    if (!account?.did) return setSource(null)
-    await setSource({ service: { origin: location.origin, did: account.did, ...options } })
-  } catch {
-    await setSource(null)
-  }
-}
 
 export const useWorkspace = () =>
   useSyncExternalStore(cb => (listeners.add(cb), () => listeners.delete(cb)), () => state)
@@ -451,27 +437,6 @@ async function publishBlock(held: { ref: BlockRef; version: string }, block: Doc
 
 // Agents' requests for moves they may not finish, waiting for the member.
 let moveRequests: MoveRequest[] = []
-// People asking to be friends, waiting for the member, as devices wait on a private network.
-let friendRequests: FriendRequest[] = []
-export const waitingFriends = () => friendRequests
-export async function loadFriendRequests() {
-  friendRequests = await live().friendRequests.list()
-  set(bump())
-  return friendRequests
-}
-/** Lets someone who asked into the friends layer, for every channel or only some. Consequential: the person approves in a dialog first. */
-export async function approveFriend(id: string, channels: "*" | string[]) {
-  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
-  await live().friendRequests.approve(id, channels)
-  await loadFriendRequests()
-  return { id, channels }
-}
-export async function declineFriend(id: string) {
-  await live().friendRequests.decline(id)
-  await loadFriendRequests()
-  return { id, declined: true }
-}
-
 // Agents: the member's coding agents, and what they wait for the member to approve in ohm.
 export type Agents = { agents: AgentInfo[]; approvals: AgentApproval[] }
 let agentsWaiting = 0
@@ -496,44 +461,9 @@ export async function setAgentState(agent: string, state: AgentAccess) {
   return { agent, state }
 }
 
-// Connections: the people around you. Friends you let in, people who let you in, and who you asked.
-export type People = { friends: Friend[]; sharers: Sharer[]; asks: Ask[] }
-export async function loadPeople(): Promise<People> {
-  const [friends, sharers, asks] = await Promise.all([live().listFriends(), live().people.friendOf(), live().people.asked()])
-  return { friends, sharers, asks }
-}
-/** Asks someone, by their email, to let you see what they share with friends. Nothing says whether the email is on ohm. */
-export async function askFriend(email: string, message?: string) {
-  const typed = email.trim()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typed)) throw new DOMException("Give their email address", "DataError")
-  await live().people.askByEmail(typed, message?.trim() || undefined)
-  return { email: typed.toLowerCase(), asked: true }
-}
-/** Changes which channels one friend sees. Only you, signed in to ohm; wider asks first in the page. */
-export async function setFriendChannels(did: string, channels: "*" | string[]) {
-  if (channels !== "*" && (!channels.length || channels.some(path => !isChannelPath(path)))) throw new DOMException("Choose every channel, or at least one channel", "DataError")
-  await live().friendRequests.setChannels(did, channels)
-  return { did, channels }
-}
-/** Stops a friend reading your friends layer. Consequential: the person approves in a dialog first. */
-export async function removeFriend(did: string) {
-  await live().removeFriend(did)
-  return { did, removed: true }
-}
-/** What one person shares with you, as block heads. */
-export const sharedBy = (owner: string) => live().listShared(owner)
-/** Opens a block a friend shares with you, read-only, in the main panel. */
-export function openShared(owner: string, id: string) {
-  set({ view: { kind: "shared", owner, id }, ...bump() })
-}
-export const readShared = (owner: string, id: string): Promise<BlockFile> => live().readShared(owner, id)
-
-/** When the home opens: who asks to be a friend, what agents asked for, and sealing what they hid. None keeps the home from opening. */
+/** When the home opens: what agents asked for, and sealing what they hid. Neither keeps the home from opening. */
 async function movesOnOpen() {
   moveRequests = []
-  friendRequests = []
-  // Friends are not shown in the first release (features.ts); their requests are read only when they are.
-  if (features.connections) try { await loadFriendRequests() } catch (problem) { failureListeners.forEach(listener => listener(problem as Error)) }
   pendingSeals.clear()
   try {
     await loadMoveRequests()
@@ -597,6 +527,15 @@ export function openSettings(tab: SettingsTab = "profile") {
   set({ side: narrow() && state.side === "profile" ? null : "profile", view: { kind: "settings", tab }, searchOpen: false, returnTo })
 }
 /** Leaving settings: back to the block and panel you came from. */
+/** Close what is open, so the main panel is back to what it shows by default. */
+export const showMain = () => set({ view: { kind: "empty" }, searchOpen: false })
+/** Home: your home's own screen, the canvas (with a site) and its panel. Again, on it, hides the panel. */
+export const showHome = () => {
+  const onHome = state.view.kind === "empty" || state.view.kind === "doc"
+  if (onHome) return toggleSide("repo")
+  set({ view: { kind: "empty" }, searchOpen: false, side: "repo" })
+}
+
 export function closeSettings() {
   const back = state.returnTo
   const view = back?.view.kind === "doc" && !byId(back.view.id) ? { kind: "empty" as const } : back?.view ?? { kind: "empty" as const }
@@ -617,13 +556,34 @@ export const setAgentsAllowed = (agentsAllowed: boolean) => set({ agentsAllowed 
 export const setOffered = (name: ToolName, on: boolean) => set({ offered: { ...state.offered, [name]: on } })
 
 // Handlers shared by the UI and the tools.
-export function open(id: string, mode: "read" | "edit" = "read") {
+/** What opening returns to a tool: what is open now, and the step that follows. */
+export type Opened = { id: string; title: string; view: string; next: string }
+export function open(id: string, mode: "read" | "edit" = "read"): Opened {
+  // Any other unit (the profile, the wallet, a site file) opens by its unit id, from a row, a hit or a tool.
+  const unit = unitById(id)
+  if (unit) return openUnit(unit)
   const doc = byId(id)
   if (!doc) throw new DOMException(`Nothing with id ${id}`, "NotFoundError")
   if (mode === "edit") live()
   marks.unread.delete(id)
   set({ view: { kind: "doc", id, mode }, searchOpen: false, ...sideAfterOpen() })
   return { id, title: doc.title, view: mode, next: mode === "edit" ? "workspace.save-draft" : "workspace.open" }
+}
+
+/**
+ * Opens any unit of the home (docs/plans/units.md): a block or an agent's file in the editor, as open()
+ * does, and anything else (the profile, the wallet, a file of the site) in its own view.
+ */
+export function openUnit(unit: Unit): Opened {
+  const doc = docOfUnit(unit)
+  if (doc) return open(doc.id)
+  set({ view: { kind: "unit", unit }, searchOpen: false, ...sideAfterOpen() })
+  return { id: `${UNIT_ID}${unit.key}`, title: unit.title ?? unit.path, view: "read", next: "workspace.open" }
+}
+
+/** Shows the feed in the main panel (flows/feed.md); the Feed button and `feed.read` both call this. */
+export function showFeed() {
+  set({ view: { kind: "feed" }, searchOpen: false, ...sideAfterOpen() })
 }
 
 /** The graph lives in the side panel, in the home. */
@@ -660,6 +620,28 @@ export async function createDraft(input: { homeChannel?: string; channels?: stri
   try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
   set({ view: { kind: "doc", id: doc.id, mode: "edit" }, ...bump(), searchOpen: false, ...sideAfterOpen() })
   return { id: doc.id, slug, view: "edit", next: "workspace.save-draft" }
+}
+
+/** A short post's length, as Bluesky counts it: graphemes (app/flows/short-post.md). */
+export const SHORT_LENGTH = 300
+export const shortLength = (text: string) => [...new Intl.Segmenter().segment(text)].length
+/**
+ * Saves a short post: a private block of kind `short` in Collections › posts, with no title, its text its
+ * body. Nothing is published. The composer's Save and `short.write` both call this.
+ */
+export async function writeShort(input: { text: string }) {
+  const text = String(input.text ?? "").trim()
+  if (!text) throw new DOMException("Write something first", "DataError")
+  if (shortLength(text) > SHORT_LENGTH) throw new DOMException(`A short post is at most ${SHORT_LENGTH} characters`, "DataError")
+  const slug = freeSlug(text.split(/\s+/).slice(0, 6).join(" "), "post")
+  const doc: Doc = {
+    id: newOpaqueId(), vaultId: newNodeId(), kind: "short", slug, title: "", homeChannel: "posts", visibility: "private",
+    updated: today(), body: text,
+  }
+  usedSlugs.add(slug)
+  try { await serial(() => persist(doc)) } catch (problem) { usedSlugs.delete(slug); throw problem }
+  set({ ...bump() })
+  return { id: doc.id, next: "feed.read" }
 }
 
 /** Saves the open block as private. Never publishes. */

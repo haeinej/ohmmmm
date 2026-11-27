@@ -2,7 +2,16 @@
   "mcpServers": {
     "ohm-vault": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"
+      ]
+    },
+    "ohm-site": {
+      "type": "http",
+      "url": "${user_config.ohm_url}/site/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.agent_key}"
+      }
     }
   }
 }

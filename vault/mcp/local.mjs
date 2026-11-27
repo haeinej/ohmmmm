@@ -13,6 +13,9 @@ import { appendEvents, HISTORY, JOURNAL, keepVersion, readEvents } from '../vaul
 import { applyRename, planRename, readVaultFolder } from '../vault/rename.mjs';
 import { layerOf, LAYERS, readRequests, requestVisibility, THROUGH_PUBLISH } from '../vault/visibility-folder.mjs';
 import { CHANNEL_FILE, EDGE_KINDS, isChannelPath, nodeFile, readNode, SOURCES } from '../vault/node.mjs';
+import { importSite } from '../site-import/apply.mjs';
+import { checkSite } from '../site-import/check.mjs';
+import { scanSite } from '../site-import/scan.mjs';
 
 // Every version an agent replaced or wrote, by content address, so any agent change can be undone.
 export { HISTORY };
@@ -61,11 +64,20 @@ export const LOCAL_TOOLS = [
     ref: text, to: { enum: LAYERS }, why: text,
   }, ['ref', 'to']),
   tool('vault_requests', 'Your requests to change who can see a block, newest first: waiting, approved or declined.', { limit: integer(1, 100) }, [], true),
+  tool('vault_site_scan', 'Read a website folder on this device and return its plan: its pages and their kinds, what it holds many of (folders of articles, runs of repeated items with their fields), the cards that show them, and its media. Reads only what git tracks there and changes nothing. Every channel name in the plan is empty: names are the person\'s. Give the folder\'s absolute path.', {
+    folder: text, origin: text,
+  }, ['folder'], true),
+  tool('vault_site_import', 'Bring a website into the vault from a plan vault_site_scan returned, once the person has named every channel in it (or set "skip": true). Without apply it says what it would write. With apply it writes the new files, if the person granted you write on each folder; every block is marked as yours and starts private. Files that already differ in the vault are listed, never overwritten.', {
+    plan: { type: 'object' }, apply: { type: 'boolean' },
+  }, ['plan']),
+  tool('vault_site_check', 'Build a website\'s galleries and lists again from what the vault holds, from the same plan, and compare them with the site\'s pages; compare every article\'s words. Says where they differ. Changes nothing.', {
+    plan: { type: 'object' },
+  }, ['plan'], true),
   tool('vault_rename', 'Rename or move a block or a channel, if the person granted you write where it is and where it goes. Every file that used the old name is rewritten to the new one where you may write it; any other keeps working through the old name, and is listed in left. For a channel, give it as ref and its new path as to. For a block, give it as ref and any of: its new slug as to, a title, or a new home channel.', {
     ref: text, to: text, title: text, channel: text,
   }, ['ref']),
 ];
-const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename', 'vault_request_visibility'];
+const WRITING = ['vault_collect', 'vault_write', 'vault_remove', 'vault_link', 'vault_restore', 'vault_rename', 'vault_request_visibility', 'vault_site_import'];
 
 const refuse = message => { throw new VaultProblem(message); };
 const present = value => typeof value === 'string' && value.trim() && !value.includes('\0');
@@ -420,6 +432,32 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       return done;
     },
 
+    async vault_site_scan(db, { folder, origin }) {
+      if (!present(folder) || !isAbsolute(folder)) refuse('Give the absolute path of the website\'s folder.');
+      if (!(await info(folder))?.isDirectory()) refuse('There is no folder there.');
+      if (origin !== undefined && !(present(origin) && /^https?:\/\//.test(origin))) refuse('Give the site\'s address as https://…');
+      const { plan } = await scanSite(folder, { origin });
+      return { plan, next: 'Report what the plan holds to the person (the home report\'s sources, parts and media). Ask them to name each channel, one at a time, and record their names in the plan\'s channels[].name. Then call vault_site_import without apply, and show them what it would write.' };
+    },
+    async vault_site_import(db, { plan, apply = false }) {
+      const result = await importSite(plan, { vault, by });
+      const adds = result.files.filter(f => f.state === 'add');
+      const changes = result.files.filter(f => f.state === 'change').map(f => f.path);
+      const summary_ = { channels: result.channels, blocks: result.blocks, add: adds.length, change: changes.length, same: result.files.length - adds.length - changes.length, notes: result.notes, unresolved: result.unresolved };
+      if (!apply) return { ...summary_, files: adds.slice(0, 50).map(f => f.path), changed: changes.slice(0, 50), written: [] };
+      // Every folder first: either all of it can be written, or none of it is.
+      const refused = new Set();
+      for (const f of adds) { writable(f.path); try { await mayChange('write', f.path); } catch { refused.add(f.path.split('/').slice(0, -1).join('/') || '*'); } }
+      if (refused.size) refuse(`You have no write grant on ${[...refused].slice(0, 8).join(', ')}${refused.size > 8 ? '…' : ''}. Ask the person; for each channel they can run: ohm vault grant ${agent} write <channel>`);
+      for (const f of adds) {
+        await mkdir(dirname(join(vault, f.path)), { recursive: true });
+        await recordChange(f.path, undefined, f.text, 'write');
+      }
+      await rescan(db);
+      return { ...summary_, written: adds.map(f => f.path), changed: changes, next: 'Call vault_site_check with the same plan.' };
+    },
+    vault_site_check: (db, { plan }) => checkSite(plan, { vault }),
+
     async vault_capture(db, { source, channel, title }) {
       if (typeof channel !== 'string' || !isChannelPath(channel)) refuse('Give the path of the channel it goes into.');
       if (title !== undefined && !present(title)) refuse('Give a title as text.');
@@ -471,7 +509,7 @@ export function createLocalTools({ vault, by, DatabaseSync }) {
       await beneath(vault, CACHE.split('/'));
       const db = await openIndex(vault, { DatabaseSync });
       try {
-        if (!['vault_index', 'vault_capture', 'vault_history', 'vault_requests'].includes(name) && !summary(db).scanned) {
+        if (!['vault_index', 'vault_capture', 'vault_history', 'vault_requests', 'vault_site_scan', 'vault_site_check'].includes(name) && !summary(db).scanned) {
           refuse('Run vault_index to scan this vault first.');
         }
         const invoke = () => calls[name](db, args);

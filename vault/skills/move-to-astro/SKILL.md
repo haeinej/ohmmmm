@@ -52,6 +52,13 @@ visibility decisions belong to the owner.
 
 ## If the site uses another generator, a CMS export, or HTML
 
+For a hand-written HTML site, start with `ohm site compose` after `ohm site import`:
+it writes each repeated item as a component, each gallery or list as a component
+fed by the vault, and each page that holds them, and `ohm site check --built`
+compares the build with the site. Port the remaining pages with the steps below.
+[The contract](../../docs/agents/bring-in-a-site.md)
+
+
 1. Use the same existing site branch or checkout. Build Astro layouts and
    components from the original templates, including shared navigation and
    repeated content regions. Retain the original tags, attributes, CSS cascade,

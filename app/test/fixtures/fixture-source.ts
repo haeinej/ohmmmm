@@ -8,7 +8,7 @@ import { cortexDocOf, cortexFileOf } from "../../src/data/cortex-document"
 import { createJournal, type Actor, type JournalEntry } from "../../src/data/journal"
 import {
   emptyPlan, mediaName, moveVisibility, visibilityMove,
-  type AgentAccess, type AgentApproval, type AgentInfo, type Ask, type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type Friend, type FriendRequest, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type MoveResult, type MoveTarget, type Sharer, type VaultEvidence,
+  type AgentAccess, type AgentApproval, type AgentInfo, type BlockHead, type BlockRef, type ChannelHead, type CortexFile, type HomeFile, type HomeSource, type Layer, type MoveRecord, type MoveRequest, type MoveResult, type MoveTarget, type VaultEvidence,
 } from "../../src/data/source"
 import { channelsOf, type Doc } from "../../src/data/workspace-model"
 import { createMemorySearch } from "../../src/data/memory-search"
@@ -30,11 +30,7 @@ export function createFixtureSource() {
   const channels = new Map<string, string>()
   const cortexFiles = new Map<string, HomeFile>(cortexDocs.map(doc => [doc.id, cortexFileOf(doc)]))
   const media = new Map<string, Uint8Array>()
-  const friendList: Friend[] = entities.filter(person => person.did !== owner.did).map(person => ({ did: person.did, added: "2026-11-01", channels: "*", name: person.name }))
-  const friendAsks: FriendRequest[] = []
-  const asks: Ask[] = []
   // People who let the owner in: the first entity that is not the owner.
-  const sharers: Sharer[] = entities.filter(person => person.did !== owner.did).slice(0, 1).map(person => ({ did: person.did, since: "2026-11-01", name: person.name }))
   const journal = seededJournal([...blocks, ...cortexDocs], fixtureIds)
   /** Kept versions of sealed blocks, newest last, as the private layer keeps them. */
   const kept = new Map<string, { rev: number; version: string; created: string; file: HomeFile }[]>()
@@ -141,37 +137,6 @@ export function createFixtureSource() {
     async moveVisibility(ref: BlockRef, to: MoveTarget, replaces: string): Promise<MoveResult> {
       return moveVisibility(source as unknown as Pick<HomeSource, "readBlock" | "saveBlock" | "deleteBlock">, ref, to, replaces)
     },
-    async listFriends() { return structuredClone(friendList) },
-    people: {
-      async askByEmail(email: string) { if (!asks.some(each => each.email === email.toLowerCase())) asks.push({ email: email.toLowerCase(), asked: "2026-11-24T00:00:00.000Z", state: "waiting" }) },
-      async asked() { return structuredClone(asks) },
-      async friendOf() { return structuredClone(sharers) },
-    },
-    friendRequests: {
-      async list() { return structuredClone(friendAsks) },
-      async approve(id: string, channels: "*" | string[]) {
-        const index = friendAsks.findIndex(each => each.id === id)
-        if (index < 0) throw new DOMException("There is no such request waiting", "NotFoundError")
-        const [asked] = friendAsks.splice(index, 1)
-        friendList.push({ did: asked.did, added: "2026-11-24", channels, ...(asked.name ? { name: asked.name } : {}), ...(asked.email ? { email: asked.email } : {}) })
-      },
-      async decline(id: string) {
-        const index = friendAsks.findIndex(each => each.id === id)
-        if (index < 0) throw new DOMException("There is no such request waiting", "NotFoundError")
-        friendAsks.splice(index, 1)
-      },
-      async setChannels(did: string, channels: "*" | string[]) {
-        const friend = friendList.find(each => each.did === did)
-        if (!friend) throw new DOMException("That DID is not a friend", "NotFoundError")
-        friend.channels = channels
-      },
-    },
-    async removeFriend(did: string) {
-      const index = friendList.findIndex(friend => friend.did === did)
-      if (index >= 0) friendList.splice(index, 1)
-    },
-    async listShared() { return [] },
-    async readShared(): Promise<never> { throw missing() },
     async publishPlan() { return emptyPlan() },
     channels: {
       async list() { return [...channels.keys()].map(channelHead) },
@@ -290,7 +255,7 @@ export function createFixtureSource() {
         counted: "public and friends-only",
       }
     },
-  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agents" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "people" | "friendRequests" | "agents" | "agenda">
+  } satisfies Omit<HomeSource<"sync">, "channels" | "cortex" | "media" | "moves" | "agents" | "agenda"> & Pick<HomeSource, "channels" | "cortex" | "media" | "moves" | "agents" | "agenda">
   const ask = (request: Omit<MoveRequest, "id" | "asked" | "state">) => {
     const made = { ...request, id: `r${requests.length + 1}`, asked: "2026-11-24T00:00:00.000Z", state: "waiting" as const }
     requests.push(made)
@@ -298,12 +263,6 @@ export function createFixtureSource() {
   }
   /** Hides a friends block as an agent with a grant would (vault.hideBlock). */
   const hide = (id: string) => { hidden.add(id) }
-  /** Someone signed in to ohm asks to be a friend (vault.askFriend). */
-  const askFriend = (asked: Omit<FriendRequest, "id" | "asked">) => {
-    const made = { ...asked, id: `f${friendAsks.length + 1}`, asked: "2026-11-24T00:00:00.000Z" }
-    friendAsks.push(made)
-    return made
-  }
   /** An agent's tool checks in and asks the member to approve an action (vault.askApproval). */
   const agentAsks = (agent: string, tool: string, shown: Record<string, unknown>) => {
     if (!agentList.some(each => each.agent === agent)) agentList.push({ agent, state: "active", firstSeen: "2026-11-24T00:00:00.000Z", lastSeen: "2026-11-24T00:00:00.000Z", waiting: 0, recent: [] })
@@ -314,7 +273,7 @@ export function createFixtureSource() {
     approvals.push(made)
     return made
   }
-  return Object.assign(source, { fixtureIds, owner, ask, hide, askFriend, agentAsks, approvals, journalOfMoves, failing })
+  return Object.assign(source, { fixtureIds, owner, ask, hide, agentAsks, approvals, journalOfMoves, failing })
 }
 
 export type FixtureSource = ReturnType<typeof createFixtureSource>

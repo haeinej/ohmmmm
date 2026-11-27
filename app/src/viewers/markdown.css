@@ -1,0 +1,37 @@
+/* A repository's Markdown, laid out as GitHub lays it out, in ohm's type and colours. Layout only. */
+.ohm-markdown { font-size: 15px; line-height: 1.6; color: var(--foreground); word-wrap: break-word; }
+.ohm-markdown > *:first-child { margin-top: 0; }
+.ohm-markdown :is(p, ul, ol, blockquote, table, pre, details) { margin: 0 0 16px; }
+.ohm-markdown :is(h1, h2, h3, h4, h5, h6) { margin: 24px 0 16px; font-family: var(--ohm-font-sans); font-weight: 600; line-height: 1.25; letter-spacing: 0; }
+.ohm-markdown h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.ohm-markdown h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.ohm-markdown h3 { font-size: 1.25em; }
+.ohm-markdown h4 { font-size: 1em; }
+.ohm-markdown :is(h5, h6) { font-size: .875em; }
+.ohm-markdown h6 { color: var(--muted-foreground); }
+.ohm-markdown a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.ohm-markdown :is(ul, ol) { padding-left: 2em; }
+.ohm-markdown ul { list-style: disc; }
+.ohm-markdown ol { list-style: decimal; }
+.ohm-markdown li + li { margin-top: .25em; }
+.ohm-markdown li:has(> input[type=checkbox]) { list-style: none; margin-left: -1.4em; }
+.ohm-markdown input[type=checkbox] { margin-right: .4em; vertical-align: middle; }
+.ohm-markdown blockquote { padding: 0 1em; color: var(--muted-foreground); border-left: .25em solid var(--border); }
+.ohm-markdown img { max-width: 100%; border-radius: var(--radius-md, 6px); }
+.ohm-markdown hr { height: 4px; margin: 24px 0; background: var(--muted); border: 0; }
+.ohm-markdown :not(pre) > code { padding: .2em .4em; font-size: 85%; border-radius: 6px; background: var(--muted); font-family: var(--font-mono, ui-monospace, monospace); }
+.ohm-markdown pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; border-radius: var(--radius-lg, 8px); background: var(--muted); font-family: var(--font-mono, ui-monospace, monospace); }
+.ohm-markdown table { display: block; width: max-content; max-width: 100%; overflow: auto; border-collapse: collapse; }
+.ohm-markdown :is(th, td) { padding: 6px 13px; border: 1px solid var(--border); }
+.ohm-markdown th { font-weight: 600; }
+.ohm-markdown tr:nth-child(2n) { background: color-mix(in oklab, var(--muted) 50%, transparent); }
+.ohm-markdown .footnotes { font-size: 85%; color: var(--muted-foreground); }
+
+/* Code colours, from highlight.js's classes, in muted tones that sit on both themes. */
+.ohm-markdown .hljs-comment, .ohm-markdown .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+.ohm-markdown :is(.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-doctag) { color: var(--ohm-mark-burgundy, #8a2b3c); }
+.ohm-markdown :is(.hljs-string, .hljs-regexp, .hljs-attr-value, .hljs-addition) { color: var(--ohm-mark-forest, #2f5d46); }
+.ohm-markdown :is(.hljs-number, .hljs-literal, .hljs-variable, .hljs-template-variable) { color: var(--ohm-mark-ochre, #9a6b1f); }
+.ohm-markdown :is(.hljs-title, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class) { color: var(--ohm-mark-navy, #1f3a6b); }
+.ohm-markdown :is(.hljs-attr, .hljs-attribute, .hljs-type, .hljs-meta) { color: var(--ohm-mark-petrol, #1f5c66); }
+.ohm-markdown .hljs-deletion { color: var(--ohm-mark-clay, #a0502e); }

@@ -1,4 +1,4 @@
-// Your cortex on this computer, through `ohmmmm serve` (docs/serve.md, home/cortex-routes.mjs), as
+// Your cortex on this computer, through `ohm serve` (docs/serve.md, home/cortex-routes.mjs), as
 // the workspace reads it: the bridge's parts as Docs (the profile, each observation, each skill and
 // each tool), what waits for the person, and the cortex journal as history. The local source
 // (local-source.ts) writes each change back through the same routes. Nothing here writes to the vault.

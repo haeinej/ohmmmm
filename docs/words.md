@@ -2,15 +2,27 @@
 
 One list for the vault, the cortex and the account app. When a part needs a word, it uses the one here; when two parts named one thing differently, the name kept is the one here.
 
+## Words for people, words for code
+
+People see one product, **ohm** (never "ohmmmm"), and four folders in their ohm: **Collections** (the vault), **Agents** (the cortex), **Site** (their website) and **profile**. App copy, the human guides and the commands' messages to people use those words. Code, commands (`ohm vault …`), MCP tool names (`vault_*`), agent docs, and the runtime names that stay `ohm-vault` (the Worker, D1, the MCP server, crypto contexts, IndexedDB) keep vault and cortex. The command people type is `ohm`; `ohmmmm` stays as another name for it.
+
 ## The home
 
-- **Home:** a person's folder `ohmmmm.<handle>`, holding `vault/` and `cortex/`.
+- **Home** (people say **your ohm**): a person's folder `ohm.<handle>`, holding `profile/`, `collections/` (the vault), `agents/` (the cortex) and `site/` ([home/home.mjs](../home/home.mjs)). A home made before, `ohmmmm.<handle>` with `vault/` and `cortex/`, is read as it is; nothing moves it.
+- **Profile:** `profile/profile.md`, the person's identity as properties (name, handle, DID, wallet, card colour) with what they say about themselves as Markdown under them, and its picture beside it. The person writes it; no agent tool does.
+- **Site:** `site/`, the person's website as a git checkout of their own repository (`ohm site connect`). `site/.ohm/` is ohm's own and never tracked: `site.json` (the repository and the Cloudflare project), the **save log** (`saves.jsonl`, every save with the file before it) and `deploys.jsonl`. **Save** writes a file at once and never commits; **Publish** pulls, commits, pushes and deploys.
 - **Handle:** the person's AT Protocol handle, which names the home. The DID is in the cortex's identity, not in folder names.
-- **Bridge:** `ohmmmm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohmmmm pair`) prints, which holds that browser's **app key**. Each agent has its own **agent key** (`ohmmmm agents add <name>`), which reaches only the MCP endpoints and makes every session it opens that agent ([docs/serve.md](serve.md)).
+- **Bridge:** `ohm serve`, the home's server on the person's own machine, which lets the app and local agents reach the home folder. A browser is **paired** with it once, through the link it (or `ohm pair`) prints, which holds that browser's **app key**. Each agent has its own **agent key** (`ohm agents add <name>`), which reaches only the MCP endpoints and makes every session it opens that agent ([docs/serve.md](serve.md)).
+
+## Units
+
+- **Unit:** anything in a home, as every part of ohm reads it: a block, a channel, the profile and its **wallet**, an agent's observation, skill, tool or memory, or an **artifact** (a content file of the site). Each keeps its file and its own reader; the unit is the shape they all return, a contract in code and not a lexicon, with its `path` from the top of the home ([contract/unit.mjs](../contract/unit.mjs), [plans/units.md](plans/units.md)).
+- **Feed:** the units someone sees, the latest change first. You see every unit, a friend public and friends units, everyone public ones.
 
 ## In the vault
 
 - **Block:** one unit of thought, a file `{ path, text }` whose ID is its `id` property, a 13-character TID. A published block is a **post**: a standard.site document (`site.standard.document`) in the member's repository, with the post itself inside as `com.ohmmmm.post` content. The member's website is its **publication** (`site.standard.publication`).
+- **Short post** (kind `short`): a block of at most 300 characters, as on Bluesky. Published, it is an `app.bsky.feed.post` in the member's repository, not a `site.standard.document`, and it shows on their site too.
 - **Media block:** a block of kind `media` that holds one image: its file sits beside it in the home folder, and its `hash` is the bytes' CID. Another block shows it with an **embed**, `![[slug]]`. Outside the home folder its bytes are in the **media cache** (the browser's `ohm-media` today), with **sizes**: smaller copies made on the device ([vault/plans/media.md](../vault/plans/media.md)).
 - **Channel:** an ordered collection of blocks; a block can be in many. Named by its path, such as `essays` or `notes/reading`.
 - **Former name:** a path, slug or title a block or channel had before it was renamed or moved. Old names keep working: the journal records them (`renamed`, `moved`), and a reference that uses one is listed to tidy, never broken ([vault/plans/renames.md](../vault/plans/renames.md)).

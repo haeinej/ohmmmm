@@ -361,7 +361,9 @@ h3 { font: var(--ohm-type-h3-weight) var(--ohm-type-h3-size) / var(--ohm-type-h3
 .lucide { stroke-width: var(--ohm-icon-stroke); stroke-linecap: round; stroke-linejoin: round; }
 
 /* Scoped preflight: shadcn components start from a clean native control. */
-:where([data-slot]), :where([data-slot])::before, :where([data-slot])::after { box-sizing: border-box; margin: 0; border: 0 solid; }
+/* Width and style only: the `border` shorthand would also reset the colour to the text colour,
+   and this rule is unlayered, so a component's plain `border` would draw in ink, not --border. */
+:where([data-slot]), :where([data-slot])::before, :where([data-slot])::after { box-sizing: border-box; margin: 0; border-width: 0; border-style: solid; border-color: var(--border); }
 :where(button[data-slot], input[data-slot], textarea[data-slot], select[data-slot]) {
   padding: 0;
   background-color: transparent;

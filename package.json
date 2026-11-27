@@ -5,7 +5,7 @@
   "type": "module",
   "description": "A person's home, ohmmmm.<handle>: their vault (blocks and channels) and their cortex (what an agent knows about them), side by side, under one contract.",
   "bin": {
-    "ohm": "vault/bin/ohm.mjs",
+    "ohm": "bin/ohmmmm.mjs",
     "cortex": "cortex/bin/cortex.mjs",
     "ohmmmm": "bin/ohmmmm.mjs"
   },

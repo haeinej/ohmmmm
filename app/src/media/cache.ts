@@ -52,7 +52,7 @@ function indexedBackend(): MediaBackend {
 const defaultBackend = (): MediaBackend => typeof indexedDB === "undefined" ? memoryBackend() : indexedBackend()
 let backend = defaultBackend()
 
-/** Where an original is looked for last, by its CID: the home folder, through `ohmmmm serve` (src/data/bridge.ts). */
+/** Where an original is looked for last, by its CID: the home folder, through `ohm serve` (src/data/bridge.ts). */
 export type MediaRemote = (cid: string) => Promise<{ bytes: Uint8Array; type: string } | undefined>
 let remote: MediaRemote | undefined
 export const setMediaRemote = (next?: MediaRemote) => { remote = next }
