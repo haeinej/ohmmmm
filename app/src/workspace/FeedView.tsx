@@ -22,7 +22,9 @@ import { MarkdownView } from "@/viewers/MarkdownView"
 import { siteUrl } from "@/site/source"
 import "@/editor/editor.css"
 import "@/viewers/markdown.css"
-import { me, report, useWorkspace } from "./store"
+import { me, reload, report, useWorkspace } from "./store"
+import { planShort, postPage, publishShort, vaultPath, type ShortPlan } from "@/data/short"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { notify } from "@/components/ui/notice"
 import { PageEditor } from "@/editor/PageEditor"
@@ -148,15 +150,21 @@ function ChannelFace({ unit }: { unit: Unit }) {
   )
 }
 
-/** You, as a block: your identity card, the first tile of the feed. It opens your profile. */
+/** You, as a block: your identity card, posted like any other block, by you. It opens your profile. */
 function ProfileTile({ profile, onOpen }: { profile: SiteProfile; onOpen(): void }) {
+  const name = profile.name || me.name
+  const picture = profile.image ? pictureUrl(profile.image) : null
   return (
     <article>
-      <FixedScale width={CARD_WIDTH}>
-        <IdentityCard className="w-full" finish="matt" color={profile.color || null} name={profile.name || me.name}
-          address={profile.handle || null} did={profile.did || null} wallet={profile.wallet || null}
-          avatarSrc={profile.image ? pictureUrl(profile.image) : null} onOpen={onOpen} />
-      </FixedScale>
+      <PostFrame name={name} picture={picture} seen="public">
+        <span className="mt-1 block">
+          <FixedScale width={CARD_WIDTH}>
+            <IdentityCard className="w-full" finish="matt" color={profile.color || null} name={name}
+              address={profile.handle || null} did={profile.did || null} wallet={profile.wallet || null}
+              avatarSrc={picture} onOpen={onOpen} />
+          </FixedScale>
+        </span>
+      </PostFrame>
     </article>
   )
 }
@@ -218,7 +226,7 @@ function PostFrame({ name, picture, when, seen, children }: {
 /** One tile of the masonry: the block, then its title, then who made it, when, and who sees it. */
 export function FeedTile({ unit, onOpen }: { unit: Unit; onOpen(): void }) {
   const author = authorOf(unit)
-  if (unit.kind === "short") return <PostLayout name={author.name} picture={author.picture} when={unit.updated} text={unit.excerpt ?? ""} onOpen={onOpen} />
+  if (unit.kind === "short") return <PostLayout name={author.name} picture={author.picture} when={unit.updated} seen={unit.visibility} text={unit.excerpt ?? ""} onOpen={onOpen} />
   // A block or an agent's file is named as everywhere in the app; anything else by its own title.
   const doc = docOfUnit(unit)
   const title = doc ? titleOf(doc) : unit.title || unit.path.split("/").at(-1)
@@ -244,7 +252,73 @@ async function savePage(page: string, change: Change) {
 function Opened({ unit, onOpen, onClose }: { unit: Unit; onOpen(unit: Unit): void; onClose(): void }) {
   if (unit.type === "channel") return <ChannelOpened unit={unit} onOpen={onOpen} />
   if (unit.type === "profile") return <div className="min-h-0 flex-1 overflow-y-auto"><ProfileView onClose={onClose} /></div>
+  if (unit.kind === "short") return <ShortOpened unit={unit} />
   return <OpenedBlock unit={unit} />
+}
+
+/**
+ * A short post, opened: as it reads in the feed, and Publish to Bluesky (app/flows/short-post.md). The
+ * preview shows exactly what will be posted and where; nothing is posted until you confirm. It is yours
+ * alone to do: no agent has a tool for it.
+ */
+function ShortOpened({ unit }: { unit: Unit }) {
+  const author = authorOf(unit)
+  const [plan, setPlan] = useState<ShortPlan | null>(null)
+  const [asking, setAsking] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [posted, setPosted] = useState<string | null>(null)
+  const preview = async () => {
+    try { setPlan(await planShort(vaultPath(unit.path))); setAsking(true) } catch (problem) { notify({ message: (problem as Error).message, tone: "error" }) }
+  }
+  const publish = async () => {
+    if (!plan) return
+    setPosting(true)
+    try {
+      const done = await publishShort(plan)
+      setPosted(done.uri); setAsking(false)
+      notify({ message: "Posted to Bluesky." })
+      void report(reload())
+    } catch (problem) { notify({ message: (problem as Error).message, tone: "error" }) } finally { setPosting(false) }
+  }
+  const was = posted ?? plan?.posted
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8">
+      <div className="mx-auto flex max-w-xl flex-col gap-4">
+        <PostFrame name={author.name} picture={author.picture} when={unit.updated} seen={unit.visibility}>
+          <span className="text-body leading-relaxed break-words whitespace-pre-wrap"><Faceted text={unit.excerpt ?? ""} /></span>
+        </PostFrame>
+        <div className="flex items-center gap-2 ps-12">
+          <Button onClick={() => void preview()}>{was ? "Update on Bluesky…" : "Publish to Bluesky…"}</Button>
+          {was && <Button variant="ghost" onClick={() => window.open(postPage(was), "_blank", "noopener")}><Icon icon={ExternalLinkIcon} />Open on Bluesky</Button>}
+        </div>
+      </div>
+      <Dialog open={asking} onOpenChange={open => { if (!posting) setAsking(open) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{plan?.posted ? "Update this post on Bluesky?" : "Post this to Bluesky?"}</DialogTitle>
+            <DialogDescription>
+              {plan?.ready
+                ? "Anyone can read it once it is posted, on Bluesky and wherever your posts are shown. It is posted from your account with the app password on this computer."
+                : "This computer can't post yet:"}
+            </DialogDescription>
+          </DialogHeader>
+          {plan && !plan.ready && <ul className="flex list-disc flex-col gap-1 ps-5 text-small text-muted-foreground">{plan.needs.map(need => <li key={need}>{need}</li>)}</ul>}
+          {plan && (
+            <div className="rounded-2xl bg-muted p-3">
+              <PostFrame name={author.name} picture={author.picture}>
+                <span className="text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={plan.text} /></span>
+              </PostFrame>
+              {plan.repository && <p className="ps-12 pt-1 text-small text-muted-foreground">To {plan.repository}{plan.pds ? ` on ${new URL(plan.pds).host}` : ""}</p>}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" disabled={posting} onClick={() => setAsking(false)}>Not now</Button>
+            <Button disabled={!plan?.ready || posting} onClick={() => void publish()}>{posting ? "Posting…" : plan?.posted ? "Update" : "Post"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }
 
 /** A channel opened: its blocks and the channels in it, as tiles; each opens in this same popup. */
@@ -313,15 +387,15 @@ function Popup({ unit, onOpen, onClose }: { unit: Unit; onOpen(unit: Unit): void
  * the words as they were written, no card around them; pictures and a link inside, and how much it was
  * talked about. Your short posts and other people's are drawn the same way.
  */
-function PostLayout({ name, picture, when, text, images, link, replies, likes, onOpen }: {
-  name: string; picture?: string | null; when?: string; text: string
+function PostLayout({ name, picture, when, seen, text, images, link, replies, likes, onOpen }: {
+  name: string; picture?: string | null; when?: string; seen?: Unit["visibility"]; text: string
   images?: { thumb: string; alt: string; ratio?: number }[]; link?: NetPost["link"]; replies?: number; likes?: number; onOpen(): void
 }) {
   const image = images?.[0]
   return (
     <article>
       <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-        <PostFrame name={name} picture={picture} when={when}>
+        <PostFrame name={name} picture={picture} when={when} seen={seen}>
           {text && <span className="text-body leading-snug break-words whitespace-pre-wrap"><Faceted text={text} /></span>}
           {image && <img src={image.thumb} alt={image.alt} draggable={false} referrerPolicy="no-referrer" decoding="async" className="mt-1.5 block h-auto w-full rounded-2xl bg-muted" style={{ aspectRatio: image.ratio ?? 4 / 3 }} />}
           {!image && link && (
@@ -460,7 +534,7 @@ function ChannelBlockOpened({ block, onOpenItem }: { block: ChannelBlock; onOpen
 }
 
 // What the feed places: one of your units, or a post from the network. `at` orders them.
-type Item = { key: string; at: string; unit?: Unit; post?: NetPost; block?: ChannelBlock }
+type Item = { key: string; at: string; unit?: Unit; post?: NetPost; block?: ChannelBlock; profile?: true }
 /** One of the site's blocks (a writing, a project, a photograph) as the unit it is, to open it. */
 const unitOfItem = (item: SiteItem): Unit => ({
   key: `site:${item.path}`, type: "artifact", kind: item.kind === "image" || item.kind === "video" ? "image" : "page", root: "site",
@@ -479,7 +553,7 @@ const MOST_COLUMNS = 8
 const columnsFor = (room: number) => Math.min(4, Math.max(1, Math.floor((room + GAP) / (COLUMN + GAP))))
 const PAGE = 60
 /** A tile's height before it is drawn, in a column's widths, to place it in the shortest column. */
-const guess = ({ unit, post, block }: Item) => block ? 4 / 3 + 0.2 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
+const guess = ({ unit, post, block, profile }: Item) => profile ? 0.75 : block ? 4 / 3 + 0.2 : post ? 0.3 + (post.images?.length ? 1 : 0) + post.text.length / 400
   : unit!.kind === "short" ? 0.35 + (unit!.excerpt?.length ?? 0) / 400
   : (unit!.cover || unit!.kind === "image" ? 1.25 : 4 / 3) + 0.25
 
@@ -506,6 +580,7 @@ export function FeedView() {
   const page = useRef<HTMLDivElement>(null)
   const [opened, setOpened] = useState<Unit | null>(null)
   const [channels, setChannels] = useState<Unit[]>([])
+  const [drafts, setDrafts] = useState<Unit[]>([])
   // Your channels, as your home panel reads them: the site's collections, the pages you kept, your tools.
   // Their marks too: each channel wears the colour you gave it there.
   const [site, setSite] = useState<{ content: SiteContent | null; links: SiteLink[]; tools: SiteTool[]; marks: Record<string, string> }>({ content: null, links: [], tools: [], marks: {} })
@@ -579,6 +654,10 @@ export function FeedView() {
     let current = true
     setMore(true)
     void report(readFeed({ audience, limit: PAGE }).then(read => { if (current) { setUnits(read); setMore(read.length === PAGE) } }))
+    // Your short posts not yet shared are posts waiting to be published: in your feed, marked Only you,
+    // when you look as yourself; never to anyone else.
+    if (viewAs === "private") void report(readFeed({ audience: "private", limit: 100, types: ["block"] }).then(read => { if (current) setDrafts(read.filter(unit => unit.kind === "short" && unit.visibility === "private")) }))
+    else setDrafts([])
     // Your channels come first, after you, as a site's sections do; the rest follows newest first.
     void report(readFeed({ audience, limit: 50, types: ["channel"] }).then(read => { if (current) setChannels(read.filter(unit => (unit.count ?? 0) > 0)) }))
     return () => { current = false }
@@ -638,8 +717,8 @@ export function FeedView() {
   // Following: you, your channels, then your blocks and who you follow, newest first. Discover: theirs alone.
   const items: Item[] = tab === "discover"
     ? (found ?? []).map(postItem)
-    : [...blocks.map(block => ({ key: `channel:${block.name}`, at: "", block })), ...channels.map(itemOf),
-       ...(units ?? []).filter(blockOfItsOwn).map(itemOf).concat(live.map(postItem)).sort((a, b) => b.at.localeCompare(a.at))]
+    : [...(profile ? [{ key: "profile:you", at: "", profile: true as const }] : []), ...blocks.map(block => ({ key: `channel:${block.name}`, at: "", block })), ...channels.map(itemOf),
+       ...[...(units ?? []), ...drafts.filter(draft => !units?.some(unit => unit.key === draft.key))].filter(blockOfItsOwn).map(itemOf).concat(live.map(postItem)).sort((a, b) => b.at.localeCompare(a.at))]
   if (!units) return <div className="flex-1" aria-busy />
   return (
     <section aria-label="Feed" className="relative flex min-h-0 flex-1 flex-col">
@@ -671,8 +750,9 @@ export function FeedView() {
             <div role="feed" aria-busy={more} className="flex items-start" style={{ gap: GAP }}>
               {placed(items, count).map((column, i) => (
                 <div key={i} className="flex flex-col" style={{ width: COLUMN, gap: GAP }}>
-                  {tab === "following" && i === 0 && profile && <ProfileTile profile={profile} onOpen={() => setOpened(youUnit)} />}
-                  {column.map(item => item.block
+                  {column.map(item => item.profile
+                    ? <ProfileTile key={item.key} profile={profile!} onOpen={() => setOpened(youUnit)} />
+                    : item.block
                     ? <ChannelBlockTile key={item.key} block={item.block} onOpen={() => setOpenedBlock(item.block!)} />
                     : item.post
                     ? <NetTile key={item.key} post={item.post} onOpen={() => setOpenedPost(item.post!)} />

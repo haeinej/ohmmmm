@@ -529,6 +529,12 @@ export function openSettings(tab: SettingsTab = "profile") {
 /** Leaving settings: back to the block and panel you came from. */
 /** Close what is open, so the main panel is back to what it shows by default. */
 export const showMain = () => set({ view: { kind: "empty" }, searchOpen: false })
+/** Home: your home's own screen, the canvas (with a site) and its panel. Again, on it, hides the panel. */
+export const showHome = () => {
+  const onHome = state.view.kind === "empty" || state.view.kind === "doc"
+  if (onHome) return toggleSide("repo")
+  set({ view: { kind: "empty" }, searchOpen: false, side: "repo" })
+}
 
 export function closeSettings() {
   const back = state.returnTo

@@ -15,7 +15,7 @@ import { icons } from "@/lib/icons"
 import { Kbd } from "@/components/ui/kbd"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/cn"
-import { createDraft, loadAgents, me, openSettings, report, setSearchOpen, SHORT_LENGTH, shortLength, showFeed, showMain, toggleSide, useWorkspace, waitingAgentActions, writeShort } from "./store"
+import { createDraft, loadAgents, me, openSettings, report, setSearchOpen, SHORT_LENGTH, shortLength, showFeed, showHome, showMain, toggleSide, useWorkspace, waitingAgentActions, writeShort } from "./store"
 
 const rackButton = cn(
   "inline-flex size-10 items-center justify-center rounded-xl text-muted-foreground transition-colors outline-none",
@@ -62,7 +62,7 @@ export function Rack() {
   return (
     <nav aria-label="Workspace" className="flex w-[68px] shrink-0 flex-col items-center gap-2.5 pt-4 pb-1">
       {/* The ohm dot, at the size of an icon, in a slot the size of a button. */}
-      <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={HouseIcon} /></RackButton>
+      <RackButton label="Home" active={side === "repo" && view.kind !== "feed"} onClick={showHome}><RackIcon icon={HouseIcon} /></RackButton>
       <RackButton label={waiting ? `Agents: ${waiting} waiting for you` : "Agents"} active={side === "agents"} dot={waiting > 0} onClick={() => toggleSide("agents")}><RackIcon icon={BotIcon} /></RackButton>
       {/* The feed: everything in your home, newest first, in the main panel (flows/feed.md). */}
       <RackButton label="Feed" active={view.kind === "feed"} onClick={() => (view.kind === "feed" ? showMain() : showFeed())}><RackIcon icon={LayoutGridIcon} /></RackButton>

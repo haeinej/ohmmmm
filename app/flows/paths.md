@@ -39,7 +39,7 @@ How to read each path:
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| B1 | Show or hide the panel | Rack Home, or ⌘\ (brings back the panel you last had) | The panel shows or hides; the open block never changes | Make room, or come back to your files | *UI only* |
+| B1 | Show or hide the panel | Rack Home, or ⌘\ (brings back the panel you last had). From the feed or another screen, Home goes back to the home screen (the canvas, with a site) with its panel open | The panel shows or hides; the open block never changes | Make room, or come back to your files | *UI only* |
 | B1a | **Reveal the open block** | Automatic: open a block from anywhere | The rows above it open in the tree; it scrolls into view, is selected and flashes once | Always know where you are | Any tool that opens a block |
 | B1b | Reveal a channel or category from the path | Click a channel or category in the path pill | The panel shows the home with that row open, scrolled to, flashing | Jump from where a block lives to its neighbours | *UI only* |
 | B2 | Choose what shows | Your pill (picture and name) → All, or Cortex and/or Vault | The tree and graph show only those | Focus on what agents know, or on writing | *UI only* |

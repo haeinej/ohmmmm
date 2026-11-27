@@ -12,6 +12,7 @@
 //   /vault/requests    GET what agents asked to change about who sees a block; POST /<id> approves or declines
 //   /vault/publish     POST /plan shows what publishing a block would write; POST publishes it, as the person
 //   /vault/unpublish   POST takes a published block's post down, then moves the block back, as the person
+//   /vault/short       POST /plan previews a short post as Bluesky will show it; POST /publish posts it, as the person
 //   /vault/keys        GET the paired browsers and the agents with keys; POST /self names this browser;
 //                      DELETE /<id> forgets one browser
 //   /cortex/…       the person's cortex for the app: its parts, its journal, and their changes (cortex-routes.mjs)
@@ -62,7 +63,8 @@ import { moveOldTools, watchTools } from './site-tools.mjs';
 import { siteLive } from './site-live.mjs';
 import { createLocalTools, HISTORY, LOCAL_INSTRUCTIONS, LOCAL_TOOLS, withCollectLock } from '../vault/mcp/local.mjs';
 import { pdsConfig, webUrl } from '../vault/feed/pds.mjs';
-import { signIn } from '../vault/scripts/rpc.mjs';
+import { rpc, signIn } from '../vault/scripts/rpc.mjs';
+import { graphemes } from '../vault/vault/core.mjs';
 import { blobCid, FILE_TYPES, isSlug, recordVersion, VaultProblem } from '../vault/vault/core.mjs';
 import { isPostId, setProperty, slugOf, writeNoteFile } from '../vault/vault/file.mjs';
 import { CACHE, openIndex, scan, summary } from '../vault/vault/indexer.mjs';
@@ -75,7 +77,7 @@ import { applyRename, planRename, readVaultFolder } from '../vault/vault/rename.
 import { decideRequest, layerOf, publishedLayer, readRequests, withVisibility } from '../vault/vault/visibility-folder.mjs';
 import { cortexRoutes } from './cortex-routes.mjs';
 import { readFeed, readLevel, readUnits } from './units.mjs';
-import { discover, liveFollowing } from './network.mjs';
+import { discover, liveFollowing, resolveHandle } from './network.mjs';
 import { findHome } from './home.mjs';
 import { isSiteRoute, siteRoutes } from './site.mjs';
 
@@ -817,6 +819,116 @@ export async function unpublishAsPerson({ vault, path, replaces, to, config, pas
   return { ...done.file, layer: to, removed: Boolean(read.published), ...(read.published ? { address: read.published.record.canonicalUrl } : {}) };
 }
 
+// ---- Short posts, to Bluesky (app/flows/short-post.md) ----
+//
+// A block of kind short is published as an app.bsky.feed.post in the person's own repository, under the
+// block's own ID, so it shows on Bluesky; long posts stay site.standard.document. Only the person
+// publishes, after the plan: the bridge writes with the app password from its own environment, and no
+// agent has a tool for it.
+
+export const SHORT_COLLECTION = 'app.bsky.feed.post';
+const utf8 = new TextEncoder();
+const byteAt = (text, index) => utf8.encode(text.slice(0, index)).length;
+
+/**
+ * Bluesky's facets for a text: its links, #tags and @mentions, by UTF-8 byte ranges. A mention is kept
+ * only when its handle resolves to a DID (`resolve`), as Bluesky does.
+ */
+export async function shortFacets(text, resolve = async () => null) {
+  const facets = [];
+  const span = (start, end) => ({ byteStart: byteAt(text, start), byteEnd: byteAt(text, end) });
+  for (const found of text.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+    const uri = found[0].replace(/[.,;:!?)\]]+$/, '');
+    facets.push({ index: span(found.index, found.index + uri.length), features: [{ $type: 'app.bsky.richtext.facet#link', uri }] });
+  }
+  for (const found of text.matchAll(/(^|\s)#([\p{L}\p{N}_]*\p{L}[\p{L}\p{N}_]*)/gu)) {
+    const start = found.index + found[1].length;
+    facets.push({ index: span(start, start + 1 + found[2].length), features: [{ $type: 'app.bsky.richtext.facet#tag', tag: found[2] }] });
+  }
+  for (const found of text.matchAll(/(^|\s)@([a-z0-9][a-z0-9.-]*\.[a-z]{2,})/gi)) {
+    const did = await resolve(found[2].toLowerCase()).catch(() => null);
+    if (!did) continue;
+    const start = found.index + found[1].length;
+    facets.push({ index: span(start, start + 1 + found[2].length), features: [{ $type: 'app.bsky.richtext.facet#mention', did }] });
+  }
+  return facets.sort((a, b) => a.index.byteStart - b.index.byteStart);
+}
+
+// The short post's file, read: its text, its version, and whether it was posted already.
+async function readShort(vault, path) {
+  if (!editablePath(path)) throw fail('Give the post as its file\'s path in the vault', 400);
+  let text;
+  try { text = await readFile(await inVault(vault, path), 'utf8'); } catch { throw fail('There is no such file any more', 412); }
+  const node = readNode(path, text)?.node;
+  if (node?.type !== 'block' || node.kind !== 'short') throw new VaultProblem('Only a short post is published to Bluesky.');
+  const words = String(node.body ?? '').trim();
+  if (!words) throw new VaultProblem('A short post needs words.');
+  if (graphemes(words) > 300) throw new VaultProblem('A short post is at most 300 characters, as Bluesky counts them.');
+  const posted = typeof node.properties?.posted === 'string' ? node.properties.posted : null;
+  return { text, version: await versionOf(text), node, words, posted };
+}
+
+// What the person approves: the words and their facets, as Bluesky will show them. Not the date.
+const shortConfirm = (words, facets) => createHash('sha256').update(JSON.stringify({ words, facets })).digest('hex').slice(0, 16);
+
+/**
+ * What publishing a short post would write, for the preview the person approves: the app.bsky.feed.post
+ * (its words and facets), where it goes, whether it was posted before, and what this computer still
+ * needs (`needs`). Writes nothing.
+ */
+export async function planShort({ vault, path, config, password = process.env.ATPROTO_APP_PASSWORD, resolve }) {
+  const settings = await siteSettings(config);
+  const read = await readShort(vault, path);
+  const facets = await shortFacets(read.words, resolve);
+  const needs = needsOf({ settings, config, password });
+  return {
+    path, version: read.version, text: read.words, facets, collection: SHORT_COLLECTION,
+    ...(settings ? { repository: settings.did, pds: settings.origin } : {}),
+    ...(read.posted ? { posted: read.posted } : {}),
+    needs: needs.map(need => need.say), ready: !needs.length, confirm: shortConfirm(read.words, facets),
+  };
+}
+
+/**
+ * Publishes a short post as the person, over the version read (`replaces`) and only as the plan they
+ * saw (`confirm`). The post goes to their repository under the block's ID (given one first, if it has
+ * none), so a publish tried again replaces it rather than posting twice. Then the block is marked public
+ * and keeps the post's address (`posted`); both are journaled (`via: publish`).
+ */
+export async function publishShort({ vault, path, replaces, confirm, config, password = process.env.ATPROTO_APP_PASSWORD, resolve, token, call = rpc, now = () => new Date() }) {
+  const settings = await siteSettings(config);
+  const needs = needsOf({ settings, config, password });
+  if (needs.length) throw new VaultProblem(needs.map(need => need.say).join(' '));
+  let read = await readShort(vault, path);
+  if (read.version !== replaces) throw Object.assign(fail('The post changed since it was read', 412), { version: read.version });
+  const facets = await shortFacets(read.words, resolve);
+  if (shortConfirm(read.words, facets) !== confirm) throw new VaultProblem('It changed since you saw the preview. Look at it again before publishing.');
+  const at = now().toISOString();
+  const events = [];
+  // The ID first, so the post's key is kept whatever happens next.
+  if (!read.node.id) {
+    const done = await writePublished(vault, path, read.text, setProperty(read.text, 'id', newNodeId()), {});
+    events.push({ at, ...done.event });
+    read = { ...read, text: done.file.text, node: readNode(path, done.file.text).node };
+  }
+  const rkey = read.node.id;
+  const record = { $type: SHORT_COLLECTION, text: read.words, createdAt: read.node.created ?? at, ...(facets.length ? { facets } : {}) };
+  const access = token ?? await signIn(settings.origin, settings.did, password).catch(problem => { throw new VaultProblem(problem.message); });
+  const put = await call(settings.origin, 'com.atproto.repo.putRecord', { body: { repo: settings.did, collection: SHORT_COLLECTION, rkey, record }, token: access });
+  if (!put.response.ok || typeof put.data?.uri !== 'string') throw new VaultProblem(`Bluesky did not take the post (HTTP ${put.response.status}${put.data?.message ? `: ${put.data.message}` : ''}).`);
+  // The block, marked public, keeps where the post is.
+  const text = setProperty(publishedLayer(path, read.text, 'public'), 'posted', put.data.uri);
+  if (text !== read.text) {
+    const done = await writePublished(vault, path, read.text, text, { layer: 'public', was: layerOf(path, read.text) });
+    events.push({ at, ...done.event });
+    read = { ...read, text };
+  }
+  events.push({ at, op: 'published', root: 'vault', path, by: 'me', via: 'publish', key: rkey, address: put.data.uri });
+  await appendEvents(vault, events);
+  return { path, uri: put.data.uri, cid: put.data.cid ?? null, version: await versionOf(read.text) };
+}
+
+
 // ---- The bridge ----
 
 const hostOf = header => {
@@ -1075,6 +1187,23 @@ export function homeBridge({ layout, origins = [APP], DatabaseSync, agent, confi
         try {
           return send(res, 200, await withCollectLock(layout.vault, DatabaseSync, () => unpublishAsPerson({
             vault: layout.vault, path: asked.path, replaces, to: asked.to, config, password: env.ATPROTO_APP_PASSWORD,
+          })));
+        } catch (problem) { return answered(res, problem); }
+      }
+      // A short post, to Bluesky: the preview, then the publish the person approved. Never an agent's.
+      if (url.pathname === '/vault/short/plan' && req.method === 'POST') {
+        const asked = await json(req, 4 * 1024);
+        if (!asked || typeof asked.path !== 'string') return said(res, 400, 'A plan is { path }');
+        try { return send(res, 200, await planShort({ vault: layout.vault, path: asked.path, config, password: env.ATPROTO_APP_PASSWORD, resolve: resolveHandle })); } catch (problem) { return answered(res, problem); }
+      }
+      if (url.pathname === '/vault/short/publish' && req.method === 'POST') {
+        const replaces = versionAsked(req);
+        if (replaces === undefined) return said(res, 428, 'Say which version you read: If-Match: "<version>"');
+        const asked = await json(req, 4 * 1024);
+        if (!asked || typeof asked.path !== 'string' || typeof asked.confirm !== 'string') return said(res, 400, 'A publish is { path, confirm }, confirm from the preview the person approved');
+        try {
+          return send(res, 200, await withCollectLock(layout.vault, DatabaseSync, () => publishShort({
+            vault: layout.vault, path: asked.path, replaces, confirm: asked.confirm, config, password: env.ATPROTO_APP_PASSWORD, resolve: resolveHandle,
           })));
         } catch (problem) { return answered(res, problem); }
       }

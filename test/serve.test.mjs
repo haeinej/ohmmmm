@@ -492,4 +492,6 @@ test('the bridge serves the home as units, and their feed, to the app only', asy
   assert.equal((await call('GET', '/units', { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
   // Other people's posts, from the network, are the person's to read in the app, never an agent's.
   for (const path of ['/feed/live', '/feed/discover']) assert.equal((await call('GET', path, { headers: { Authorization: `Bearer ${agent}` } })).status, 403);
+  // Publishing a short post is the person's alone: an agent's key never reaches it.
+  for (const path of ['/vault/short/plan', '/vault/short/publish']) assert.equal((await call('POST', path, { headers: { Authorization: `Bearer ${agent}`, 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
 });
