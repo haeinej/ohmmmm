@@ -11,8 +11,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The app's tests start a real bridge and the ohm command, which load the vault's site tools
+      # (markdown-it among them), so the vault is installed before them.
       - run: npm ci --prefix app
-      - run: npm --prefix app test
       - run: npm ci --prefix vault
       - run: npm ci --prefix vault/service
+      - run: npm --prefix app test
       - run: npm test
