@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client"
 import "./styles.css"
 import { installWebMcpShim } from "./webmcp-shim"
 import { App } from "./App"
-import { applyDensity, connectHome, open, report, setSource, sourceChanged } from "./workspace/store"
+import { applyDensity, open, report, setSource, sourceChanged } from "./workspace/store"
 import { bridgeMedia, currentBridge, pairFromLocation } from "./data/bridge"
 import { startSite } from "./site/connect"
 import { nameThisBrowser } from "./data/browsers"
@@ -38,8 +38,9 @@ setMediaRemote(async cid => {
   return blob && { bytes: new Uint8Array(await blob.arrayBuffer()), type: blob.type }
 })
 
-// The home is the signed-in member's vault service. Paired, it is the home on this computer instead
-// (docs/serve.md); if that does not answer, the service, as when not paired.
+// The home is the folder on this computer, through its bridge (`ohm serve`, docs/serve.md), paired
+// once from the link it prints. Nothing else is a home: unpaired, or with the bridge not answering, the
+// app says how to open it (MainPanel's OpenHome).
 const bridge = currentBridge()
 if (bridge) {
   createLocalSource(bridge, { onProblem: message => notify({ message }), onChange: sourceChanged })
@@ -56,9 +57,9 @@ if (bridge) {
         message: problem instanceof DOMException && problem.name === "NotAllowedError" ? UNPAIRED : "Your home on this computer did not answer. Run ohm serve in your home, then reload.",
         tone: "info",
       })
-      void report(connectHome().then(opened))
+      void report(setSource(null))
     })
-} else void connectHome().then(opened)
+} else void report(setSource(null))
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

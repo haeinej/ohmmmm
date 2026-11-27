@@ -34,7 +34,10 @@ export async function startSite() {
     if (!answer.ok) return
     const said = (await answer.json()) as SiteInfo
     if (!said.connected) return
-    await readyWorker(bridge)
+    // The worker only serves the site's files on this origin (the canvas's frame, tile pictures). A
+    // browser that won't run it still gets the Site view, its tiles and its canvas; what the worker
+    // would have served is missing there, and says so in the console.
+    await readyWorker(bridge).catch(problem => console.warn("The site's worker did not start, so the site's own files won't show here:", problem))
     tell(said)
   } catch { /* no site: the main panel is as before */ }
 }

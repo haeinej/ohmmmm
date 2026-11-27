@@ -44,9 +44,11 @@ function saying(node: unknown): string {
 
 const KIND = { article: { label: "Article", icon: FileTextIcon }, project: { label: "Project", icon: FolderKanbanIcon }, image: { label: "Photograph", icon: ImageIcon }, video: { label: "Video", icon: ImageIcon } } as const
 
-export function ArticleView({ item, channel, onSave }: {
+export function ArticleView({ item, channel, onSave, reading = false }: {
   item: SiteItem
   channel: string
+  /** Only to read, as the feed opens a page: no toolbar, nothing to change. */
+  reading?: boolean
   /** Save one change to the block's page. The Site view's own handler, shared with its tools. */
   onSave(page: string, change: Change): Promise<unknown>
 }) {
@@ -68,11 +70,11 @@ export function ArticleView({ item, channel, onSave }: {
   if (failed) return <p className="p-8 text-small text-muted-foreground">{failed}</p>
   if (read?.path !== item.path) return <div className="flex-1" aria-busy />
   const article = read.article
-  return <Writing key={item.path} item={item} channel={channel} article={article} onSave={onSave} />
+  return <Writing key={item.path} item={item} channel={channel} article={article} onSave={onSave} reading={reading} />
 }
 
-function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: string; article: SiteArticle; onSave(page: string, change: Change): Promise<unknown> }) {
-  const writing = item.kind === "article" || item.kind === "project"
+function Writing({ item, channel, article, onSave, reading }: { item: SiteItem; channel: string; article: SiteArticle; onSave(page: string, change: Change): Promise<unknown>; reading: boolean }) {
+  const writing = !reading && (item.kind === "article" || item.kind === "project")
   const page = item.path.split("#")[0]
   const [changed, setChanged] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -127,7 +129,7 @@ function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: 
   return (
     <div className="relative flex size-full min-h-0 flex-col bg-card">
       {/* Toolbar: what the block is and where it is filed, then the inserts. */}
-      <div data-article-toolbar className="flex h-14 shrink-0 items-center gap-1.5 px-3">
+      {!reading && <div data-article-toolbar className="flex h-14 shrink-0 items-center gap-1.5 px-3">
         {writing && (
           <div className={pill}>
             <ToolButton label="Text" icon={TypeIcon} onClick={() => insertText(editor)} />
@@ -144,7 +146,7 @@ function Writing({ item, channel, article, onSave }: { item: SiteItem; channel: 
             </Popover>
           </div>
         )}
-      </div>
+      </div>}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div data-article-page className="mx-auto w-full max-w-[720px] px-14 pt-10 pb-40 max-md:px-6">

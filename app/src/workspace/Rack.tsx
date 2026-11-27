@@ -2,9 +2,9 @@ import type { LucideIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { features } from "@/features"
-import { BotIcon, FileTextIcon, FolderGitIcon, ImageIcon, LinkIcon, FolderPlusIcon, PlusIcon, SparklesIcon, StickyNoteIcon, UsersIcon, WrenchIcon } from "lucide-react"
+import { BotIcon, FileTextIcon, MessageSquareIcon, HouseIcon, LayoutGridIcon, ImageIcon, LinkIcon, FolderPlusIcon, PlusIcon, SparklesIcon, StickyNoteIcon, WrenchIcon } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { addLink, addSiteFile, NEW_CHANNEL, NEW_NOTE, NEW_PROMPT } from "@/site/source"
 import { notify } from "@/components/ui/notice"
@@ -15,7 +15,7 @@ import { icons } from "@/lib/icons"
 import { Kbd } from "@/components/ui/kbd"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/cn"
-import { createDraft, loadAgents, me, openSettings, report, setSearchOpen, toggleSide, useWorkspace, waitingAgentActions } from "./store"
+import { createDraft, loadAgents, me, openSettings, report, setSearchOpen, SHORT_LENGTH, shortLength, showFeed, showHome, showMain, toggleSide, useWorkspace, waitingAgentActions, writeShort } from "./store"
 
 const rackButton = cn(
   "inline-flex size-10 items-center justify-center rounded-xl text-muted-foreground transition-colors outline-none",
@@ -44,7 +44,7 @@ const RackIcon = ({ icon }: { icon: LucideIcon }) => <Icon icon={icon} />
 
 /** The rack: a column of icons on the page itself, apart from the panels. */
 export function Rack() {
-  const { side, searchOpen } = useWorkspace()
+  const { side, searchOpen, view } = useWorkspace()
   // Agents wait for the person: the rack marks Agents while any action waits. Read now and then;
   // a home without the vault service has no agents, and says nothing about it.
   useEffect(() => {
@@ -56,12 +56,16 @@ export function Rack() {
   const waiting = waitingAgentActions()
   const picker = useRef<HTMLInputElement>(null)
   const [linking, setLinking] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [short, setShort] = useState("")
+  const left = SHORT_LENGTH - shortLength(short)
   return (
     <nav aria-label="Workspace" className="flex w-[68px] shrink-0 flex-col items-center gap-2.5 pt-4 pb-1">
       {/* The ohm dot, at the size of an icon, in a slot the size of a button. */}
-      <RackButton label="Home" active={side === "repo"} onClick={() => toggleSide("repo")}><RackIcon icon={FolderGitIcon} /></RackButton>
-      {features.connections && <RackButton label="Connections" active={side === "connections"} onClick={() => toggleSide("connections")}><RackIcon icon={UsersIcon} /></RackButton>}
+      <RackButton label="Home" active={side === "repo" && view.kind !== "feed"} onClick={showHome}><RackIcon icon={HouseIcon} /></RackButton>
       <RackButton label={waiting ? `Agents: ${waiting} waiting for you` : "Agents"} active={side === "agents"} dot={waiting > 0} onClick={() => toggleSide("agents")}><RackIcon icon={BotIcon} /></RackButton>
+      {/* The feed: everything in your home, newest first, in the main panel (flows/feed.md). */}
+      <RackButton label="Feed" active={view.kind === "feed"} onClick={() => (view.kind === "feed" ? showMain() : showFeed())}><RackIcon icon={LayoutGridIcon} /></RackButton>
       <span aria-hidden className="my-2 h-px w-6 bg-border" />
       <RackButton label="Search" shortcut="⌘K" active={searchOpen} onClick={() => setSearchOpen(true)}><RackIcon icon={icons.search} /></RackButton>
       {/* A picture chosen from this computer is added to the site, in Photographs › new, as a save. */}
@@ -92,6 +96,30 @@ export function Rack() {
           </form>
         </DialogContent>
       </Dialog>
+      {/* A short post, as on Bluesky (flows/short-post.md): saved private; publishing is its own step. */}
+      <Dialog open={posting} onOpenChange={setPosting}>
+        <DialogContent className="sm:max-w-lg">
+          <form className="contents" onSubmit={e => {
+            e.preventDefault()
+            writeShort({ text: short }).then(() => {
+              setPosting(false); setShort("")
+              notify({ message: "Saved. Only you see it until you publish." })
+              showFeed()
+            }, problem => notify({ message: (problem as Error).message, tone: "error" }))
+          }}>
+            <DialogHeader>
+              <DialogTitle>Post</DialogTitle>
+              <DialogDescription>A short post, as on Bluesky. It is saved in Collections › posts, and only you see it until you publish it.</DialogDescription>
+            </DialogHeader>
+            <Textarea name="text" autoFocus rows={5} value={short} onChange={e => setShort(e.target.value)} placeholder="What's on your mind?"
+              onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") e.currentTarget.form?.requestSubmit() }} />
+            <DialogFooter className="items-center">
+              <span aria-live="polite" className={cn("me-auto text-small tabular-nums", left < 0 ? "text-destructive" : "text-muted-foreground")}>{left}</span>
+              <Button type="submit" disabled={!short.trim() || left < 0}>Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       {/* Make something. What lasts (a block, a channel) is made here, structured; a note is the canvas's own. */}
       <DropdownMenu>
         <Tooltip>
@@ -106,6 +134,7 @@ export function Rack() {
           <DropdownMenuLabel className="text-small text-muted-foreground">New block</DropdownMenuLabel>
           <DropdownMenuItem onClick={() => void report(createDraft())}><Icon icon={FileTextIcon} size="sm" />Writing</DropdownMenuItem>
           <DropdownMenuItem onClick={() => picker.current?.click()}><Icon icon={ImageIcon} size="sm" />Image<span className="ms-auto text-small text-muted-foreground">Photographs</span></DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setPosting(true)}><Icon icon={MessageSquareIcon} size="sm" />Post<span className="ms-auto text-small text-muted-foreground">Short, as on Bluesky</span></DropdownMenuItem>
           <DropdownMenuItem onClick={() => setLinking(true)}><Icon icon={LinkIcon} size="sm" />Link<span className="ms-auto text-small text-muted-foreground">A page</span></DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />

@@ -314,7 +314,11 @@ test('an agent builds an internal tool: kept in the home, out of git, and put on
     try {
       // The agent writes a folder with its own file tools; ohm finds it, names it, and tells the app (which lists it).
       await md(join(toolsDir(dir), 'link-sorter')); await wf(join(toolsDir(dir), 'link-sorter', 'index.html'), '<title>Link sorter</title><meta name="description" content="Sorts links">');
-      for (let i = 0; i < 40 && !told.some(e => e.name === 'link-sorter'); i++) await new Promise(r => setTimeout(r, 50));
+      // A watcher can miss what is written in its first moments (macOS's FSEvents starts late): write again until it is seen.
+      for (let i = 0; i < 100 && !told.some(e => e.name === 'link-sorter'); i++) {
+        if (i % 10 === 9) await wf(join(toolsDir(dir), 'link-sorter', 'index.html'), '<title>Link sorter</title><meta name="description" content="Sorts links">');
+        await new Promise(r => setTimeout(r, 50));
+      }
       const listed = await tools.call('tools_list', {});
       assert.equal(listed.folder, toolsDir(dir));
       assert.deepEqual(listed.tools.map(t => t.name).sort(), ['link-sorter', 'old-one']);

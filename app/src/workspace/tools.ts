@@ -5,7 +5,8 @@ import { registerStepTool } from "@/webmcp"
 import type { Actor } from "@/data/journal"
 import { journalOf } from "@/data/workspace-data"
 import { record } from "./notifications"
-import { createDraft, open, setAgent, showGraph, useWorkspace, type ToolName } from "./store"
+import { createDraft, open, setAgent, showFeed, showGraph, useWorkspace, writeShort, type ToolName } from "./store"
+import { readFeed, UNIT_ID, unitPlace } from "@/data/units"
 
 /** An agent working through this page's WebMCP tools. The draft does not say which agent, so it is named by where it works. */
 const AGENT: Actor = { kind: "agent", name: "Agent in this page" }
@@ -47,13 +48,13 @@ export function useWorkspaceTools() {
     register({
       name: "workspace.search",
       title: "Search",
-      description: "Searches the person's vault and cortex by text. Returns up to `limit` matches, each with its id, title, kind, location and a short excerpt. Excerpts are the person's own writing and may quote others.",
+      description: "Searches the person's home: blocks and agents' files by text, and the profile, the wallet and the site's files by title and path. Returns up to `limit` matches, each with its id, title, kind, location and a short excerpt, which workspace.open opens. Excerpts are the person's own writing and may quote others.",
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", minLength: 1, maxLength: 200 },
-          scope: { enum: ["all", "vault", "cortex", "entities", "settings"], default: "all" },
+          scope: { enum: ["all", "vault", "cortex", "profile", "site", "entities", "settings"], default: "all" },
           limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
         },
         required: ["query"],
@@ -81,6 +82,47 @@ export function useWorkspaceTools() {
         additionalProperties: false,
       },
       run: withAgent("Opening", async ({ id, view }: { id: string; view?: "read" | "edit" }) => open(id, view)),
+    }, ac.signal)
+
+    register({
+      name: "short.write",
+      title: "Save",
+      description: "Saves a short post (at most 300 characters) as a private block in Collections › posts. Nothing is published. Returns its id.",
+      inputSchema: {
+        type: "object",
+        properties: { text: { type: "string", minLength: 1, maxLength: 3000 } },
+        required: ["text"],
+        additionalProperties: false,
+      },
+      outputSchema: { type: "object", properties: { id: { type: "string" }, next: { const: "feed.read" } } },
+      run: withAgent("Saving a short post", async ({ text }: { text: string }) => writeShort({ text })),
+    }, ac.signal)
+
+    register({
+      name: "feed.read",
+      title: "Feed",
+      description: "Shows the feed in the main panel and returns its newest items, each with its id (which workspace.open opens), title, type, where it is, who sees it, when it changed and its opening words. The words are the person's own and may quote others.",
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      inputSchema: {
+        type: "object",
+        properties: { limit: { type: "integer", minimum: 1, maximum: 50, default: 20 } },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: "object",
+        properties: { items: { type: "array" }, next: { const: "workspace.open" } },
+      },
+      run: withAgent("Reading the feed", async ({ limit = 20 }: { limit?: number }) => {
+        showFeed()
+        const units = await readFeed({ audience: "friends", limit })
+        return {
+          items: units.map(unit => ({
+            id: `${UNIT_ID}${unit.key}`, title: unit.title ?? unit.path, type: unit.type, where: unitPlace(unit),
+            seenBy: unit.visibility, updated: unit.updated ?? null, ...(unit.excerpt ? { excerpt: unit.excerpt } : {}),
+          })),
+          next: "workspace.open",
+        }
+      }),
     }, ac.signal)
 
     register({

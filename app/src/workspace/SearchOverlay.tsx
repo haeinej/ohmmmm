@@ -4,7 +4,7 @@
 import { isBlockKind } from "@/data/block-kind"
 import { useEffect, useRef, useState } from "react"
 import type { LucideIcon } from "lucide-react"
-import { ArrowUpIcon, BrainIcon, ChevronRightIcon, FileTextIcon, SettingsIcon, UserIcon } from "lucide-react"
+import { ArrowUpIcon, BrainIcon, ChevronRightIcon, CircleUserIcon, FileTextIcon, GlobeIcon, SettingsIcon, UserIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Icon } from "@/components/ui/icon"
 import { notify } from "@/components/ui/notice"
@@ -16,7 +16,9 @@ import { open, openSettings, setSearchOpen, showGraph, useWorkspace } from "./st
 type Category = { scope: Exclude<SearchScope, "all">; label: string; icon: LucideIcon; has: (h: SearchHit) => boolean }
 const CATEGORIES: Category[] = [
   { scope: "vault", label: "Collections", icon: FileTextIcon, has: h => isBlockKind(h.kind) },
-  { scope: "cortex", label: "Agents", icon: BrainIcon, has: h => !isBlockKind(h.kind) && h.kind !== "entity" && h.kind !== "setting" },
+  { scope: "cortex", label: "Agents", icon: BrainIcon, has: h => !isBlockKind(h.kind) && h.kind !== "entity" && h.kind !== "setting" && h.kind !== "unit" },
+  { scope: "profile", label: "Profile", icon: CircleUserIcon, has: h => h.kind === "unit" && h.root === "profile" },
+  { scope: "site", label: "Site", icon: GlobeIcon, has: h => h.kind === "unit" && h.root === "site" },
   { scope: "entities", label: "Entities", icon: UserIcon, has: h => h.kind === "entity" },
   { scope: "settings", label: "Settings", icon: SettingsIcon, has: h => h.kind === "setting" },
 ]

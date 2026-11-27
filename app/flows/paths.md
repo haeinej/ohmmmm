@@ -12,7 +12,7 @@ How to read each path:
 - **Agent:** the WebMCP tool that runs the same step, or *UI only*.
 - **Asks first:** for anything other people would see, or anything that can't be undone, the block confirms before acting.
 
-**Production first.** The workspace shows the signed-in member's home from their vault service and nothing else: no sample data is in the app. Signed out, it shows sign-in. Every change is sent to the service first and shows once the service has answered; it lasts across reloads and devices. The private layer and the cortex open only on a device that has unlocked the account's keys; until then they show as locked. Places with nothing in them show ohm-ui's `Empty`.
+**Your home, on this computer.** The workspace shows the home folder `ohm.<handle>` through its bridge (`ohm serve`), once this browser is paired from the link the bridge prints, and nothing else: no sample data, no online home. Unpaired, or with the bridge not answering, it shows **Open your home**, which says how. Every change is written to the home folder first and shows once the bridge has answered. Places with nothing in them show ohm-ui's `Empty`.
 
 ---
 
@@ -20,12 +20,13 @@ How to read each path:
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| A1 | **Search** | Rack Search or ⌘K → type → arrows or hover → Enter or click | The chosen block, setting or person is open | Get to anything without knowing where it lives | `workspace.search`, then `workspace.open` |
-| A2 | Narrow a search | In search, choose All, Vault, Cortex, People or Settings | Only that kind of match shows | Cut noise when you know what you want | `workspace.search` with `scope` |
+| A1 | **Search** | Rack Search or ⌘K → type → arrows or hover → Enter or click | The chosen block, agent's file, profile, wallet, site file, setting or person is open. The profile, the wallet and the site's files are found by title and path ([docs/plans/units.md](../../docs/plans/units.md)) | Get to anything without knowing where it lives | `workspace.search`, then `workspace.open` |
+| A2 | Narrow a search | In search, choose All, Collections, Agents, Profile, Site, Entities or Settings | Only that kind of match shows | Cut noise when you know what you want | `workspace.search` with `scope` |
 | A3 | Search finds a setting | Type a setting's word (e.g. "dark") → choose it | That settings screen is open | Reach a setting without browsing | `workspace.search` (`scope: settings`) |
 | A4 | Search finds a person | Type a name or handle → choose them | The graph is centred on that person | See everything that touches someone | `workspace.search`, then `workspace.graph` |
 | A5 | Ask an agent from search | Type a question → Send with no match chosen | A notice: asking arrives once an agent is connected | Reserved: ask instead of look up | *Not yet* |
 | A6 | Open from the tree | Home → expand → click a block | The block is open in the editor; its row is selected; its unread dot clears | Browse by where things live | `workspace.open` |
+| A6a | **Open any unit from the tree** | Home → expand a folder (Profile, Agents, Collections, Site) → click a row | The tree reads that folder when it opens, not before ([docs/plans/units.md](../../docs/plans/units.md)). A block or an agent's file opens in the editor; the profile and the wallet open the profile; a site file opens in the site's file view | One view of everything in your home, however large | `workspace.open` for blocks and agents' files; *UI only* for the rest |
 | A7 | Open from the graph | Graph → click a block or cortex node (or focus it and press Enter) | That block is open in the editor | Browse by how things connect | `workspace.open` |
 | A8 | Follow a link | In a block, click a green `[[link]]` | The linked block is open | Move along the links you wrote | `workspace.open` |
 | A9 | Preview a link | Hover a green `[[link]]` | A card shows the block's path, title and opening lines; the block is shaded green in the tree | Check where a link goes without leaving | *UI only* |
@@ -38,7 +39,7 @@ How to read each path:
 
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
-| B1 | Show or hide the panel | Rack Home, or ⌘\ (brings back the panel you last had) | The panel shows or hides; the open block never changes | Make room, or come back to your files | *UI only* |
+| B1 | Show or hide the panel | Rack Home, or ⌘\ (brings back the panel you last had). From the feed or another screen, Home goes back to the home screen (the canvas, with a site) with its panel open | The panel shows or hides; the open block never changes | Make room, or come back to your files | *UI only* |
 | B1a | **Reveal the open block** | Automatic: open a block from anywhere | The rows above it open in the tree; it scrolls into view, is selected and flashes once | Always know where you are | Any tool that opens a block |
 | B1b | Reveal a channel or category from the path | Click a channel or category in the path pill | The panel shows the home with that row open, scrolled to, flashing | Jump from where a block lives to its neighbours | *UI only* |
 | B2 | Choose what shows | Your pill (picture and name) → All, or Cortex and/or Vault | The tree and graph show only those | Focus on what agents know, or on writing | *UI only* |
@@ -129,16 +130,6 @@ How to read each path:
 | F3a | **Let someone in as a friend** | Bell → Agent → *Asking to be friends* → **Review** → Every channel, or choose channels → **Approve**, or **Decline** | They (and their agents) read your friends-only blocks in those channels, until you remove them. Declined: they see nothing, and aren't told | Choose who sees what | *UI only*: only you, signed in to ohm |
 | F4 | What an agent hid | Opening the home with the private layer unlocked | Blocks an agent with a grant hid on their way to private are sealed into the private layer and journalled | Finish narrowing an agent started | *automatic* |
 
-## F′. Connections (rack)
-
-| # | Path | Entry → steps | End state | For | Agent |
-| --- | --- | --- | --- | --- | --- |
-| K1 | **Connections** | Rack → Connections | The side panel lists everyone around you: friends you let in, people who let you in, both ("Friends both ways"), and who you asked, waiting | See your people | *UI only* |
-| K2 | Graph | Connections → the graph button | You in the middle and everyone around you; a solid line is friends both ways, dashed is one way. Click a person for their card | See how you are connected | *UI only* |
-| K3 | **Make friends** | Connections → **Make friends** → their email, a line → **Ask** | They get a request with your name and email, and answer it (F3a). The answer is the same whether or not the email is on ohm; your list shows it as waiting until they let you in | Find a friend | `connections.ask` (consequential: a dialog first) |
-| K4 | What someone shares with you | Click a person who shares with you → a block | The block opens in the main panel to read; it is theirs, so it is never edited | Read what friends share | *UI only* |
-| K5 | **Stop sharing** | A person you let in → **Stop sharing** → confirm | They and their agents stop reading your friends-only blocks | Take someone out | *UI only* · asks first |
-
 ## F″. Agents (rack)
 
 The coding agents that use ohm's tools (the `ohm-vault` MCP server), and every action they wait on. A two-step tool waits here: a yes in the agent's own chat approves nothing. Talking to an agent stays in its own chat. Flow: [agents.md](agents.md).
@@ -153,8 +144,6 @@ The coding agents that use ohm's tools (the `ohm-vault` MCP server), and every a
 
 ## G. Profile and settings
 
-Settings › **Friends** lists each friend you let in, with their name, email and the channels they see. **Channels** changes what they see (Every channel, or some; never none), and **Stop sharing** removes them after a dialog. It also says how many are asking, and who you asked.
-
 | # | Path | Entry → steps | End state | For | Agent |
 | --- | --- | --- | --- | --- | --- |
 | G1 | Open settings | Rack avatar | The side panel shows you (picture, name, handle) and the settings sections; the main panel shows one | Manage your account and workspace | *UI only* |
@@ -168,7 +157,7 @@ Settings › **Friends** lists each friend you let in, with their name, email an
 | G6a | Accept a profile line | Settings → Cortex → Accept (or Decline) | The line is under its heading in your profile, as your change; declined, it is never proposed again | Decide what agents may take as true about you | *UI only* |
 | G6b | Approve a skill | Settings → Cortex → Approve (or Decline) | The skill is in force, as your change naming the agent; declined, it is moved aside, kept | Decide how agents do things for you | *UI only* |
 | G7 | Appearance | Settings → Appearance → System / Light / Dark; Density Compact / Comfortable / Rounded | Theme and how round and tight things are, on this device | Comfort | *UI only* |
-| G8 | Sign out | Settings → Sign out | Ends the ohm session (`POST /api/auth/sign-out`); the workspace then shows sign-in | Leave | *UI only* |
+| G8 | Unpair this browser | You → Unpair this browser | This browser forgets the bridge it was paired with; the workspace shows Open your home until it is paired again | Leave this computer's home | *UI only* |
 
 ## H. History ([flows/history.md](history.md))
 
@@ -203,7 +192,6 @@ An agent in the browser sees only the tools the workspace offers right now (Sett
 | `history.restore` | Brings a private block back to a version; marked as the agent's | H7 | — (private only) | A new change, by the agent |
 | `history.save` | Names this point in history | H8 | — | A save; nothing changes |
 | `history.session` | Records a finished task, its changes and dead ends | H4 | — | A session |
-| `connections.ask` | Asks someone by email to be friends, after the person approves | K3 | consequential | Asked; declining leaves nothing (`NotAllowedError`) |
 | `visibility.preview` | What moving one block would do, by the shared rules | C3a | read-only | Nothing changes |
 | `visibility.move` | Moves one block after the person approves the same dialog as C2 | C2, C3 | consequential | Moved and journalled, or, to or from public, marked and the Publish page opened; declining leaves it as it was (`NotAllowedError`) |
 | `cortex.observe` | Asks to keep an observation about the open block | J5 | consequential: waits for your Approve | An observation, written as the agent's, once you approved |
@@ -245,7 +233,6 @@ These show a notice saying what they will do. Each will become a path above once
 - **Agent features:** ask an agent (from search and from selected text), and generate or visualise.
 - **Version history.**
 - **Publishing from the sample, and through the vault service.** On your home through `ohmmmm serve` it is built (C6, C7).
-- **Accepting friend requests.**
 - **Media:** video, audio and file blocks.
 - **Unlocking on this device:** the private layer and the cortex open once the account app's keys are wired into the workspace (`privateSession`). The cortex also needs the keys package to seal under `ohm-vault/cortex/v1`.
 - **Media upload from the editor:** the media cache requests are in the source (`HomeSource.media`); dropping a picture does not send its bytes yet.

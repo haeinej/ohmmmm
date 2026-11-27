@@ -15,12 +15,10 @@ import { forgetBridge } from "@/data/bridge"
 import { forgetPairedBrowser, homeKeys, type PairedBrowser } from "@/data/browsers"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SETTINGS_TABS, type SettingsTab } from "./settings-tabs"
-import type { Friend } from "@/data/source"
-import { ChannelPicker, chosen, pickedNothing, pickedOf, type Picked } from "./ChannelPicker"
 import { panelTitle } from "./Surface"
 import {
-  answerCortex, cortexWaiting, loadPeople, me, removeFriend, report, setAgentsAllowed, setAppearance, setDensity, setFriendChannels, setOffered, setSource, useWorkspace, waitingFriends,
-  type Appearance, type Density, type People, type ToolName,
+  answerCortex, cortexWaiting, me, report, setAgentsAllowed, setAppearance, setDensity, setOffered, setSource, useWorkspace,
+  type Appearance, type Density, type ToolName,
 } from "./store"
 import { cn } from "@/lib/cn"
 
@@ -131,6 +129,8 @@ const copy = (text: string) => {
 const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] = [
   { name: "workspace.search", title: "Search", does: "Searches your Collections and Agents", reads: true },
   { name: "workspace.open", title: "Open", does: "Opens a block or cortex file", reads: true },
+  { name: "short.write", title: "Save", does: "Saves a short post as private; nothing is published", reads: false },
+  { name: "feed.read", title: "Feed", does: "Shows your feed and reads what changed in your home, newest first", reads: true },
   { name: "workspace.graph", title: "Show graph", does: "Shows the graph of your blocks, or of those mentioning a person", reads: true },
   { name: "workspace.create", title: "New block", does: "Starts a private draft", reads: false },
   { name: "workspace.save-draft", title: "Save draft", does: "Saves the open draft as private", reads: false },
@@ -146,85 +146,9 @@ const TOOLS: { name: ToolName; title: string; does: string; reads: boolean }[] =
   { name: "cortex.observe", title: "Write observation", does: "Writes an observation about the open block into Agents, once you approve it", reads: false },
 ]
 
-/** Friends: each one, with what they see, changed or taken away here. */
-function FriendsPage() {
-  const { rev } = useWorkspace()
-  const [people, setPeople] = useState<People | null>(null)
-  const [editing, setEditing] = useState<{ friend: Friend } & Picked | null>(null)
-  const [removing, setRemoving] = useState<Friend | null>(null)
-  const reload = () => { void report(loadPeople().then(setPeople)) }
-  useEffect(reload, [rev]) // eslint-disable-line react-hooks/exhaustive-deps
-  const waiting = waitingFriends()
-  const nameOf = (friend: Friend) => friend.name || friend.email || friend.did
-  const sees = (channels: Friend["channels"]) => (!channels || channels === "*" ? "Every channel" : channels.join(", "))
-  if (!people) return null
-  return <>
-    <Section title="Friends" intro="They, and their agents, read your friends-only blocks in the channels shown. It lasts until you stop sharing with them.">
-      {people.friends.map(friend => (
-        <Row key={friend.did} title={nameOf(friend)}
-          note={<>{[friend.email, nameOf(friend) === friend.did ? null : friend.did].filter(Boolean).join(" · ")}{(friend.email || nameOf(friend) !== friend.did) && <br />}Sees: {sees(friend.channels)}</>}
-          action={<>
-            <Button variant="secondary" size="sm" onClick={() => setEditing({ friend, ...pickedOf(friend.channels) })}>Channels</Button>
-            <Button variant="ghost" size="sm" onClick={() => setRemoving(friend)}>Stop sharing</Button>
-          </>} />
-      ))}
-      {!people.friends.length && <Row title="No friends yet" note="Make friends from Connections in the rack, by their email." />}
-    </Section>
-    {waiting.length > 0 && (
-      <Section title="Waiting for you">
-        <Row title={`${waiting.length} asking to be your friend`} note="Answer them in Notifications, under Agent." />
-      </Section>
-    )}
-    {people.asks.some(ask => ask.state === "waiting") && (
-      <Section title="You asked">
-        {people.asks.filter(ask => ask.state === "waiting").map(ask => <Row key={ask.email} title={ask.email} note="Waiting for them to let you in" />)}
-      </Section>
-    )}
-
-    <Dialog open={!!editing} onOpenChange={o => !o && setEditing(null)}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>What {editing && nameOf(editing.friend)} sees</DialogTitle>
-          <DialogDescription>They and their agents read your friends-only blocks filed in these channels, and the channels inside them.</DialogDescription>
-        </DialogHeader>
-        {editing && <ChannelPicker value={editing} onChange={picked => setEditing({ ...editing, ...picked })} />}
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
-          <Button disabled={!!editing && pickedNothing(editing)} onClick={() => {
-            if (!editing) return
-            const { friend } = editing
-            const next = chosen(editing)
-            setEditing(null)
-            report(setFriendChannels(friend.did, next)).then(() => { notify({ message: `${nameOf(friend)} now sees ${sees(next).toLowerCase()}.`, tone: "info" }); reload() })
-          }}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    <Dialog open={!!removing} onOpenChange={o => !o && setRemoving(null)}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Stop sharing with {removing && nameOf(removing)}?</DialogTitle>
-          <DialogDescription>They, and their agents, stop reading your friends-only blocks from now on. What they already read can’t be taken back.</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setRemoving(null)}>Cancel</Button>
-          <Button variant="destructive" onClick={() => {
-            if (!removing) return
-            const friend = removing
-            setRemoving(null)
-            report(removeFriend(friend.did)).then(() => { notify({ message: `${nameOf(friend)} no longer sees what you share.`, tone: "info" }); reload() })
-          }}>Stop sharing</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </>
-}
-
 function Page({ tab }: { tab: SettingsTab }) {
   const { appearance, density, agentsAllowed, offered } = useWorkspace()
   switch (tab) {
-    case "friends":
-      return <FriendsPage />
     case "profile":
       return <>
         <Section title="Profile">
